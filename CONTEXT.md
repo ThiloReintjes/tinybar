@@ -7,7 +7,7 @@ A macOS menu bar app that shows how much of each AI coding subscription is used 
 ### Subscriptions and limits
 
 **Provider**:
-A company whose AI subscription Subar tracks (e.g. Anthropic via Claude, OpenAI via Codex).
+A company whose AI subscription Subar tracks (e.g. Anthropic via Claude, OpenAI via Codex, Google via Gemini, Anysphere via Cursor).
 _Avoid_: Service, vendor, integration
 
 **Limit Window**:

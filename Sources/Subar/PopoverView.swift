@@ -53,7 +53,7 @@ private struct ProviderCard: View {
                     Image(systemName: source == .browser ? "globe" : "terminal")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .help(source == .browser ? "Read from your browser session" : "Read via the \(id.cliCommand) CLI")
+                        .help(source == .browser ? "Read from your browser session" : "Read via the \(id.cliCommand ?? id.displayName) CLI")
                 }
                 Spacer()
                 if let credits = state?.snapshot?.credits, credits.hasCredits, let balance = credits.balance {
@@ -102,7 +102,7 @@ private struct StaleLine: View {
     var body: some View {
         let since = state.snapshot?.fetchedAt
         let hint: String = switch state.error {
-        case .loginExpired, .notConfigured: "run `\(id.cliCommand)` once to refresh"
+        case .loginExpired, .notConfigured: id.loginHint
         case .rateLimited: "provider asked to slow down"
         default: state.error?.localizedDescription ?? ""
         }
@@ -398,7 +398,7 @@ private struct SettingsView: View {
                 }
                 Section {
                     let _ = settings.browserFallbackRevision
-                    ForEach(ProviderID.allCases, id: \.self) { id in
+                    ForEach(ProviderID.allCases.filter(\.hasBrowserFallback), id: \.self) { id in
                         Toggle("\(id.displayName) (\(id.webDomain))", isOn: Binding(
                             get: { settings.isBrowserFallbackEnabled(id) },
                             set: {
@@ -432,6 +432,8 @@ extension ProviderID {
         switch self {
         case .claude: "claude.ai"
         case .codex: "chatgpt.com"
+        case .gemini: "antigravity.google"
+        case .cursor: "cursor.com"
         }
     }
 
@@ -439,6 +441,8 @@ extension ProviderID {
         switch self {
         case .claude: Color(red: 0.85, green: 0.47, blue: 0.34)
         case .codex: .accentColor
+        case .gemini: Color(red: 0.26, green: 0.52, blue: 0.96)
+        case .cursor: .primary
         }
     }
 }

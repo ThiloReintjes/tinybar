@@ -52,6 +52,8 @@ final class AppModel {
         sources = [
             .claude: ClaudeProvider(allowBrowser: { browserFlags.isEnabled(.claude) }),
             .codex: CodexProvider(allowBrowser: { browserFlags.isEnabled(.codex) }),
+            .gemini: GeminiProvider(),
+            .cursor: CursorProvider(),
         ]
         store = try? UsageStore()
         alertPlanner = settings.loadAlertState()
