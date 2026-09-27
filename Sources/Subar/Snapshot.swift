@@ -12,8 +12,13 @@ enum PopoverSnapshot {
         let model = AppModel(settings: Settings())
         Task { @MainActor in
             await model.refresh(force: true)
+            // `--page claude` or `--page settings` renders that page instead of the overview.
+            var page = Page.overview
+            if let p = args.firstIndex(of: "--page"), p + 1 < args.count {
+                page = args[p + 1] == "settings" ? .settings : ProviderID(rawValue: args[p + 1]).map(Page.provider) ?? .overview
+            }
             for (appearance, suffix) in [(NSAppearance.Name.darkAqua, ".dark"), (.aqua, "")] {
-                let host = NSHostingView(rootView: PopoverView(model: model).background(Color(nsColor: .windowBackgroundColor)))
+                let host = NSHostingView(rootView: PopoverView(model: model, page: page).background(Color(nsColor: .windowBackgroundColor)))
                 host.appearance = NSAppearance(named: appearance)
                 let size = host.fittingSize
                 let window = NSWindow(

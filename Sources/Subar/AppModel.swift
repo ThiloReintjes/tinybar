@@ -16,16 +16,10 @@ struct ProviderState {
 @Observable
 final class AppModel {
     private(set) var providers: [ProviderID: ProviderState] = [:]
+    /// All Providers together, for the overview.
     private(set) var usage: [UsageRange: UsageSummary] = [:]
-    /// Providers with any usage in the last 30 days, for the filter legend.
-    private(set) var usageProviders: [ProviderID] = []
-    /// nil shows all Providers; otherwise the usage section shows only this one.
-    var usageFilter: ProviderID? {
-        didSet {
-            UserDefaults.standard.set(usageFilter?.rawValue, forKey: "usageFilter")
-            rebuildUsage()
-        }
-    }
+    /// One Provider each, for its detail view.
+    private(set) var providerUsage: [ProviderID: [UsageRange: UsageSummary]] = [:]
     private var usageRows: [DailyUsage] = []
     private var prices = PriceTable.empty
     private(set) var importProgress: Double?
@@ -57,7 +51,6 @@ final class AppModel {
         ]
         store = try? UsageStore()
         alertPlanner = settings.loadAlertState()
-        usageFilter = UserDefaults.standard.string(forKey: "usageFilter").flatMap(ProviderID.init(rawValue:))
         for (id, source) in sources where settings.isEnabled(id, detected: source.isConfigured()) {
             providers[id] = ProviderState()
         }
@@ -192,16 +185,20 @@ final class AppModel {
         rebuildUsage()
     }
 
-    /// Recomputes summaries from the in-memory 30-day rows (a few thousand at most), so switching
-    /// the filter needs no database access.
+    /// Recomputes summaries from the in-memory 30-day rows (a few thousand at most), so opening
+    /// a detail view needs no database access.
     private func rebuildUsage() {
-        usageProviders = Set(usageRows.map(\.provider)).sorted()
-        let rows = usageFilter.map { f in usageRows.filter { $0.provider == f } } ?? usageRows
-        var next: [UsageRange: UsageSummary] = [:]
-        for range in UsageRange.allCases {
-            next[range] = UsageSummary.build(rows: rows, range: range, prices: prices)
+        func summaries(_ rows: [DailyUsage]) -> [UsageRange: UsageSummary] {
+            Dictionary(uniqueKeysWithValues: UsageRange.allCases.map {
+                ($0, UsageSummary.build(rows: rows, range: $0, prices: prices))
+            })
         }
-        usage = next
+        usage = summaries(usageRows)
+        var perProvider: [ProviderID: [UsageRange: UsageSummary]] = [:]
+        for id in Set(usageRows.map(\.provider)) {
+            perProvider[id] = summaries(usageRows.filter { $0.provider == id })
+        }
+        providerUsage = perProvider
     }
 
     // MARK: Pinned Limit

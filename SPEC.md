@@ -82,7 +82,7 @@ Enabled automatically only when Cursor.app holds a login. No Limit Alerts (billi
 
 ### Detection and staleness
 - On launch, a Provider is enabled automatically if its CLI credentials exist. It can be toggled in Settings.
-- If a fetch fails (expired token, network, 401), the Provider becomes **Stale**. The card keeps its last values and shows "Stale since HH:MM — run `claude` once to refresh" (or `codex`, `agy`, or "open Cursor or sign in at cursor.com").
+- If a fetch fails (expired token, network, 401), the Provider becomes **Stale**. It keeps its last values and says how to fix it: run `claude` once (or `codex`, `agy`, or "open Cursor or sign in at cursor.com").
 
 Implementation note: endpoint shapes are undocumented. Verify request headers and response fields against CodexBar's sources (`Sources/CodexBarCore/Providers/{Claude,Codex}/`, `docs/codex.md`) before implementing.
 
@@ -98,26 +98,30 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 ## 6. Menu bar
 
 - A tiny ring glyph showing how much of the Pinned Limit is **left**: full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
-- **Pinned Limit**: chosen by clicking any Limit Window in the popover. The default is the 5h window of the first enabled Provider (order: Claude, Codex, Gemini, Cursor), or its weekly window if no 5h window exists.
+- **Pinned Limit**: chosen by clicking any Limit Window on a Provider page. The default is the 5h window of the first enabled Provider (order: Claude, Codex, Gemini, Cursor), or its weekly window if no 5h window exists.
 - If the Pinned Limit's Provider is Stale, the glyph is dimmed.
 
 ## 7. Popover (about 340 pt wide; height grows, scrolls when needed)
 
-1. **Provider cards**, one per enabled Provider:
-   - Name plus plan.
-   - For each Limit Window: a bar that drains as usage grows, % left, and a reset countdown ("resets in 2h 14m"). Click to pin; the pinned one is marked.
-   - Codex: credits and Banked Resets (count, expiry).
-   - Stale line when applicable.
-2. **Usage section**, with tabs for Today, 7d and 30d:
-   - Total tokens and Theoretical Cost.
-   - A daily bar chart stacked by Provider (7d/30d).
-   - Top models (tokens, cost).
-   - Top Projects as side info, where the Provider's logs contain a working directory.
-   - A progress hint during the first-launch import.
-   - Today is marked provisional (see Provisional Day).
-3. **Footer**: last updated time, refresh, settings (gear), quit.
+Two levels, one click apart. A tab bar at the top always shows Overview plus one tab per enabled
+Provider (keys 0–4). Pages slide left or right in tab order.
 
-**Settings** (small pane): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), and hide percentage.
+1. **Overview**:
+   - One row per Provider: concentric rings (outer: longest account-wide window, inner: the next),
+     name, plan, the window closest to running out with its reset countdown, and its % left.
+     Model-specific windows are left out. A Stale Provider shows "Login expired" (or the reason) in
+     orange. Clicking a row opens its page.
+   - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
+     by Provider in each Provider's colour.
+2. **Provider page**:
+   - Large rings with the tightest % left, name, plan, and when and where the numbers were read.
+   - A banner when Stale: what went wrong and what the user runs to fix it.
+   - Every Limit Window: bar, % left, reset time and countdown. Click to pin; the pinned one is marked.
+   - Extras: credits, Banked Resets, extra usage or on-demand spend.
+   - That Provider's usage only: tokens, cost, chart, top models and Projects. Today is provisional.
+3. **Footer**: last check time, check now (⌘R), settings (⌘,), quit (⌘Q).
+
+**Settings** (replaces the page, back with Esc): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), and hide percentage.
 
 ## 8. Limit Alerts
 

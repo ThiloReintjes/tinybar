@@ -23,7 +23,7 @@ around one idea: a status item should cost nothing while you're not looking at i
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-    <img src="docs/screenshot.png" alt="Subar popover with Claude and Codex limits and 7-day usage" width="340">
+    <img src="docs/screenshot.png" alt="Subar overview with Claude, Codex and Gemini limits and today's usage" width="340">
   </picture>
 </p>
 
@@ -33,15 +33,18 @@ around one idea: a status item should cost nothing while you're not looking at i
   Antigravity), and Cursor's billing cycle, counting down from 100% to 0%, with reset countdowns.
   Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and **banked
   resets** included.
-- **Menu bar at a glance** — a ring and a percentage for the one window you pin. Click any limit in
-  the popover to pin it.
+- **One overview, one page per subscription** — the overview shows each subscription as rings and
+  the limit closest to running out; click a row (or press 1–4) for its limits, resets, extras and
+  usage. Everything is one click away.
+- **Menu bar at a glance** — a ring and a percentage for the one window you pin. Click any limit on a
+  subscription's page to pin it.
 - **Token history** — Today, 7 days and 30 days, read from the local Claude Code and Codex logs
   (Gemini and Cursor show limits only),
   with a daily chart and the top models and projects.
 - **Theoretical cost** — what those tokens would have cost at public API prices, from
   [models.dev](https://models.dev).
-- **Filter by subscription** — click Claude or Codex in the chart legend to see only its tokens,
-  cost, chart and projects.
+- **Per-subscription usage** — each subscription's page shows only its tokens, cost, chart, models
+  and projects.
 - **Projects from git** — usage is attributed to the repository it happened in; worktrees count as
   their main repo.
 - **Limit alerts** — a notification at 90% and 95% of a 5-hour or weekly window, and when a window
@@ -122,7 +125,7 @@ swift run subar-cli limits [--browser]   # fetch limits for all four providers
 swift run subar-cli cookies              # which browser holds session cookies
 swift run subar-cli ingest [db]          # ingest Claude + Codex logs
 swift run subar-cli usage [db]           # print usage summaries
-.build/debug/Subar --snapshot out.png    # render the popover to PNG, light and dark
+.build/debug/Subar --snapshot out.png [--page claude|settings]  # render to PNG, light and dark
 ```
 
 [SPEC.md](SPEC.md) is the v1 scope, [CONTEXT.md](CONTEXT.md) the vocabulary (Limit Window, Banked
