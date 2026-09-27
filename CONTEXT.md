@@ -11,7 +11,7 @@ A company whose AI subscription Subar tracks (e.g. Anthropic via Claude, OpenAI 
 _Avoid_: Service, vendor, integration
 
 **Limit Window**:
-A rolling or fixed period in which a Provider caps usage, reported as a used percentage and a Reset time (e.g. the 5-hour session window, the weekly window, a model-specific weekly window).
+A rolling or fixed period in which a Provider caps usage, shown as the percentage left (100% at the start of the window, 0% when the cap is reached) and a Reset time (e.g. the 5-hour session window, the weekly window, a model-specific weekly window).
 _Avoid_: Quota, rate limit, bucket
 
 **Reset**:

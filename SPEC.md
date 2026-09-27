@@ -81,7 +81,7 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 
 ## 6. Menu bar
 
-- A tiny ring glyph filling to the Pinned Limit's used %, with the percentage next to it (`◔ 58%`). Settings has "hide percentage".
+- A tiny ring glyph showing how much of the Pinned Limit is **left**: full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
 - **Pinned Limit**: chosen by clicking any Limit Window in the popover. The default is the 5h window of the first enabled Provider (Claude before Codex), or its weekly window if no 5h window exists.
 - If the Pinned Limit's Provider is Stale, the glyph is dimmed.
 
@@ -89,7 +89,7 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 
 1. **Provider cards**, one per enabled Provider:
    - Name plus plan.
-   - For each Limit Window: a bar, % used, and a reset countdown ("resets in 2h 14m"). Click to pin; the pinned one is marked.
+   - For each Limit Window: a bar that drains as usage grows, % left, and a reset countdown ("resets in 2h 14m"). Click to pin; the pinned one is marked.
    - Codex: credits and Banked Resets (count, expiry).
    - Stale line when applicable.
 2. **Usage section**, with tabs for Today, 7d and 30d:

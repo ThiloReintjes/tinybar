@@ -24,7 +24,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: PopoverView(model: model))
+        let host = NSHostingController(rootView: PopoverView(model: model))
+        // Size the popover to the SwiftUI content; the default is a fixed 320×320 box that
+        // centers and clips the content.
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
 
         if let button = statusItem.button {
             button.target = self
@@ -48,7 +52,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let pinned = model.pinned
         let stale = pinned.map { model.providers[$0.0]?.isStale ?? false } ?? false
         let key = RenderKey(
-            percent: pinned.map { Int($0.1.usedPercent.rounded()) },
+            percent: pinned.map { Int($0.1.remainingPercent.rounded()) },
             stale: stale,
             hidePercent: model.settings.hidePercentage)
         guard key != lastRendered, let button = statusItem.button else { return }
@@ -63,7 +67,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
         button.appearsDisabled = stale
         if let (provider, window) = pinned {
-            button.toolTip = "\(provider.displayName) \(window.title): \(Int(window.usedPercent))% used"
+            button.toolTip = "\(provider.displayName) \(window.title): \(Int(window.remainingPercent.rounded()))% left"
         }
     }
 
@@ -78,7 +82,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
-/// A small template ring that fills clockwise with the used fraction.
+/// A small template ring showing the remaining fraction: full at 100% left, empty at 0%.
 enum RingIcon {
     static func image(fraction: Double?, dimmed: Bool) -> NSImage {
         let size = NSSize(width: 14, height: 14)
