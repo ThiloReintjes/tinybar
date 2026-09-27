@@ -33,7 +33,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if let button = statusItem.button {
             button.target = self
             button.action = #selector(togglePopover)
-            button.imagePosition = .imageLeading
+            button.imagePosition = .imageOnly
         }
         render()
         observe()
@@ -58,13 +58,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         guard key != lastRendered, let button = statusItem.button else { return }
         lastRendered = key
 
-        button.image = RingIcon.image(fraction: key.percent.map { Double($0) / 100 }, dimmed: stale)
-        if let percent = key.percent, !key.hidePercent {
-            button.title = " \(percent)%"
-            button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .regular)
-        } else {
-            button.title = ""
-        }
+        // Ring and percentage are drawn as one template image: a titled status item gets wider
+        // padding than an icon-only one, which left a visible gap to the neighbouring icon.
+        button.image = RingIcon.image(
+            fraction: key.percent.map { Double($0) / 100 },
+            label: key.hidePercent ? nil : key.percent.map { "\($0)%" })
+        button.title = ""
         button.appearsDisabled = stale
         if let (provider, window) = pinned {
             button.toolTip = "\(provider.displayName) \(window.title): \(Int(window.remainingPercent.rounded()))% left"
@@ -82,14 +81,24 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
-/// A small template ring showing the remaining fraction: full at 100% left, empty at 0%.
+/// A small template ring showing the remaining fraction (full at 100% left, empty at 0%),
+/// optionally followed by the percentage text.
+@MainActor
 enum RingIcon {
-    static func image(fraction: Double?, dimmed: Bool) -> NSImage {
-        let size = NSSize(width: 14, height: 14)
-        let image = NSImage(size: size, flipped: false) { rect in
-            let inset = rect.insetBy(dx: 1.5, dy: 1.5)
+    static let ringSize: CGFloat = 14
+    static let spacing: CGFloat = 3
+    static let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .regular)
+
+    static func image(fraction: Double?, label: String?) -> NSImage {
+        let text = label.map { NSAttributedString(string: $0, attributes: [.font: font, .foregroundColor: NSColor.black]) }
+        let textSize = text?.size() ?? .zero
+        let width = ringSize + (text == nil ? 0 : spacing + ceil(textSize.width))
+        let height = max(ringSize, ceil(textSize.height))
+
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
+            let ringRect = NSRect(x: 0, y: (rect.height - ringSize) / 2, width: ringSize, height: ringSize)
+            let inset = ringRect.insetBy(dx: 1.5, dy: 1.5)
             let center = NSPoint(x: inset.midX, y: inset.midY)
-            let radius = inset.width / 2
 
             NSColor.black.withAlphaComponent(0.3).setStroke()
             let track = NSBezierPath(ovalIn: inset)
@@ -99,12 +108,16 @@ enum RingIcon {
             if let fraction, fraction > 0 {
                 let arc = NSBezierPath()
                 arc.appendArc(
-                    withCenter: center, radius: radius,
+                    withCenter: center, radius: inset.width / 2,
                     startAngle: 90, endAngle: 90 - 360 * min(fraction, 1), clockwise: true)
                 arc.lineWidth = 2
                 arc.lineCapStyle = .round
                 NSColor.black.setStroke()
                 arc.stroke()
+            }
+
+            if let text {
+                text.draw(at: NSPoint(x: ringSize + spacing, y: (rect.height - textSize.height) / 2))
             }
             return true
         }

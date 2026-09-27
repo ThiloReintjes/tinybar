@@ -17,6 +17,17 @@ struct ProviderState {
 final class AppModel {
     private(set) var providers: [ProviderID: ProviderState] = [:]
     private(set) var usage: [UsageRange: UsageSummary] = [:]
+    /// Providers with any usage in the last 30 days, for the filter legend.
+    private(set) var usageProviders: [ProviderID] = []
+    /// nil shows all Providers; otherwise the usage section shows only this one.
+    var usageFilter: ProviderID? {
+        didSet {
+            UserDefaults.standard.set(usageFilter?.rawValue, forKey: "usageFilter")
+            rebuildUsage()
+        }
+    }
+    private var usageRows: [DailyUsage] = []
+    private var prices = PriceTable.empty
     private(set) var importProgress: Double?
     private(set) var lastUpdated: Date?
     private(set) var isRefreshing = false
@@ -44,6 +55,7 @@ final class AppModel {
         ]
         store = try? UsageStore()
         alertPlanner = settings.loadAlertState()
+        usageFilter = UserDefaults.standard.string(forKey: "usageFilter").flatMap(ProviderID.init(rawValue:))
         for (id, source) in sources where settings.isEnabled(id, detected: source.isConfigured()) {
             providers[id] = ProviderState()
         }
@@ -173,8 +185,16 @@ final class AppModel {
         case .paths: break
         }
 
-        let prices = await pricing.refreshIfNeeded()
-        let rows = (try? await store.daily(since: DayKey.daysAgo(UsageRange.month.days - 1))) ?? []
+        prices = await pricing.refreshIfNeeded()
+        usageRows = (try? await store.daily(since: DayKey.daysAgo(UsageRange.month.days - 1))) ?? []
+        rebuildUsage()
+    }
+
+    /// Recomputes summaries from the in-memory 30-day rows (a few thousand at most), so switching
+    /// the filter needs no database access.
+    private func rebuildUsage() {
+        usageProviders = Set(usageRows.map(\.provider)).sorted()
+        let rows = usageFilter.map { f in usageRows.filter { $0.provider == f } } ?? usageRows
         var next: [UsageRange: UsageSummary] = [:]
         for range in UsageRange.allCases {
             next[range] = UsageSummary.build(rows: rows, range: range, prices: prices)
