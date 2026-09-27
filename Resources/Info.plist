@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Subar</string>
+    <string>Tinybar</string>
     <key>CFBundleDisplayName</key>
-    <string>Subar</string>
+    <string>Tinybar</string>
     <key>CFBundleIdentifier</key>
-    <string>com.subar.app</string>
+    <string>com.tinybar.app</string>
     <key>CFBundleExecutable</key>
-    <string>Subar</string>
+    <string>Tinybar</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

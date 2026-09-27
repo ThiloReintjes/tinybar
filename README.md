@@ -1,4 +1,4 @@
-# Subar
+# Tinybar
 
 **A tiny, fully native macOS menu bar app for your AI subscriptions. What's left of your Claude,
 Codex, Gemini and Cursor limits, the tokens you burned, and what they would have cost at API prices, in about 20 MB of
@@ -17,13 +17,13 @@ RAM.**
 </p>
 
 AppKit and SwiftUI, **zero third-party dependencies**, no Electron, no WebViews and no telemetry.
-Subar is a from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar), built
+Tinybar is a from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar), built
 around one idea: a status item should cost nothing while you're not looking at it.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-    <img src="docs/screenshot.png" alt="Subar overview with Claude, Codex and Gemini limits and today's usage" width="340">
+    <img src="docs/screenshot.png" alt="Tinybar overview with Claude, Codex and Gemini limits and today's usage" width="340">
   </picture>
 </p>
 
@@ -56,7 +56,7 @@ around one idea: a status item should cost nothing while you're not looking at i
 
 ## Safe by design
 
-Subar only ever **reads**. It uses the logins your official CLIs already store and calls the same
+Tinybar only ever **reads**. It uses the logins your official CLIs already store and calls the same
 read-only endpoints they call for `/usage` and `/status`:
 
 | Provider | Limits | Token history |
@@ -91,13 +91,13 @@ Not packaged yet. Homebrew, a notarized build and auto-updates are on the way. U
 it yourself:
 
 ```sh
-git clone https://github.com/ThiloReintjes/subar.git
-cd subar
+git clone https://github.com/ThiloReintjes/tinybar.git
+cd tinybar
 ./Scripts/build-app.sh
-open build/Subar.app
+open build/Tinybar.app
 ```
 
-Subar starts at login by default. On first launch it finds the CLIs you're signed in to and turns
+Tinybar starts at login by default. On first launch it finds the CLIs you're signed in to and turns
 those providers on. There's nothing to configure.
 
 ## Permissions
@@ -115,17 +115,17 @@ Swift 6 toolchain (Xcode 16 or newer), macOS 14+. Plain SwiftPM, no Xcode projec
 ```sh
 swift build                  # debug build
 swift test                   # unit tests
-./Scripts/build-app.sh       # universal, ad-hoc signed build/Subar.app
+./Scripts/build-app.sh       # universal, ad-hoc signed build/Tinybar.app
 ```
 
 Developer tools:
 
 ```sh
-swift run subar-cli limits [--browser]   # fetch limits for all four providers
-swift run subar-cli cookies              # which browser holds session cookies
-swift run subar-cli ingest [db]          # ingest Claude + Codex logs
-swift run subar-cli usage [db]           # print usage summaries
-.build/debug/Subar --snapshot out.png [--page claude|settings]  # render to PNG, light and dark
+swift run tinybar-cli limits [--browser]   # fetch limits for all four providers
+swift run tinybar-cli cookies              # which browser holds session cookies
+swift run tinybar-cli ingest [db]          # ingest Claude + Codex logs
+swift run tinybar-cli usage [db]           # print usage summaries
+.build/debug/Tinybar --snapshot out.png [--page claude|settings]  # render to PNG, light and dark
 ```
 
 [SPEC.md](SPEC.md) is the v1 scope, [CONTEXT.md](CONTEXT.md) the vocabulary (Limit Window, Banked
@@ -134,7 +134,7 @@ Reset, Theoretical Cost, …), and [docs/adr/](docs/adr) the decisions behind th
 ## Contributing
 
 > [!IMPORTANT]
-> **Open an issue before you write code.** Get the bug or feature agreed first. Subar stays small on
+> **Open an issue before you write code.** Get the bug or feature agreed first. Tinybar stays small on
 > purpose: "CodexBar has it" is not a reason on its own, and new providers are added one at a time,
 > only when someone actually uses them.
 

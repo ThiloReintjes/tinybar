@@ -1,4 +1,4 @@
-# Subar
+# Tinybar
 
 A macOS menu bar app that shows how much of each AI coding subscription is used up, how many tokens were used over time, and what that usage would have cost at API prices.
 
@@ -7,7 +7,7 @@ A macOS menu bar app that shows how much of each AI coding subscription is used 
 ### Subscriptions and limits
 
 **Provider**:
-A company whose AI subscription Subar tracks (e.g. Anthropic via Claude, OpenAI via Codex, Google via Gemini, Anysphere via Cursor).
+A company whose AI subscription Tinybar tracks (e.g. Anthropic via Claude, OpenAI via Codex, Google via Gemini, Anysphere via Cursor).
 _Avoid_: Service, vendor, integration
 
 **Limit Window**:
@@ -19,7 +19,7 @@ The moment a Limit Window's usage returns to zero.
 _Avoid_: Renewal, refresh
 
 **Banked Reset**:
-A saved Codex reset coupon the user holds, which can be redeemed to reset a Limit Window early. Subar only displays it and never redeems it.
+A saved Codex reset coupon the user holds, which can be redeemed to reset a Limit Window early. Tinybar only displays it and never redeems it.
 _Avoid_: Reset credit, rollover
 
 **Pinned Limit**:

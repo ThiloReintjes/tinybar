@@ -1,4 +1,4 @@
-# Subar — v1 Specification
+# Tinybar — v1 Specification
 
 A lightweight, native macOS menu bar app showing AI subscription limits, local token usage over time, and the Theoretical Cost of that usage. It is a from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar) (about 309k LOC, 87 providers), built around performance and a small scope.
 
@@ -67,7 +67,7 @@ Displayed: 5h window, weekly window, model-specific windows if present, credits,
 
 ### Gemini
 Google stopped serving Gemini CLI OAuth to individual, AI Pro and Ultra accounts in June 2026; those quotas now live in Antigravity.
-1. **Antigravity CLI**: a short-lived `agy -p /usage --output-format json`, run in an empty temporary directory with logging off. It is the CLI's built-in usage command: no model turn, no tokens. `agy` uses and refreshes its own login; Subar never reads Google tokens.
+1. **Antigravity CLI**: a short-lived `agy -p /usage --output-format json`, run in an empty temporary directory with logging off. It is the CLI's built-in usage command: no model turn, no tokens. `agy` uses and refreshes its own login; Tinybar never reads Google tokens.
 
 Displayed: the "Gemini Models" 5h and weekly windows, plus Antigravity's "Claude and GPT models" 5h and weekly windows as model-specific windows. No plan name (the report has none).
 Enabled automatically when `agy` and `~/.gemini/antigravity-cli` exist.
@@ -147,7 +147,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - **Afterwards**: incremental. Store per file (path, inode, size, mtime, byte offset). Only read appended bytes. Re-read a file from zero if it was truncated or replaced.
 - Stored daily totals survive the CLIs deleting old logs (Claude Code deletes after 30 days by default).
 
-### Store (SQLite, `~/Library/Application Support/Subar/usage.sqlite`)
+### Store (SQLite, `~/Library/Application Support/Tinybar/usage.sqlite`)
 - `daily_usage(day, provider, model, project, input, output, cache_write, cache_read)`, primary key (day, provider, model, project).
 - `file_cursor(path, inode, size, mtime, offset)`.
 - Dedupe keys for Claude, pruned after a reasonable horizon.
@@ -174,9 +174,9 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 11. Distribution
 
-- GitHub repo `subar`, MIT license.
+- GitHub repo `tinybar`, MIT license.
 - Signed with Developer ID and notarized (the owner provides the Apple Developer account).
-- Released on GitHub Releases, plus a Homebrew cask: `brew install --cask subar`.
+- Released on GitHub Releases, plus a Homebrew cask: `brew install --cask tinybar`.
 - Sparkle for in-app auto-updates (EdDSA-signed appcast).
 - First run needs no configuration: auto-detect Providers, launch at login, request notification permission.
 
