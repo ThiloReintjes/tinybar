@@ -8,6 +8,8 @@
     <string>Tinybar</string>
     <key>CFBundleIdentifier</key>
     <string>com.tinybar.app</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>Tinybar</string>
     <key>CFBundlePackageType</key>

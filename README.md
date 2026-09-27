@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon.png" alt="" width="128"></p>
+
 # Tinybar
 
 **A tiny, fully native macOS menu bar app for your AI subscriptions. What's left of your Claude,
@@ -5,6 +7,9 @@ Codex, Gemini and Cursor limits, the tokens you burned, and what they would have
 RAM.**
 
 <p align="center">
+  <a href="https://github.com/ThiloReintjes/tinybar/actions/workflows/ci.yml">
+    <img alt="CI"
+         src="https://github.com/ThiloReintjes/tinybar/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Swift 6"
        src="https://img.shields.io/badge/Swift-6-F05138?style=flat&logo=swift&logoColor=white">
   <img alt="macOS 14 or later"
@@ -116,6 +121,7 @@ Swift 6 toolchain (Xcode 16 or newer), macOS 14+. Plain SwiftPM, no Xcode projec
 swift build                  # debug build
 swift test                   # unit tests
 ./Scripts/build-app.sh       # universal, ad-hoc signed build/Tinybar.app
+swift Scripts/make-icon.swift  # redraw Resources/AppIcon.icns and docs/icon.png
 ```
 
 Developer tools:
