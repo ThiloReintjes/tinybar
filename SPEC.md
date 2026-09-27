@@ -50,7 +50,7 @@ For each Provider, the source order is inspired by CodexBar and everything is st
 ### Claude
 1. **CLI OAuth**: read the token from `~/.claude/.credentials.json`, else Keychain item `Claude Code-credentials`.
    → `GET https://api.anthropic.com/api/oauth/usage` (plus `/api/oauth/profile` for the plan name), with the same headers the official CLI sends.
-2. **Browser cookie fallback** (opt-in in Settings): `sessionKey` from Safari/Chromium/Firefox → `claude.ai/api/organizations/{id}/usage`.
+2. **Browser cookie fallback** (opt-in in Settings): `sessionKey` from Chromium browsers or Firefox → `claude.ai/api/organizations/{id}/usage`. Safari is out (needs Full Disk Access).
 
 Displayed: 5h session window, weekly window, model-specific weekly windows (e.g. Opus/Sonnet), extra usage spend if present, and a Reset time for each.
 Honor `Retry-After`; on HTTP 429 with no header, back off 5 minutes.
@@ -60,7 +60,7 @@ Honor `Retry-After`; on HTTP 429 with no header, back off 5 minutes.
    → `GET https://chatgpt.com/backend-api/wham/usage` for the 5h and weekly windows, Resets and credits.
    → `GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits` for Banked Resets (status and expiry). Display only; never redeem.
 2. **CLI app-server fallback**: `codex -s read-only -a never app-server`, JSON-RPC `account/rateLimits/read`. The process is short-lived and terminated after the call.
-3. **Browser cookie fallback** (opt-in).
+3. **Browser cookie fallback** (opt-in): chatgpt.com session cookie → `/api/auth/session` access token → the `wham` endpoints. A session the browser has not refreshed (`error: RefreshAccessTokenError`) counts as expired.
 
 Displayed: 5h window, weekly window, model-specific windows if present, credits, Banked Resets.
 

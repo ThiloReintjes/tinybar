@@ -14,7 +14,7 @@ struct PopoverView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         if model.enabledProviders.isEmpty {
-                            Text("No subscriptions detected. Sign in to the Codex CLI with `codex login`.")
+                            Text("No subscriptions detected. Sign in with `claude` or `codex login`, or turn on the browser fallback in Settings.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
@@ -49,6 +49,12 @@ private struct ProviderCard: View {
                 if let plan = state?.snapshot?.plan {
                     Text(plan).font(.caption).foregroundStyle(.secondary)
                 }
+                if let source = state?.snapshot?.source, source != .cli {
+                    Image(systemName: source == .browser ? "globe" : "terminal")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help(source == .browser ? "Read from your browser session" : "Read via the \(id.cliCommand) CLI")
+                }
                 Spacer()
                 if let credits = state?.snapshot?.credits, credits.hasCredits, let balance = credits.balance {
                     Text("\(balance, format: .number.precision(.fractionLength(0))) credits")
@@ -72,6 +78,16 @@ private struct ProviderCard: View {
 
             if let banked = state?.snapshot?.bankedResets?.filter(\.isAvailable), !banked.isEmpty {
                 BankedResetsRow(resets: banked)
+            }
+
+            if let extra = state?.snapshot?.extraUsage {
+                HStack {
+                    Image(systemName: "creditcard")
+                    Text("Extra usage")
+                    Spacer()
+                    Text(extra.formatted).foregroundStyle(.secondary)
+                }
+                .font(.caption)
             }
         }
         .padding(12)
@@ -235,7 +251,8 @@ private struct SummaryView: View {
                         y: .value("Tokens", bar.tokens))
                         .foregroundStyle(by: .value("Provider", bar.provider.displayName))
                 }
-                .chartLegend(.hidden)
+                .chartForegroundStyleScale(domain: ProviderID.allCases.map(\.displayName), range: ProviderID.allCases.map(\.color))
+                .chartLegend(summary.days.contains { $0.provider != summary.days.first?.provider } ? .visible : .hidden)
                 .chartYAxis {
                     AxisMarks(position: .trailing) { value in
                         AxisGridLine()
@@ -330,11 +347,28 @@ private struct SettingsView: View {
             }
             Form {
                 Section("Providers") {
-                    ForEach(ProviderID.allCases.filter { $0 == .codex }, id: \.self) { id in
+                    ForEach(ProviderID.allCases, id: \.self) { id in
                         Toggle(id.displayName, isOn: Binding(
                             get: { model.providers[id] != nil },
                             set: { model.setEnabled(id, $0) }))
                     }
+                }
+                Section {
+                    let _ = settings.browserFallbackRevision
+                    ForEach(ProviderID.allCases, id: \.self) { id in
+                        Toggle("\(id.displayName) (\(id.webDomain))", isOn: Binding(
+                            get: { settings.isBrowserFallbackEnabled(id) },
+                            set: {
+                                settings.setBrowserFallback(id, $0)
+                                if $0 { Task { await model.refresh(force: true) } }
+                            }))
+                    }
+                } header: {
+                    Text("Browser fallback")
+                } footer: {
+                    Text("If a CLI login is missing or expired, read your signed-in browser session instead. Chromium browsers ask once for Keychain access.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("General") {
                     Toggle("Launch at login", isOn: $settings.launchAtLogin)
@@ -347,5 +381,29 @@ private struct SettingsView: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
+    }
+}
+
+extension ProviderID {
+    var webDomain: String {
+        switch self {
+        case .claude: "claude.ai"
+        case .codex: "chatgpt.com"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .claude: Color(red: 0.85, green: 0.47, blue: 0.34)
+        case .codex: .accentColor
+        }
+    }
+}
+
+extension ExtraUsageSpend {
+    var formatted: String {
+        let used = used.formatted(.currency(code: currency))
+        guard let limit else { return used }
+        return "\(used) of \(limit.formatted(.currency(code: currency)))"
     }
 }

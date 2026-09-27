@@ -26,7 +26,7 @@ final class AppModel {
     private let store: UsageStore?
     private let pricing = PricingService()
     private let notifier = Notifier()
-    private let logWatcher = LogWatcher(roots: UsageStore.codexRoots)
+    private let logWatcher = LogWatcher(roots: UsageStore.codexRoots + UsageStore.claudeRoots)
     private var alertPlanner: LimitAlertPlanner
 
     private var pollTimer: Timer?
@@ -37,7 +37,11 @@ final class AppModel {
 
     init(settings: Settings) {
         self.settings = settings
-        sources = [.codex: CodexProvider()]
+        let browserFlags = settings.browserFallbackFlags
+        sources = [
+            .claude: ClaudeProvider(allowBrowser: { browserFlags.isEnabled(.claude) }),
+            .codex: CodexProvider(allowBrowser: { browserFlags.isEnabled(.codex) }),
+        ]
         store = try? UsageStore()
         alertPlanner = settings.loadAlertState()
         for (id, source) in sources where settings.isEnabled(id, detected: source.isConfigured()) {
@@ -164,8 +168,8 @@ final class AppModel {
         // Incremental ingestion runs on the store's actor, off the main thread. Only files
         // FSEvents saw change are checked; a full walk happens on launch or if events were dropped.
         switch logWatcher.drain() {
-        case .all: _ = try? await store.ingestCodex()
-        case let .paths(paths) where !paths.isEmpty: _ = try? await store.ingestCodex(only: paths)
+        case .all: _ = try? await store.ingestAll()
+        case let .paths(paths) where !paths.isEmpty: _ = try? await store.ingestAll(only: paths)
         case .paths: break
         }
 
