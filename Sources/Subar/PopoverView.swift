@@ -266,7 +266,10 @@ private struct SummaryView: View {
             ProviderFilter(model: model)
 
             BreakdownList(title: "Models", lines: summary.models)
-            BreakdownList(title: "Projects", lines: summary.projects)
+            BreakdownList(title: "Projects", lines: PopoverSnapshotOptions.redactProjects
+                ? summary.projects.enumerated().map { i, l in
+                    UsageSummary.Line(name: ["acme-web", "billing-service", "No project", "docs-site", "ml-pipeline"][i % 5], tokens: l.tokens, cost: l.cost)
+                } : summary.projects)
         }
     }
 }
@@ -446,4 +449,9 @@ extension ExtraUsageSpend {
         guard let limit else { return used }
         return "\(used) of \(limit.formatted(.currency(code: currency)))"
     }
+}
+
+/// Developer snapshot switches (`--snapshot … --redact-projects` for public screenshots).
+enum PopoverSnapshotOptions {
+    static let redactProjects = CommandLine.arguments.contains("--redact-projects")
 }
