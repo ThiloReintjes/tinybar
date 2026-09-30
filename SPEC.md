@@ -97,7 +97,7 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 
 ## 6. Menu bar
 
-- A tiny ring glyph showing how much of the Pinned Limit is **left**: full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
+- A tiny ring glyph showing how much of the Pinned Limit is **left**, in that Provider's colour (Claude orange, Gemini its spark, Codex and Cursor monochrome): full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
 - **Pinned Limit**: chosen by clicking any Limit Window on a Provider page. The default is the 5h window of the first enabled Provider (order: Claude, Codex, Gemini, Cursor), or its weekly window if no 5h window exists.
 - If the Pinned Limit's Provider is Stale, the glyph is dimmed.
 
