@@ -2,23 +2,23 @@
 import PackageDescription
 
 let package = Package(
-    name: "Subar",
+    name: "Tinybar",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Subar", targets: ["Subar"]),
-        .executable(name: "subar-cli", targets: ["subar-cli"]),
+        .executable(name: "Tinybar", targets: ["Tinybar"]),
+        .executable(name: "tinybar-cli", targets: ["tinybar-cli"]),
     ],
     targets: [
         .target(
-            name: "SubarCore",
+            name: "TinybarCore",
             linkerSettings: [.linkedLibrary("sqlite3")]),
         .executableTarget(
-            name: "Subar",
-            dependencies: ["SubarCore"]),
+            name: "Tinybar",
+            dependencies: ["TinybarCore"]),
         .executableTarget(
-            name: "subar-cli",
-            dependencies: ["SubarCore"]),
+            name: "tinybar-cli",
+            dependencies: ["TinybarCore"]),
         .testTarget(
-            name: "SubarCoreTests",
-            dependencies: ["SubarCore"]),
+            name: "TinybarCoreTests",
+            dependencies: ["TinybarCore"]),
     ])

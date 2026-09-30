@@ -1,7 +1,7 @@
-# Contributing to Subar
+# Contributing to Tinybar
 
-Check existing [issues](https://github.com/ThiloReintjes/subar/issues) and
-[pull requests](https://github.com/ThiloReintjes/subar/pulls) first, then open an issue before you
+Check existing [issues](https://github.com/ThiloReintjes/tinybar/issues) and
+[pull requests](https://github.com/ThiloReintjes/tinybar/pulls) first, then open an issue before you
 write code. Docs-only fixes are the exception.
 
 > **Take your time. A small, correct change beats a fast one.**
@@ -25,10 +25,10 @@ write code. Docs-only fixes are the exception.
 ## Setup
 
 - macOS 14+, Swift 6 toolchain (Xcode 16 or newer).
-- `swift build`, then `.build/debug/Subar` runs the app unbundled (no notifications or launch at
-  login). `./Scripts/build-app.sh && open build/Subar.app` for the real thing.
-- Layout: `Sources/SubarCore` holds providers, parsing, storage and pricing, with no UI;
-  `Sources/Subar` is the menu bar app; `Sources/subar-cli` is a developer tool.
+- `swift build`, then `.build/debug/Tinybar` runs the app unbundled (no notifications or launch at
+  login). `./Scripts/build-app.sh && open build/Tinybar.app` for the real thing.
+- Layout: `Sources/TinybarCore` holds providers, parsing, storage and pricing, with no UI;
+  `Sources/Tinybar` is the menu bar app; `Sources/tinybar-cli` is a developer tool.
 - Read [SPEC.md](SPEC.md) and [CONTEXT.md](CONTEXT.md). Use the glossary's terms in code and PRs:
   Provider, Limit Window, Banked Reset, Usage Record, Theoretical Cost.
 
@@ -40,7 +40,7 @@ write code. Docs-only fixes are the exception.
 - Performance measured, numbers in the PR. After a few minutes idle:
 
   ```sh
-  pid=$(pgrep -x Subar); ps -o %cpu=,rss=,time= -p $pid; footprint $pid | grep Footprint
+  pid=$(pgrep -x Tinybar); ps -o %cpu=,rss=,time= -p $pid; footprint $pid | grep Footprint
   ```
 
 - You used the app with your change, including after a restart.
@@ -51,7 +51,7 @@ write code. Docs-only fixes are the exception.
 
 ## Pull requests
 
-- Visual change → before and after screenshots, light and dark. `.build/debug/Subar --snapshot
+- Visual change → before and after screenshots, light and dark. `.build/debug/Tinybar --snapshot
   out.png --redact-projects` renders both without your project names.
 - Non-visual → say what you tested and how.
 - Flag anything surprising, and any trade-off you made on purpose.
@@ -63,14 +63,14 @@ Open an issue first and say which plan you're on. For the PR:
 
 - Take the data from where the provider's own CLI or app already keeps it, and call the endpoints
   that client itself calls. Show the request headers and response shape in the PR.
-- Implement `UsageProvider` in `Sources/SubarCore/<Provider>/`, mapping to `LimitWindow`s with
+- Implement `UsageProvider` in `Sources/TinybarCore/<Provider>/`, mapping to `LimitWindow`s with
   `id`s that stay stable across fetches (pinning and alerts depend on them).
 - Map every error to `ProviderError`, so an expired login shows as stale with a hint.
 - Test the mapping with a response fixture. Never commit real tokens, emails or account IDs.
 
 ## Bugs
 
-macOS version, Subar commit, steps, expected vs actual. For wrong numbers: the provider, the time
+macOS version, Tinybar commit, steps, expected vs actual. For wrong numbers: the provider, the time
 range, and what the official client shows for the same range.
 
 ## Security
