@@ -8,41 +8,62 @@ enum Page: Hashable {
     case settings
 }
 
+/// The pages sit side by side on one strip that slides under a fixed window. Switching tabs moves
+/// the strip; nothing is rebuilt and the popover never changes size, so nothing jumps.
 struct PopoverView: View {
     let model: AppModel
     @State private var page: Page
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static let width: CGFloat = 344
+    /// Fixed so the popover keeps its size (and its arrow its place) across pages. Longer pages
+    /// scroll inside it.
+    static let contentHeight: CGFloat = 540
 
     init(model: AppModel, page: Page = .overview) {
         self.model = model
         _page = State(initialValue: page)
     }
-    /// +1 when moving right along the tab bar, -1 when moving left, so pages enter and leave
-    /// along the same path.
-    @State private var direction: CGFloat = 1
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var pages: [Page] {
+        [.overview] + model.enabledProviders.map(Page.provider) + [.settings]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            if page == .settings {
-                SettingsHeader { go(.overview) }
-            } else {
+            ZStack {
                 TabBar(model: model, page: page, select: go)
+                    .opacity(page == .settings ? 0 : 1)
+                    .allowsHitTesting(page != .settings)
+                SettingsHeader { go(.overview) }
+                    .opacity(page == .settings ? 1 : 0)
+                    .allowsHitTesting(page == .settings)
             }
-            ScrollView {
-                content
-                    .id(page)
-                    .transition(transition)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
-                    .padding(.bottom, 12)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
+
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(pages, id: \.self) { p in
+                    ScrollView {
+                        content(p)
+                            .padding(.horizontal, 14)
+                            .padding(.top, 6)
+                            .padding(.bottom, 12)
+                    }
+                    .scrollIndicators(.never)
+                    .frame(width: Self.width, height: Self.contentHeight)
+                    .accessibilityHidden(p != page)
+                }
             }
-            .scrollIndicators(.never)
-            .frame(maxHeight: 600)
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: Self.width, alignment: .leading)
+            .offset(x: -CGFloat(pages.firstIndex(of: page) ?? 0) * Self.width)
             .clipped()
+            .mask(ScrollEdgeFade())
+
             Footer(model: model, page: page, select: go)
         }
-        .frame(width: 344)
+        .frame(width: Self.width)
         .background(TabShortcuts(model: model, select: go))
         .onChange(of: model.enabledProviders) { _, enabled in
             if case let .provider(id) = page, !enabled.contains(id) { page = .overview }
@@ -50,32 +71,27 @@ struct PopoverView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
-        switch page {
+    private func content(_ p: Page) -> some View {
+        switch p {
         case .overview: OverviewPage(model: model, open: { go(.provider($0)) })
         case let .provider(id): ProviderPage(model: model, id: id)
         case .settings: SettingsPage(model: model)
         }
     }
 
-    private var transition: AnyTransition {
-        if reduceMotion { return .opacity }
-        return .asymmetric(
-            insertion: .opacity.combined(with: .offset(x: 18 * direction)),
-            removal: .opacity.combined(with: .offset(x: -18 * direction)))
-    }
-
     private func go(_ next: Page) {
         guard next != page else { return }
-        direction = order(next) >= order(page) ? 1 : -1
-        withAnimation(reduceMotion ? Motion.reduced : Motion.page) { page = next }
+        withAnimation(reduceMotion ? nil : Motion.page) { page = next }
     }
+}
 
-    private func order(_ p: Page) -> Int {
-        switch p {
-        case .overview: 0
-        case let .provider(id): 1 + (model.enabledProviders.firstIndex(of: id) ?? 0)
-        case .settings: 100
+/// Content softens into the chrome above and below instead of meeting a hard edge.
+private struct ScrollEdgeFade: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 6)
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 14)
         }
     }
 }
@@ -101,9 +117,7 @@ private struct TabBar: View {
             ForEach(model.enabledProviders, id: \.self) { id in
                 tab(.provider(id)) {
                     HStack(spacing: 5) {
-                        Circle()
-                            .fill(id.color)
-                            .frame(width: 6, height: 6)
+                        ProviderDot(id: id)
                             .opacity(model.providers[id]?.isStale == true ? 0.35 : 1)
                         Text(id.displayName)
                     }
@@ -113,9 +127,6 @@ private struct TabBar: View {
         .padding(3)
         .background(Capsule().fill(.primary.opacity(0.05)))
         .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 0.5))
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
     }
 
     private func tab(_ target: Page, @ViewBuilder label: () -> some View) -> some View {
@@ -190,9 +201,7 @@ private struct SettingsHeader: View {
             Spacer()
             Color.clear.frame(width: 26, height: 26)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
+        .frame(height: 32)
     }
 }
 
@@ -218,7 +227,7 @@ private struct OverviewPage: View {
                 }
                 .platter(cornerRadius: 16)
             }
-            UsagePanel(model: model, summaries: model.usage, color: .accentColor)
+            UsagePanel(model: model, summaries: model.usage)
         }
     }
 }
@@ -236,7 +245,7 @@ private struct OverviewRow: View {
         let stale = state?.isStale ?? false
 
         HStack(spacing: 12) {
-            LimitRings(windows: snapshot?.ringWindows ?? [], color: id.color, lineWidth: 4, gap: 1.5, dimmed: stale)
+            LimitRings(windows: snapshot?.ringWindows ?? [], provider: id, lineWidth: 4, gap: 1.5, dimmed: stale)
                 .frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -299,7 +308,7 @@ private struct TightLabel: LabelStyle {
 private struct EmptyState: View {
     var body: some View {
         VStack(spacing: 8) {
-            LimitRings(windows: [], color: .secondary, lineWidth: 5)
+            LimitRings(windows: [], provider: nil, lineWidth: 5)
                 .frame(width: 44, height: 44)
             Text("No subscriptions found").font(.system(size: 13, weight: .semibold))
             Text("Sign in with `claude`, `codex` or `agy`, or open Cursor. Subar picks them up on its next check.")
@@ -357,7 +366,7 @@ private struct ProviderPage: View {
                 VStack(spacing: 0) {
                     ForEach(windows) { window in
                         WindowRow(
-                            window: window, color: id.color,
+                            window: window, provider: id,
                             pinned: model.isPinned(id, window), dimmed: stale
                         ) { model.pin(id, window) }
                         if window.id != windows.last?.id {
@@ -373,7 +382,7 @@ private struct ProviderPage: View {
             }
 
             if let summaries = model.providerUsage[id] {
-                UsagePanel(model: model, summaries: summaries, color: id.color, showBreakdown: true)
+                UsagePanel(model: model, summaries: summaries)
             }
         }
     }
@@ -390,7 +399,7 @@ private struct Hero: View {
         HStack(spacing: 16) {
             ZStack {
                 LimitRings(
-                    windows: snapshot?.ringWindows ?? [], color: id.color,
+                    windows: snapshot?.ringWindows ?? [], provider: id,
                     lineWidth: 9, gap: 3, dimmed: state?.isStale ?? false)
                 if let binding {
                     PercentText(percent: binding.remainingPercent, size: 17)
@@ -456,7 +465,7 @@ private struct StaleBanner: View {
 /// One Limit Window. Clicking it pins it to the menu bar.
 private struct WindowRow: View {
     let window: LimitWindow
-    let color: Color
+    let provider: ProviderID
     let pinned: Bool
     let dimmed: Bool
     let onPin: () -> Void
@@ -468,11 +477,11 @@ private struct WindowRow: View {
                     Text(window.title).font(.system(size: 13, weight: .medium))
                     Image(systemName: pinned ? "pin.fill" : "pin")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(pinned ? AnyShapeStyle(color) : AnyShapeStyle(.quaternary))
+                        .foregroundStyle(pinned ? AnyShapeStyle(provider.color) : AnyShapeStyle(.quaternary))
                     Spacer()
                     PercentText(percent: window.remainingPercent, size: 17)
                 }
-                RemainingBar(fraction: window.remainingPercent / 100, color: color)
+                RemainingBar(fraction: window.remainingPercent / 100, provider: provider)
                 if let resetsAt = window.resetsAt {
                     Text(ResetText.long(resetsAt))
                         .font(.system(size: 11).monospacedDigit())
@@ -542,13 +551,11 @@ private struct Extras: View {
 
 // MARK: Usage
 
-/// Tokens and Theoretical Cost over a range. The overview shows all subscriptions stacked; a
-/// detail page shows one, plus its top models and projects.
+/// Tokens, Theoretical Cost, top models and projects over a range. The overview shows all
+/// subscriptions stacked; a detail page shows only its own.
 private struct UsagePanel: View {
     let model: AppModel
     let summaries: [UsageRange: UsageSummary]
-    let color: Color
-    var showBreakdown = false
     @AppStorage("usageRange") private var rangeRaw = UsageRange.week.rawValue
 
     var body: some View {
@@ -597,14 +604,12 @@ private struct UsagePanel: View {
                     }
                     if range != .today, !summary.days.isEmpty {
                         UsageBars(days: summary.days, range: range)
-                            .frame(height: showBreakdown ? 90 : 70)
+                            .frame(height: 80)
                     }
-                    if showBreakdown {
-                        Breakdown(title: "Models", lines: summary.models, total: summary.totalTokens, color: color)
-                        Breakdown(
-                            title: "Projects", lines: PopoverSnapshotOptions.projects(summary.projects),
-                            total: summary.totalTokens, color: color)
-                    }
+                    Breakdown(title: "Models", lines: summary.models, total: summary.totalTokens)
+                    Breakdown(
+                        title: "Projects", lines: PopoverSnapshotOptions.projects(summary.projects),
+                        total: summary.totalTokens)
                 }
                 .padding(14)
                 .platter(cornerRadius: 16)
@@ -689,7 +694,7 @@ private struct SettingsPage: View {
                         set: { model.setEnabled(id, $0) }))
                     {
                         HStack(spacing: 8) {
-                            Circle().fill(id.color).frame(width: 7, height: 7)
+                            ProviderDot(id: id, size: 7)
                             Text(id.displayName)
                         }
                     }

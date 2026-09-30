@@ -34,7 +34,7 @@ around one idea: a status item should cost nothing while you're not looking at i
   Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and **banked
   resets** included.
 - **One overview, one page per subscription** — the overview shows each subscription as rings and
-  the limit closest to running out; click a row (or press 1–4) for its limits, resets, extras and
+  the limit closest to running out, plus usage across all of them; click a row (or press 1–4) for its limits, resets, extras and
   usage. Everything is one click away.
 - **Menu bar at a glance** — a ring and a percentage for the one window you pin. Click any limit on a
   subscription's page to pin it.

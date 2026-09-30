@@ -30,11 +30,14 @@ public struct UsageSummary: Sendable {
         public var tokens: Int64
         /// Theoretical Cost; nil when any part of it is unpriced.
         public var cost: Double?
+        /// Tokens per Provider, so a project used from several subscriptions can show the split.
+        public var byProvider: [ProviderID: Int64]
 
-        public init(name: String, tokens: Int64, cost: Double?) {
+        public init(name: String, tokens: Int64, cost: Double?, byProvider: [ProviderID: Int64] = [:]) {
             self.name = name
             self.tokens = tokens
             self.cost = cost
+            self.byProvider = byProvider
         }
     }
 
@@ -65,8 +68,8 @@ public struct UsageSummary: Sendable {
         var cost = 0.0
         var priced = false
         var unpriced = false
-        var models: [String: (Int64, Double?)] = [:]
-        var projects: [String: (Int64, Double?)] = [:]
+        var models: [String: Acc] = [:]
+        var projects: [String: Acc] = [:]
         var bars: [String: Int64] = [:]
 
         for r in rows {
@@ -75,21 +78,17 @@ public struct UsageSummary: Sendable {
             total += t
             if let c { cost += c; priced = true } else { unpriced = true }
 
-            let modelKey = r.model
-            let m = models[modelKey] ?? (0, 0)
-            models[modelKey] = (m.0 + t, add(m.1, c))
+            models[r.model, default: Acc()].add(r.provider, t, c)
 
             // Keyed by display name: a deleted worktree (stored as a bare name) merges with its
             // live repository of the same folder name.
-            let projectKey = ProjectResolver.displayName(r.project)
-            let p = projects[projectKey] ?? (0, 0)
-            projects[projectKey] = (p.0 + t, add(p.1, c))
+            projects[ProjectResolver.displayName(r.project), default: Acc()].add(r.provider, t, c)
 
             bars["\(r.day)|\(r.provider.rawValue)", default: 0] += t
         }
 
-        func lines(_ d: [String: (Int64, Double?)], name: (String) -> String) -> [Line] {
-            d.map { Line(name: name($0.key), tokens: $0.value.0, cost: $0.value.1) }
+        func lines(_ d: [String: Acc], name: (String) -> String) -> [Line] {
+            d.map { Line(name: name($0.key), tokens: $0.value.tokens, cost: $0.value.cost, byProvider: $0.value.byProvider) }
                 .sorted { ($0.cost ?? -1, $0.tokens) > ($1.cost ?? -1, $1.tokens) }
         }
 
@@ -106,7 +105,19 @@ public struct UsageSummary: Sendable {
             }.sorted { $0.day < $1.day })
     }
 
-    private static func add(_ a: Double?, _ b: Double?) -> Double? {
+    private struct Acc {
+        var tokens: Int64 = 0
+        var cost: Double? = 0
+        var byProvider: [ProviderID: Int64] = [:]
+
+        mutating func add(_ provider: ProviderID, _ t: Int64, _ c: Double?) {
+            tokens += t
+            cost = UsageSummary.add(cost, c)
+            byProvider[provider, default: 0] += t
+        }
+    }
+
+    fileprivate static func add(_ a: Double?, _ b: Double?) -> Double? {
         guard let a, let b else { return nil }
         return a + b
     }

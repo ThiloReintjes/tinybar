@@ -104,7 +104,8 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 ## 7. Popover (about 340 pt wide; height grows, scrolls when needed)
 
 Two levels, one click apart. A tab bar at the top always shows Overview plus one tab per enabled
-Provider (keys 0–4). Pages slide left or right in tab order.
+Provider (keys 0–4). The popover keeps one fixed size; pages sit side by side and slide into
+view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 
 1. **Overview**:
    - One row per Provider: concentric rings (outer: longest account-wide window, inner: the next),
@@ -112,7 +113,9 @@ Provider (keys 0–4). Pages slide left or right in tab order.
      Model-specific windows are left out. A Stale Provider shows "Login expired" (or the reason) in
      orange. Clicking a row opens its page.
    - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
-     by Provider in each Provider's colour.
+     by Provider, and top models and Projects, each bar split by Provider.
+   - Colours come from each logo: Claude orange, Codex monochrome (black or white), Gemini its
+     four-colour spark, Cursor grey.
 2. **Provider page**:
    - Large rings with the tightest % left, name, plan, and when and where the numbers were read.
    - A banner when Stale: what went wrong and what the user runs to fix it.

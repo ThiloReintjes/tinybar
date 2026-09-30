@@ -33,18 +33,20 @@ enum Motion {
 /// untouched and empties as it is used, like the ring in the menu bar.
 struct LimitRings: View {
     let windows: [LimitWindow]
-    let color: Color
+    /// nil draws neutral grey rings (empty state).
+    let provider: ProviderID?
     var lineWidth: CGFloat = 4.5
     var gap: CGFloat = 2
     var dimmed = false
 
     var body: some View {
+        let track = (provider?.color ?? .secondary).opacity(0.16)
         ZStack {
             if windows.isEmpty {
-                Circle().stroke(color.opacity(0.14), lineWidth: lineWidth).padding(lineWidth / 2)
+                Circle().stroke(track, lineWidth: lineWidth).padding(lineWidth / 2)
             }
             ForEach(Array(windows.enumerated()), id: \.element.id) { i, window in
-                Ring(fraction: window.remainingPercent / 100, color: color, lineWidth: lineWidth)
+                Ring(fraction: window.remainingPercent / 100, provider: provider, track: track, lineWidth: lineWidth)
                     .padding(CGFloat(i) * (lineWidth + gap) + lineWidth / 2)
             }
         }
@@ -57,19 +59,18 @@ struct LimitRings: View {
 
     private struct Ring: View {
         let fraction: Double
-        let color: Color
+        let provider: ProviderID?
+        let track: Color
         let lineWidth: CGFloat
 
         var body: some View {
             let f = min(max(fraction, 0), 1)
             ZStack {
-                Circle().stroke(color.opacity(0.16), lineWidth: lineWidth)
+                Circle().stroke(track, lineWidth: lineWidth)
                 Circle()
                     .trim(from: 0, to: f)
                     .stroke(
-                        AngularGradient(
-                            colors: [color.opacity(0.72), color],
-                            center: .center, startAngle: .zero, endAngle: .degrees(360 * max(f, 0.01))),
+                        provider?.ringFill(fraction: f) ?? AnyShapeStyle(Color.secondary),
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
@@ -132,16 +133,18 @@ struct PercentText: View {
 /// Fills with what is left: full at the start of a window, empty when the limit is reached.
 struct RemainingBar: View {
     let fraction: Double
-    let color: Color
+    let provider: ProviderID
 
     var body: some View {
         GeometryReader { geo in
             let f = min(max(fraction, 0), 1)
             ZStack(alignment: .leading) {
-                Capsule().fill(.primary.opacity(0.08))
+                Capsule().fill(provider.color.opacity(0.14))
                 Capsule()
-                    .fill(LinearGradient(colors: [color.opacity(0.75), color], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: f > 0 ? max(6, geo.size.width * f) : 0)
+                    .fill(provider.barFill)
+                    .mask(alignment: .leading) {
+                        Capsule().frame(width: f > 0 ? max(6, geo.size.width * f) : 0)
+                    }
             }
         }
         .frame(height: 6)
@@ -209,12 +212,12 @@ struct UsageBars: View {
     }
 }
 
-/// Top models or projects, each row backed by a faint bar showing its share.
+/// Top models or projects. Each row is backed by a faint bar showing its share of all tokens,
+/// split by subscription in their colours.
 struct Breakdown: View {
     let title: String
     let lines: [UsageSummary.Line]
     let total: Int64
-    let color: Color
 
     var body: some View {
         if !lines.isEmpty {
@@ -233,21 +236,48 @@ struct Breakdown: View {
                     .font(.system(size: 12).monospacedDigit())
                     .padding(.vertical, 4)
                     .padding(.horizontal, 8)
-                    .background(alignment: .leading) {
-                        GeometryReader { geo in
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(color.opacity(0.13))
-                                .frame(width: geo.size.width * share(line))
-                        }
-                    }
+                    .background(alignment: .leading) { ShareBar(line: line, total: total) }
                 }
             }
         }
     }
 
-    private func share(_ line: UsageSummary.Line) -> CGFloat {
-        guard total > 0 else { return 0 }
-        return CGFloat(min(max(Double(line.tokens) / Double(total), 0), 1))
+    private struct ShareBar: View {
+        let line: UsageSummary.Line
+        let total: Int64
+
+        var body: some View {
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    ForEach(line.byProvider.keys.sorted(), id: \.self) { id in
+                        Rectangle()
+                            .fill(id.color.opacity(0.16))
+                            .frame(width: geo.size.width * share(line.byProvider[id] ?? 0))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .animation(.smooth(duration: 0.4), value: line.tokens)
+        }
+
+        private func share(_ tokens: Int64) -> CGFloat {
+            guard total > 0 else { return 0 }
+            return CGFloat(min(max(Double(tokens) / Double(total), 0), 1))
+        }
+    }
+}
+
+/// A subscription's colour as a small dot; Gemini's is its four-colour spark.
+struct ProviderDot: View {
+    let id: ProviderID
+    var size: CGFloat = 6
+
+    var body: some View {
+        Circle()
+            .fill(id == .gemini
+                ? AnyShapeStyle(AngularGradient(colors: ProviderID.Gemini.clockwise, center: .center))
+                : AnyShapeStyle(id.color))
+            .frame(width: size, height: size)
     }
 }
 
@@ -296,13 +326,43 @@ extension ProviderID {
         }
     }
 
-    /// One colour per subscription, shared by its rings, bars and chart segments.
+    /// One colour per subscription for dots, charts and tracks, taken from its logo. Codex follows
+    /// OpenAI's monochrome mark, so it is black in light mode and white in dark mode.
     var color: Color {
         switch self {
         case .claude: Color(red: 0.85, green: 0.47, blue: 0.34)
-        case .codex: Color(red: 0.07, green: 0.64, blue: 0.52)
-        case .gemini: Color(red: 0.30, green: 0.52, blue: 0.98)
-        case .cursor: .primary
+        case .codex: .primary
+        case .gemini: Gemini.blue
+        case .cursor: .gray
+        }
+    }
+
+    /// The Gemini spark's colours, clockwise from its top point.
+    enum Gemini {
+        static let red = Color(red: 0.97, green: 0.38, blue: 0.35)     // #F7615A
+        static let blue = Color(red: 0.24, green: 0.62, blue: 1.0)     // #3E9DFF
+        static let green = Color(red: 0.07, green: 0.76, blue: 0.49)   // #11C27C
+        static let yellow = Color(red: 0.96, green: 0.77, blue: 0.12)  // #F5C51F
+        static let clockwise = [red, blue, green, yellow, red]
+    }
+
+    /// Gemini's ring runs through its logo's colours, fixed in place like the spark: red at the
+    /// top, blue right, green bottom, yellow left. The others deepen towards the end of the arc.
+    func ringFill(fraction: Double) -> AnyShapeStyle {
+        switch self {
+        case .gemini:
+            AnyShapeStyle(AngularGradient(colors: Gemini.clockwise, center: .center))
+        default:
+            AnyShapeStyle(AngularGradient(
+                colors: [color.opacity(0.7), color], center: .center,
+                startAngle: .zero, endAngle: .degrees(360 * max(fraction, 0.01))))
+        }
+    }
+
+    var barFill: AnyShapeStyle {
+        switch self {
+        case .gemini: AnyShapeStyle(LinearGradient(colors: [Gemini.yellow, Gemini.green, Gemini.blue], startPoint: .leading, endPoint: .trailing))
+        default: AnyShapeStyle(LinearGradient(colors: [color.opacity(0.7), color], startPoint: .leading, endPoint: .trailing))
         }
     }
 
@@ -334,7 +394,7 @@ enum PopoverSnapshotOptions {
         guard redactProjects else { return lines }
         let names = ["acme-web", "billing-service", "No project", "docs-site", "ml-pipeline"]
         return lines.enumerated().map { i, l in
-            UsageSummary.Line(name: names[i % names.count], tokens: l.tokens, cost: l.cost)
+            UsageSummary.Line(name: names[i % names.count], tokens: l.tokens, cost: l.cost, byProvider: l.byProvider)
         }
     }
 }
