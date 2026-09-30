@@ -89,6 +89,7 @@ enum CodexAppServer {
             windows: windows,
             credits: credits,
             bankedResets: banked,
+            source: .cliProcess,
             fetchedAt: now)
     }
 

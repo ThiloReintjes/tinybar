@@ -12,7 +12,7 @@ enum HistoryImport {
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached(priority: .utility) {
             if let store = try? UsageStore() {
-                _ = try? await store.ingestCodex { p in
+                _ = try? await store.ingestAll { p in
                     print("\(p.filesDone)/\(p.filesTotal)")
                     fflush(stdout)
                 }
@@ -56,7 +56,7 @@ enum HistoryImport {
         }
         out.fileHandleForReading.readabilityHandler = nil
         if done == nil {
-            _ = try? await UsageStore().ingestCodex()
+            _ = try? await UsageStore().ingestAll()
         }
     }
 }

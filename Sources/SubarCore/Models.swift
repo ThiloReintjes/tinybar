@@ -112,23 +112,48 @@ public struct Credits: Codable, Sendable, Hashable {
     }
 }
 
+/// Claude's pay-as-you-go spend beyond the subscription ("extra usage"), in currency units.
+public struct ExtraUsageSpend: Codable, Sendable, Hashable {
+    public var used: Double
+    public var limit: Double?
+    public var currency: String
+
+    public init(used: Double, limit: Double?, currency: String) {
+        self.used = used
+        self.limit = limit
+        self.currency = currency
+    }
+}
+
+/// Where a snapshot came from, shown as a small hint on the card.
+public enum DataSource: String, Codable, Sendable, Hashable {
+    case cli        // the CLI's stored OAuth login
+    case cliProcess // a short-lived official CLI process
+    case browser    // browser session cookies (opt-in)
+}
+
 public struct ProviderSnapshot: Codable, Sendable, Hashable {
     public var provider: ProviderID
     public var plan: String?
     public var windows: [LimitWindow]
     public var credits: Credits?
     public var bankedResets: [BankedReset]?
+    public var extraUsage: ExtraUsageSpend?
+    public var source: DataSource
     public var fetchedAt: Date
 
     public init(
         provider: ProviderID, plan: String?, windows: [LimitWindow],
-        credits: Credits? = nil, bankedResets: [BankedReset]? = nil, fetchedAt: Date = Date())
+        credits: Credits? = nil, bankedResets: [BankedReset]? = nil, extraUsage: ExtraUsageSpend? = nil,
+        source: DataSource = .cli, fetchedAt: Date = Date())
     {
         self.provider = provider
         self.plan = plan
         self.windows = windows
         self.credits = credits
         self.bankedResets = bankedResets
+        self.extraUsage = extraUsage
+        self.source = source
         self.fetchedAt = fetchedAt
     }
 }

@@ -14,7 +14,7 @@ public struct DailyUsage: Sendable, Hashable {
 public actor UsageStore {
     private let db: SQLiteDB
     private let projects = ProjectResolver()
-    private static let schemaVersion: Int64 = 1
+    private static let schemaVersion: Int64 = 2
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
         db = try SQLiteDB(path: path.path)
@@ -24,6 +24,12 @@ public actor UsageStore {
     private static func migrate(_ db: SQLiteDB) throws {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
+        if version >= 1 {
+            // v1 → v2: Claude message table only.
+            try db.exec(claudeMessageSchema + "PRAGMA user_version = \(schemaVersion);")
+            return
+        }
+        try db.exec(claudeMessageSchema)
         try db.exec("""
         CREATE TABLE IF NOT EXISTS daily_usage (
             day TEXT NOT NULL,
@@ -50,6 +56,22 @@ public actor UsageStore {
         """)
     }
 
+    /// One row per Claude message id: the usage we have counted for it, so a later, more
+    /// complete copy of the same message replaces its contribution instead of adding to it.
+    private static let claudeMessageSchema = """
+    CREATE TABLE IF NOT EXISTS claude_message (
+        id TEXT PRIMARY KEY,
+        day TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        project TEXT NOT NULL,
+        input INTEGER NOT NULL,
+        output INTEGER NOT NULL,
+        cache_write INTEGER NOT NULL,
+        cache_read INTEGER NOT NULL
+    ) WITHOUT ROWID;
+    """
+
     // MARK: Ingestion
 
     public struct IngestProgress: Sendable {
@@ -68,18 +90,63 @@ public actor UsageStore {
         Paths.codexHome().appendingPathComponent("archived_sessions"),
     ]
 
-    /// Scans Codex rollout files, reading only bytes appended since the last run. With `only`,
-    /// just those paths are checked (from `LogWatcher`) instead of walking every root.
+    public static let claudeRoots: [URL] = Paths.claudeConfigDirs().map { $0.appendingPathComponent("projects") }
+
+    public enum LogSource: String, Sendable, CaseIterable {
+        case codex, claude
+
+        public var roots: [URL] {
+            switch self {
+            case .codex: UsageStore.codexRoots
+            case .claude: UsageStore.claudeRoots
+            }
+        }
+    }
+
+    /// Ingests every log source. With `only`, just those paths are checked (from `LogWatcher`)
+    /// instead of walking every root.
+    @discardableResult
+    public func ingestAll(
+        only: Set<String>? = nil,
+        progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult
+    {
+        var total = IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0)
+        for source in LogSource.allCases {
+            let r = try ingest(source, roots: source.roots, only: only, progress: progress)
+            total.filesScanned += r.filesScanned
+            total.bytesRead += r.bytesRead
+            total.recordsAdded += r.recordsAdded
+        }
+        return total
+    }
+
     @discardableResult
     public func ingestCodex(
         roots: [URL] = UsageStore.codexRoots,
         only: Set<String>? = nil,
         progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult
     {
+        try ingest(.codex, roots: roots, only: only, progress: progress)
+    }
+
+    @discardableResult
+    public func ingestClaude(
+        roots: [URL] = UsageStore.claudeRoots,
+        only: Set<String>? = nil,
+        progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult
+    {
+        try ingest(.claude, roots: roots, only: only, progress: progress)
+    }
+
+    /// Reads only bytes appended since the last run of each changed file.
+    private func ingest(
+        _ source: LogSource, roots: [URL], only: Set<String>?,
+        progress: (@Sendable (IngestProgress) -> Void)?) throws -> IngestResult
+    {
         var changed: [(String, FileStamp)] = []
         if let only {
             let rootPaths = roots.map { $0.path + "/" }
-            for path in only where rootPaths.contains(where: path.hasPrefix) {
+            for path in only where path.hasSuffix(".jsonl") && rootPaths.contains(where: path.hasPrefix) {
                 if let stamp = Self.stamp(path), try isChanged(path, stamp) { changed.append((path, stamp)) }
             }
         } else {
@@ -100,7 +167,11 @@ public actor UsageStore {
             try db.transaction {
                 for (path, stamp) in batch {
                     let (read, added) = try autoreleasepool {
-                        try ingestFile(path: path, stamp: stamp, cursor: loadCursor(path: path))
+                        let cursor = try loadCursor(path: path)
+                        switch source {
+                        case .codex: return try ingestCodexFile(path: path, stamp: stamp, cursor: cursor)
+                        case .claude: return try ingestClaudeFile(path: path, stamp: stamp, cursor: cursor)
+                        }
                     }
                     result.filesScanned += 1
                     result.bytesRead += read
@@ -126,7 +197,7 @@ public actor UsageStore {
         return FileStamp(inode: known[0].int, size: known[1].int, mtime: known[2].int) != stamp
     }
 
-    private func ingestFile(path: String, stamp: FileStamp, cursor: Cursor?) throws -> (Int64, Int) {
+    private func ingestCodexFile(path: String, stamp: FileStamp, cursor: Cursor?) throws -> (Int64, Int) {
         let url = URL(fileURLWithPath: path)
         // Resume only if it's the same file and it only grew; otherwise start over.
         var parser = CodexLogParser()
@@ -155,24 +226,112 @@ public actor UsageStore {
         }
 
         for (key, t) in agg {
-            try db.run("""
-            INSERT INTO daily_usage (day, provider, model, project, input, output, cache_write, cache_read)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(day, provider, model, project) DO UPDATE SET
-                input = input + excluded.input,
-                output = output + excluded.output,
-                cache_write = cache_write + excluded.cache_write,
-                cache_read = cache_read + excluded.cache_read
-            """, [.text(key.day), .text(ProviderID.codex.rawValue), .text(key.model), .text(key.project),
-                  .int(t.input), .int(t.output), .int(t.cacheWrite), .int(t.cacheRead)])
+            try addDaily(day: key.day, provider: .codex, model: key.model, project: key.project, t)
         }
         let state = (try? JSONEncoder().encode(parser)).map { String(decoding: $0, as: UTF8.self) }
+        try saveCursor(path: path, source: .codex, stamp: stamp, offset: endOffset, state: state)
+        return (endOffset - offset, added)
+    }
+
+    private func ingestClaudeFile(path: String, stamp: FileStamp, cursor: Cursor?) throws -> (Int64, Int) {
+        // Counting is per message id and idempotent, so a replaced or truncated file can simply
+        // be re-read from the start.
+        var offset: Int64 = 0
+        if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset {
+            offset = cursor.offset
+        }
+
+        // Merge within the file first: streaming writes several lines per message.
+        var latest: [String: UsageRecord] = [:]
+        var order: [String] = []
+        let endOffset = try JSONLReader.forEachLine(url: URL(fileURLWithPath: path), from: offset) { line in
+            guard let entry = ClaudeLogParser.parse(line: line) else { return }
+            if let existing = latest[entry.messageID] {
+                latest[entry.messageID] = Self.merged(existing, entry.record)
+            } else {
+                latest[entry.messageID] = entry.record
+                order.append(entry.messageID)
+            }
+        }
+
+        var added = 0
+        for id in order {
+            guard let record = latest[id] else { continue }
+            if try upsertClaudeMessage(id: id, record) { added += 1 }
+        }
+        try saveCursor(path: path, source: .claude, stamp: stamp, offset: endOffset, state: nil)
+        return (endOffset - offset, added)
+    }
+
+    /// Streaming copies only ever grow, so the field-wise max is the final usage regardless of
+    /// the order copies are seen in.
+    private static func merged(_ a: UsageRecord, _ b: UsageRecord) -> UsageRecord {
+        var r = a
+        r.tokens = TokenCounts(
+            input: max(a.tokens.input, b.tokens.input),
+            output: max(a.tokens.output, b.tokens.output),
+            cacheWrite: max(a.tokens.cacheWrite, b.tokens.cacheWrite),
+            cacheRead: max(a.tokens.cacheRead, b.tokens.cacheRead))
+        if r.cwd == nil { r.cwd = b.cwd }
+        return r
+    }
+
+    /// Records a message's usage, replacing any earlier count for the same id.
+    /// Returns true for a message seen for the first time.
+    private func upsertClaudeMessage(id: String, _ record: UsageRecord) throws -> Bool {
+        let existing = try db.run(
+            "SELECT day, provider, model, project, input, output, cache_write, cache_read FROM claude_message WHERE id = ?",
+            [.text(id)]).first
+
+        var final = record
+        if let e = existing {
+            let old = TokenCounts(input: e[4].int, output: e[5].int, cacheWrite: e[6].int, cacheRead: e[7].int)
+            final = Self.merged(UsageRecord(timestamp: record.timestamp, model: record.model, cwd: record.cwd, tokens: old), record)
+            if final.tokens == old { return false }
+            // Undo the old contribution, keeping its original day/model/project.
+            let oldProvider = e[1].text.flatMap(ProviderID.init(rawValue:)) ?? .claude
+            try addDaily(day: e[0].text ?? "", provider: oldProvider, model: e[2].text ?? "", project: e[3].text ?? "",
+                         TokenCounts(input: -old.input, output: -old.output, cacheWrite: -old.cacheWrite, cacheRead: -old.cacheRead))
+            try addDaily(day: e[0].text ?? "", provider: oldProvider, model: e[2].text ?? "", project: e[3].text ?? "", final.tokens)
+            try db.run("""
+            UPDATE claude_message SET input = ?, output = ?, cache_write = ?, cache_read = ? WHERE id = ?
+            """, [.int(final.tokens.input), .int(final.tokens.output), .int(final.tokens.cacheWrite),
+                  .int(final.tokens.cacheRead), .text(id)])
+            return false
+        }
+
+        let day = DayKey.string(for: record.timestamp)
+        let model = ModelName.normalize(record.model)
+        let provider = ClaudeLogParser.provider(forModel: model)
+        let project = projects.project(for: record.cwd)
+        try addDaily(day: day, provider: provider, model: model, project: project, record.tokens)
+        try db.run("""
+        INSERT INTO claude_message (id, day, provider, model, project, input, output, cache_write, cache_read)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [.text(id), .text(day), .text(provider.rawValue), .text(model), .text(project),
+              .int(record.tokens.input), .int(record.tokens.output), .int(record.tokens.cacheWrite), .int(record.tokens.cacheRead)])
+        return true
+    }
+
+    private func addDaily(day: String, provider: ProviderID, model: String, project: String, _ t: TokenCounts) throws {
+        try db.run("""
+        INSERT INTO daily_usage (day, provider, model, project, input, output, cache_write, cache_read)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(day, provider, model, project) DO UPDATE SET
+            input = input + excluded.input,
+            output = output + excluded.output,
+            cache_write = cache_write + excluded.cache_write,
+            cache_read = cache_read + excluded.cache_read
+        """, [.text(day), .text(provider.rawValue), .text(model), .text(project),
+              .int(t.input), .int(t.output), .int(t.cacheWrite), .int(t.cacheRead)])
+    }
+
+    private func saveCursor(path: String, source: LogSource, stamp: FileStamp, offset: Int64, state: String?) throws {
         try db.run("""
         INSERT OR REPLACE INTO file_cursor (path, provider, inode, size, mtime, offset, state)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, [.text(path), .text(ProviderID.codex.rawValue), .int(stamp.inode), .int(stamp.size),
-              .int(stamp.mtime), .int(endOffset), state.map { .text($0) } ?? .null])
-        return (endOffset - offset, added)
+        """, [.text(path), .text(source.rawValue), .int(stamp.inode), .int(stamp.size),
+              .int(stamp.mtime), .int(offset), state.map { .text($0) } ?? .null])
     }
 
     // MARK: Queries

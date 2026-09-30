@@ -2,7 +2,8 @@ import Foundation
 import SubarCore
 
 // Developer tool: exercises SubarCore without the UI.
-//   subar-cli limits          fetch Codex limits
+//   subar-cli limits [--browser]  fetch limits (optionally allowing the browser fallback)
+//   subar-cli cookies         check which browser holds session cookies
 //   subar-cli ingest [db]     ingest Codex logs into a store
 //   subar-cli usage [db]      print usage summaries
 
@@ -11,26 +12,44 @@ let command = args.first ?? "limits"
 let dbURL = args.dropFirst().first.map { URL(fileURLWithPath: $0) }
     ?? Paths.appSupport.appendingPathComponent("usage.sqlite")
 
-func printLimits() async {
-    do {
-        let s = try await CodexProvider().fetch()
-        print("Codex \(s.plan ?? "")")
-        for w in s.windows {
-            print(String(format: "  %-24@ %5.1f%%  resets in %@", w.title as NSString, w.usedPercent, Format.countdown(to: w.resetsAt) as NSString))
+func printLimits(browser: Bool) async {
+    let providers: [any UsageProvider] = [
+        ClaudeProvider(allowBrowser: { browser }),
+        CodexProvider(allowBrowser: { browser }),
+    ]
+    for provider in providers {
+        do {
+            let s = try await provider.fetch()
+            print("\(provider.id.displayName) \(s.plan ?? "") [source: \(s.source.rawValue)]")
+            for w in s.windows {
+                print(String(format: "  %-24@ %5.1f%% left  resets in %@", w.title as NSString, w.remainingPercent, Format.countdown(to: w.resetsAt) as NSString))
+            }
+            if let c = s.credits, c.hasCredits { print("  credits: \(c.balance.map { String(format: "%.2f", $0) } ?? "-")") }
+            if let e = s.extraUsage { print(String(format: "  extra usage: %.2f / %@ %@", e.used, e.limit.map { String(format: "%.2f", $0) } ?? "∞", e.currency)) }
+            for b in s.bankedResets ?? [] where b.isAvailable {
+                print("  banked reset: \(b.title ?? b.id) expires \(b.expiresAt.map { "\($0)" } ?? "never")")
+            }
+        } catch {
+            print("\(provider.id.displayName) error: \(error.localizedDescription)")
         }
-        if let c = s.credits { print("  credits: \(c.balance.map { String(format: "%.2f", $0) } ?? "-") unlimited=\(c.unlimited)") }
-        for b in s.bankedResets ?? [] {
-            print("  banked reset: \(b.title ?? b.id) [\(b.status)] expires \(b.expiresAt.map { "\($0)" } ?? "never")")
+    }
+}
+
+func printCookies() {
+    for (domain, name) in [("claude.ai", "sessionKey"), ("chatgpt.com", "__Secure-next-auth.session-token")] {
+        if let found = BrowserCookies.find(domain: domain, required: [name]) {
+            let value = BrowserCookies.joined(name, in: found.cookies) ?? ""
+            print("\(domain): found \(name) in \(found.browser) (\(value.count) chars, prefix \(value.prefix(7))…)")
+        } else {
+            print("\(domain): no \(name) cookie found")
         }
-    } catch {
-        print("Codex error: \(error.localizedDescription)")
     }
 }
 
 func ingest() async throws {
     let store = try UsageStore(path: dbURL)
     let start = Date()
-    let r = try await store.ingestCodex { p in
+    let r = try await store.ingestAll { p in
         if p.filesDone % 5000 < 200 || p.filesDone == p.filesTotal {
             FileHandle.standardError.write("  \(p.filesDone)/\(p.filesTotal)\n".data(using: .utf8)!)
         }
@@ -53,8 +72,22 @@ func usage() async throws {
 }
 
 switch command {
-case "limits": await printLimits()
+case "limits": await printLimits(browser: args.contains("--browser"))
+case "cookies": printCookies()
+case "web": await printWeb()
 case "ingest": try await ingest()
 case "usage": try await usage()
-default: print("usage: subar-cli [limits|ingest|usage] [db-path]")
+default: print("usage: subar-cli [limits [--browser]|cookies|ingest|usage] [db-path]")
+}
+
+// `subar-cli web`: exercises only the browser-cookie paths.
+func printWeb() async {
+    for provider in ProviderID.allCases {
+        do {
+            let (browser, s) = try await BrowserFallback.fetch(provider)
+            print("\(provider.displayName) via \(browser): " + s.windows.map { "\($0.title) \(Int($0.remainingPercent))% left" }.joined(separator: ", "))
+        } catch {
+            print("\(provider.displayName) web: \(error.localizedDescription)")
+        }
+    }
 }
