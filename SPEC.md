@@ -9,7 +9,7 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Key decision: [ADR 0001](./docs/adr/
 **Goals**
 - A one-command install that runs with zero configuration.
 - Near-zero resource use (see §2).
-- Accurate Limit Windows, Resets and Banked Resets for Claude and Codex.
+- Accurate Limit Windows, Resets and Banked Resets for Claude, Codex, Gemini and Cursor.
 - Daily token history and Theoretical Cost from local CLI logs.
 - Publishable: MIT license, notarized, auto-updating.
 
@@ -101,7 +101,7 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 - **Pinned Limit**: chosen by clicking any Limit Window on a Provider page. The default is the 5h window of the first enabled Provider (order: Claude, Codex, Gemini, Cursor), or its weekly window if no 5h window exists.
 - If the Pinned Limit's Provider is Stale, the glyph is dimmed.
 
-## 7. Popover (about 340 pt wide; height grows, scrolls when needed)
+## 7. Popover (344 × 540 pt, fixed; long pages scroll inside)
 
 Two levels, one click apart. A tab bar at the top always shows Overview plus one tab per enabled
 Provider (keys 0–4). The popover keeps one fixed size; pages sit side by side and slide into
@@ -182,4 +182,4 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 12. Later (explicitly deferred)
 
-Gemini, Cursor, Grok, Kimi providers; token history for other CLIs; multiple accounts; token refresh (would need a new ADR); historical pricing; a separate Usage window.
+Grok and Kimi providers; token history for other CLIs; multiple accounts; token refresh (would need a new ADR); historical pricing; a separate Usage window.
