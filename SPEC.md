@@ -14,7 +14,8 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Key decision: [ADR 0001](./docs/adr/
 - Publishable: MIT license, notarized, auto-updating.
 
 **Non-goals (v1)**
-- Providers other than Claude and Codex. Gemini, Cursor, Grok and Kimi come later, one at a time.
+- Providers other than Claude, Codex, Gemini and Cursor. Grok and Kimi come later, one at a time.
+- Token history for Gemini and Cursor (neither keeps usable local logs; limits only).
 - Multiple accounts per Provider.
 - Refreshing tokens or writing to CLI credential files (ADR 0001).
 - Token usage from web/desktop chat apps (no local logs).
@@ -64,9 +65,24 @@ Honor `Retry-After`; on HTTP 429 with no header, back off 5 minutes.
 
 Displayed: 5h window, weekly window, model-specific windows if present, credits, Banked Resets.
 
+### Gemini
+Google stopped serving Gemini CLI OAuth to individual, AI Pro and Ultra accounts in June 2026; those quotas now live in Antigravity.
+1. **Antigravity CLI**: a short-lived `agy -p /usage --output-format json`, run in an empty temporary directory with logging off. It is the CLI's built-in usage command: no model turn, no tokens. `agy` uses and refreshes its own login; Subar never reads Google tokens.
+
+Displayed: the "Gemini Models" 5h and weekly windows, plus Antigravity's "Claude and GPT models" 5h and weekly windows as model-specific windows. No plan name (the report has none).
+Enabled automatically when `agy` and `~/.gemini/antigravity-cli` exist.
+
+### Cursor
+1. **Cursor.app login**: `cursorAuth/accessToken` from `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (read-only, `immutable` when no WAL is present), sent as the `WorkosCursorSessionToken=<userID>::<token>` cookie. Skipped within 60 s of expiry.
+2. **Browser cookie**: `WorkosCursorSessionToken` for `cursor.com`. Not a separate toggle: enabling Cursor is the consent, since many Cursor users have no app login.
+   → `GET https://cursor.com/api/usage-summary` (the dashboard's own call).
+
+Displayed: the billing-cycle window (total plan usage), Auto and API-model windows as model-specific, on-demand spend as extra usage, reset at the cycle end.
+Enabled automatically only when Cursor.app holds a login. No Limit Alerts (billing cycles are neither 5h nor weekly).
+
 ### Detection and staleness
 - On launch, a Provider is enabled automatically if its CLI credentials exist. It can be toggled in Settings.
-- If a fetch fails (expired token, network, 401), the Provider becomes **Stale**. The card keeps its last values and shows "Stale since HH:MM — run `claude` once to refresh" (or `codex`).
+- If a fetch fails (expired token, network, 401), the Provider becomes **Stale**. The card keeps its last values and shows "Stale since HH:MM — run `claude` once to refresh" (or `codex`, `agy`, or "open Cursor or sign in at cursor.com").
 
 Implementation note: endpoint shapes are undocumented. Verify request headers and response fields against CodexBar's sources (`Sources/CodexBarCore/Providers/{Claude,Codex}/`, `docs/codex.md`) before implementing.
 
@@ -82,7 +98,7 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 ## 6. Menu bar
 
 - A tiny ring glyph showing how much of the Pinned Limit is **left**: full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
-- **Pinned Limit**: chosen by clicking any Limit Window in the popover. The default is the 5h window of the first enabled Provider (Claude before Codex), or its weekly window if no 5h window exists.
+- **Pinned Limit**: chosen by clicking any Limit Window in the popover. The default is the 5h window of the first enabled Provider (order: Claude, Codex, Gemini, Cursor), or its weekly window if no 5h window exists.
 - If the Pinned Limit's Provider is Stale, the glyph is dimmed.
 
 ## 7. Popover (about 340 pt wide; height grows, scrolls when needed)

@@ -16,6 +16,8 @@ func printLimits(browser: Bool) async {
     let providers: [any UsageProvider] = [
         ClaudeProvider(allowBrowser: { browser }),
         CodexProvider(allowBrowser: { browser }),
+        GeminiProvider(),
+        CursorProvider(),
     ]
     for provider in providers {
         do {
@@ -36,7 +38,7 @@ func printLimits(browser: Bool) async {
 }
 
 func printCookies() {
-    for (domain, name) in [("claude.ai", "sessionKey"), ("chatgpt.com", "__Secure-next-auth.session-token")] {
+    for (domain, name) in [("claude.ai", "sessionKey"), ("chatgpt.com", "__Secure-next-auth.session-token"), ("cursor.com", "WorkosCursorSessionToken")] {
         if let found = BrowserCookies.find(domain: domain, required: [name]) {
             let value = BrowserCookies.joined(name, in: found.cookies) ?? ""
             print("\(domain): found \(name) in \(found.browser) (\(value.count) chars, prefix \(value.prefix(7))…)")
@@ -82,7 +84,7 @@ default: print("usage: subar-cli [limits [--browser]|cookies|ingest|usage] [db-p
 
 // `subar-cli web`: exercises only the browser-cookie paths.
 func printWeb() async {
-    for provider in ProviderID.allCases {
+    for provider in ProviderID.allCases where provider != .gemini {
         do {
             let (browser, s) = try await BrowserFallback.fetch(provider)
             print("\(provider.displayName) via \(browser): " + s.windows.map { "\($0.title) \(Int($0.remainingPercent))% left" }.joined(separator: ", "))

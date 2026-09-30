@@ -3,16 +3,39 @@ import Foundation
 public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
     case claude
     case codex
+    case gemini
+    case cursor
 
     public var displayName: String {
         switch self {
         case .claude: "Claude"
         case .codex: "Codex"
+        case .gemini: "Gemini"
+        case .cursor: "Cursor"
         }
     }
 
-    /// The CLI the user runs to refresh this Provider's login.
-    public var cliCommand: String { rawValue }
+    /// The CLI Subar reads through, where there is one.
+    public var cliCommand: String? {
+        switch self {
+        case .claude: "claude"
+        case .codex: "codex"
+        case .gemini: "agy"
+        case .cursor: nil
+        }
+    }
+
+    /// What the user does to renew an expired login. Subar never does it for them (ADR 0001).
+    public var loginHint: String {
+        switch self {
+        case .claude, .codex, .gemini: "run `\(cliCommand!)` once to refresh"
+        case .cursor: "open Cursor or sign in at cursor.com"
+        }
+    }
+
+    /// Whether the opt-in browser fallback applies. Cursor reads its browser session as a
+    /// regular source, so it has no separate toggle.
+    public var hasBrowserFallback: Bool { self == .claude || self == .codex }
 
     public static func < (lhs: ProviderID, rhs: ProviderID) -> Bool {
         allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!

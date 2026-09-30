@@ -1,7 +1,7 @@
 # Subar
 
-**A tiny, fully native macOS menu bar app for your AI subscriptions. What's left of your Claude and
-Codex limits, the tokens you burned, and what they would have cost at API prices, in about 20 MB of
+**A tiny, fully native macOS menu bar app for your AI subscriptions. What's left of your Claude,
+Codex, Gemini and Cursor limits, the tokens you burned, and what they would have cost at API prices, in about 20 MB of
 RAM.**
 
 <p align="center">
@@ -29,12 +29,14 @@ around one idea: a status item should cost nothing while you're not looking at i
 
 ## Features
 
-- **Limits, as what's left** — the 5-hour and weekly windows for Claude and Codex, counting down
-  from 100% to 0%, with reset countdowns. Model-scoped weekly limits, Claude extra usage, Codex
-  credits and **banked resets** included.
+- **Limits, as what's left** — the 5-hour and weekly windows for Claude, Codex and Gemini (via
+  Antigravity), and Cursor's billing cycle, counting down from 100% to 0%, with reset countdowns.
+  Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and **banked
+  resets** included.
 - **Menu bar at a glance** — a ring and a percentage for the one window you pin. Click any limit in
   the popover to pin it.
-- **Token history** — Today, 7 days and 30 days, read from the local Claude Code and Codex logs,
+- **Token history** — Today, 7 days and 30 days, read from the local Claude Code and Codex logs
+  (Gemini and Cursor show limits only),
   with a daily chart and the top models and projects.
 - **Theoretical cost** — what those tokens would have cost at public API prices, from
   [models.dev](https://models.dev).
@@ -58,10 +60,12 @@ read-only endpoints they call for `/usage` and `/status`:
 | -------- | ------ | ------------- |
 | Claude   | Claude Code's OAuth login (`~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item) → `api.anthropic.com/api/oauth/usage` | `~/.claude/projects/**/*.jsonl` |
 | Codex    | `~/.codex/auth.json` → `chatgpt.com/backend-api/wham/usage`, falling back to a short-lived `codex app-server` in read-only mode | `~/.codex/sessions`, `~/.codex/archived_sessions` |
+| Gemini   | a short-lived `agy -p /usage` (Antigravity CLI's built-in usage report: no prompt, no tokens spent) | — |
+| Cursor   | Cursor.app's login (`state.vscdb`), else the `cursor.com` session cookie in your browser → `cursor.com/api/usage-summary` | — |
 
 It **never refreshes or rewrites a token**, never sends a prompt, and never redeems a banked reset.
-When a login expires the card turns **stale** and tells you to run `claude` or `codex` once; the CLI
-renews its own login. Why this matters and what it costs:
+When a login expires the card turns **stale** and tells you to run `claude`, `codex` or `agy` once
+(or open Cursor); the client renews its own login. Why this matters and what it costs:
 [ADR 0001](docs/adr/0001-read-only-credentials.md).
 
 The only other network call is one unauthenticated GET to `models.dev/api.json`, at most once a day.
@@ -97,8 +101,8 @@ those providers on. There's nothing to configure.
 
 - **Notifications** — asked once, for limit alerts. Turn alerts off in Settings any time.
 - **Keychain** — Claude's login is read through `/usr/bin/security`, the tool Claude Code itself
-  uses to store it, so there is no prompt. The **browser fallback** is off by default: turning it on
-  for a Chromium browser (Chrome, Arc, Dia, Brave, Edge, Comet) asks once for that browser's
+  uses to store it, so there is no prompt. The **browser fallback** is off by default, and so is
+  Cursor unless Cursor.app is signed in: turning either on for a Chromium browser (Chrome, Arc, Dia, Brave, Edge, Comet) asks once for that browser's
   "Safe Storage" key. Firefox needs nothing; Safari isn't supported.
 
 ## Building from source
@@ -114,7 +118,7 @@ swift test                   # unit tests
 Developer tools:
 
 ```sh
-swift run subar-cli limits [--browser]   # fetch limits from the terminal
+swift run subar-cli limits [--browser]   # fetch limits for all four providers
 swift run subar-cli cookies              # which browser holds session cookies
 swift run subar-cli ingest [db]          # ingest Claude + Codex logs
 swift run subar-cli usage [db]           # print usage summaries
