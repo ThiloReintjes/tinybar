@@ -6,7 +6,7 @@ Status: **v0.2: Claude and Codex**, with an opt-in browser-cookie fallback. See 
 
 ## What it shows
 
-- **Menu bar:** a ring plus the percentage used of your Pinned Limit (by default the 5-hour window, or weekly if that is the only one). Click any Limit Window in the popover to pin it.
+- **Menu bar:** a ring plus the percentage left of your Pinned Limit (by default the 5-hour window, or weekly if that is the only one). Click any Limit Window in the popover to pin it.
 - **Claude card:** plan (e.g. Max 5x), 5-hour and weekly windows, model-scoped weekly windows, extra usage spend.
 - **Codex card:** plan, Limit Windows with reset countdowns, credits, Banked Resets.
 - **Usage:** Today / 7d / 30d tokens and Theoretical Cost (API-equivalent, from [models.dev](https://models.dev)), a daily chart, and top models and projects.
@@ -63,7 +63,7 @@ Developer tools:
 swift run subar-cli limits [--browser]  # fetch limits
 swift run subar-cli cookies       # which browser holds the session cookies
 swift run subar-cli web           # fetch limits via browser cookies only
-swift run subar-cli ingest [db]   # ingest Codex logs
+swift run subar-cli ingest [db]   # ingest Claude + Codex logs
 swift run subar-cli usage [db]    # print usage summaries
 .build/debug/Subar --snapshot out.png   # render the popover to PNG (light + dark)
 ```
