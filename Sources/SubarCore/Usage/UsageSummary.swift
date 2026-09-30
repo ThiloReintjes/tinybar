@@ -30,6 +30,12 @@ public struct UsageSummary: Sendable {
         public var tokens: Int64
         /// Theoretical Cost; nil when any part of it is unpriced.
         public var cost: Double?
+
+        public init(name: String, tokens: Int64, cost: Double?) {
+            self.name = name
+            self.tokens = tokens
+            self.cost = cost
+        }
     }
 
     public struct DayBar: Sendable, Identifiable {

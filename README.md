@@ -1,73 +1,140 @@
 # Subar
 
-A lightweight macOS menu bar app that shows your AI subscription limits, local token usage over time, and what that usage would have cost at API prices.
+**A tiny, fully native macOS menu bar app for your AI subscriptions. What's left of your Claude and
+Codex limits, the tokens you burned, and what they would have cost at API prices, in about 20 MB of
+RAM.**
 
-Status: **v0.2: Claude and Codex**, with an opt-in browser-cookie fallback. See [SPEC.md](SPEC.md) for the full v1 scope, [CONTEXT.md](CONTEXT.md) for vocabulary, and [ADR 0001](docs/adr/0001-read-only-credentials.md) for the read-only credential policy.
+<p align="center">
+  <img alt="Swift 6"
+       src="https://img.shields.io/badge/Swift-6-F05138?style=flat&logo=swift&logoColor=white">
+  <img alt="macOS 14 or later"
+       src="https://img.shields.io/badge/macOS-14%2B-000000?style=flat&logo=apple&logoColor=white">
+  <a href="LICENSE">
+    <img alt="License: MIT"
+         src="https://img.shields.io/badge/License-MIT-3DA639?style=flat"></a>
+  <img alt="Status: early"
+       src="https://img.shields.io/badge/status-early-F2A33A?style=flat">
+</p>
 
-## What it shows
+AppKit and SwiftUI, **zero third-party dependencies**, no Electron, no WebViews and no telemetry.
+Subar is a from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar), built
+around one idea: a status item should cost nothing while you're not looking at it.
 
-- **Menu bar:** a ring plus the percentage left of your Pinned Limit (by default the 5-hour window, or weekly if that is the only one). Click any Limit Window in the popover to pin it.
-- **Claude card:** plan (e.g. Max 5x), 5-hour and weekly windows, model-scoped weekly windows, extra usage spend.
-- **Codex card:** plan, Limit Windows with reset countdowns, credits, Banked Resets.
-- **Usage:** Today / 7d / 30d tokens and Theoretical Cost (API-equivalent, from [models.dev](https://models.dev)), a daily chart, and top models and projects.
-- **Limit Alerts:** notifications at 90% and 95% of the 5-hour and weekly windows, and when a window resets after passing 90%.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+    <img src="docs/screenshot.png" alt="Subar popover with Claude and Codex limits and 7-day usage" width="340">
+  </picture>
+</p>
 
-## How it gets data (read-only)
+## Features
 
-| What | Source |
-|---|---|
-| Claude limits | `GET api.anthropic.com/api/oauth/usage` with Claude Code's OAuth token, read from `~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item (via `/usr/bin/security`, which Claude Code itself uses, so no prompt) |
-| Claude token history | `~/.claude/projects/**/*.jsonl` (de-duplicated per `message.id`; streamed copies keep the final usage) |
-| Codex limits | `GET chatgpt.com/backend-api/wham/usage` and `/wham/rate-limit-reset-credits`, authenticated with the tokens the Codex CLI stores in `~/.codex/auth.json` |
-| Codex fallback | a short-lived `codex -s read-only -a never app-server`, JSON-RPC `account/rateLimits/read` |
-| Token history | `~/.codex/sessions/**/*.jsonl` and `~/.codex/archived_sessions` |
-| Browser fallback (opt-in, per provider) | `sessionKey` cookie → `claude.ai/api/organizations/{id}/usage`; chatgpt.com session cookie → `/api/auth/session` access token → the same `wham` endpoints. Chrome, Arc, Dia, Brave, Edge, Comet (decrypted with the browser's "Safe Storage" Keychain key, one macOS prompt) and Firefox. Safari is not supported (needs Full Disk Access). |
-| Prices | `models.dev/api.json`, at most once per day |
+- **Limits, as what's left** — the 5-hour and weekly windows for Claude and Codex, counting down
+  from 100% to 0%, with reset countdowns. Model-scoped weekly limits, Claude extra usage, Codex
+  credits and **banked resets** included.
+- **Menu bar at a glance** — a ring and a percentage for the one window you pin. Click any limit in
+  the popover to pin it.
+- **Token history** — Today, 7 days and 30 days, read from the local Claude Code and Codex logs,
+  with a daily chart and the top models and projects.
+- **Theoretical cost** — what those tokens would have cost at public API prices, from
+  [models.dev](https://models.dev).
+- **Filter by subscription** — click Claude or Codex in the chart legend to see only its tokens,
+  cost, chart and projects.
+- **Projects from git** — usage is attributed to the repository it happened in; worktrees count as
+  their main repo.
+- **Limit alerts** — a notification at 90% and 95% of a 5-hour or weekly window, and when a window
+  you nearly used up resets.
+- **History that outlives the logs** — daily totals live in a small local database, so they survive
+  Claude Code deleting transcripts after 30 days.
+- **Browser fallback** — optional, per provider: if a CLI login is missing or expired, read your
+  signed-in browser session instead.
 
-Subar never refreshes or writes any token, CLI or browser. If a login expires, the card turns **Stale** and asks you to run `claude` / `codex` once (or reload the site in your browser).
+## Safe by design
 
-### Codex log accounting
+Subar only ever **reads**. It uses the logins your official CLIs already store and calls the same
+read-only endpoints they call for `/usage` and `/status`:
 
-Each `token_count` event carries that response's usage (`last_token_usage`). Two kinds of events are skipped:
+| Provider | Limits | Token history |
+| -------- | ------ | ------------- |
+| Claude   | Claude Code's OAuth login (`~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item) → `api.anthropic.com/api/oauth/usage` | `~/.claude/projects/**/*.jsonl` |
+| Codex    | `~/.codex/auth.json` → `chatgpt.com/backend-api/wham/usage`, falling back to a short-lived `codex app-server` in read-only mode | `~/.codex/sessions`, `~/.codex/archived_sessions` |
 
-- **Repeats:** the same cumulative total logged twice.
-- **Fork replay:** a forked session starts by copying its parent's history, including the parent's token events. Those copied events carry the fork's own timestamp, so events stamped at or before the fork's `session_meta` time are not counted again.
+It **never refreshes or rewrites a token**, never sends a prompt, and never redeems a banked reset.
+When a login expires the card turns **stale** and tells you to run `claude` or `codex` once; the CLI
+renews its own login. Why this matters and what it costs:
+[ADR 0001](docs/adr/0001-read-only-credentials.md).
 
-On the maintainer's 100k-file, 16 GB history this matches an independent recount exactly.
+The only other network call is one unauthenticated GET to `models.dev/api.json`, at most once a day.
 
 ## Performance
 
-Measured on an Apple Silicon Mac with that 16 GB Codex history:
+Measured on an Apple silicon Mac with 16 GB of Codex logs (100k files) and 8 GB of Claude
+transcripts:
 
 | | |
-|---|---|
-| Idle CPU | 0.0% (one 5-minute poll timer, no animations) |
-| Idle footprint | ~20 MB |
-| Incremental ingest | FSEvents tells Subar which files changed; only appended bytes are read |
-| First launch import | ~80 s in a background child process, which exits when done |
+| --- | --- |
+| Idle CPU | 0.0% — one 5-minute poll, no animations, no timers faster than that |
+| Idle memory | ~20 MB footprint |
+| Keeping up | FSEvents reports which log files changed; only appended bytes are read |
+| First launch | the whole history imports in about two minutes, in a child process that exits when done |
 
-## Build
+## Install
+
+Not packaged yet. Homebrew, a notarized build and auto-updates are on the way. Until then, build
+it yourself:
 
 ```sh
-swift build                       # debug
-swift test                        # unit tests
-./Scripts/build-app.sh            # universal build/Subar.app, ad-hoc signed
+git clone https://github.com/ThiloReintjes/subar.git
+cd subar
+./Scripts/build-app.sh
 open build/Subar.app
 ```
 
-To sign for distribution, set `SIGN_IDENTITY="Developer ID Application: …"`. Notarization, Sparkle and the Homebrew cask are not set up yet.
+Subar starts at login by default. On first launch it finds the CLIs you're signed in to and turns
+those providers on. There's nothing to configure.
+
+## Permissions
+
+- **Notifications** — asked once, for limit alerts. Turn alerts off in Settings any time.
+- **Keychain** — Claude's login is read through `/usr/bin/security`, the tool Claude Code itself
+  uses to store it, so there is no prompt. The **browser fallback** is off by default: turning it on
+  for a Chromium browser (Chrome, Arc, Dia, Brave, Edge, Comet) asks once for that browser's
+  "Safe Storage" key. Firefox needs nothing; Safari isn't supported.
+
+## Building from source
+
+Swift 6 toolchain (Xcode 16 or newer), macOS 14+. Plain SwiftPM, no Xcode project.
+
+```sh
+swift build                  # debug build
+swift test                   # unit tests
+./Scripts/build-app.sh       # universal, ad-hoc signed build/Subar.app
+```
 
 Developer tools:
 
 ```sh
-swift run subar-cli limits [--browser]  # fetch limits
-swift run subar-cli cookies       # which browser holds the session cookies
-swift run subar-cli web           # fetch limits via browser cookies only
-swift run subar-cli ingest [db]   # ingest Claude + Codex logs
-swift run subar-cli usage [db]    # print usage summaries
-.build/debug/Subar --snapshot out.png   # render the popover to PNG (light + dark)
+swift run subar-cli limits [--browser]   # fetch limits from the terminal
+swift run subar-cli cookies              # which browser holds session cookies
+swift run subar-cli ingest [db]          # ingest Claude + Codex logs
+swift run subar-cli usage [db]           # print usage summaries
+.build/debug/Subar --snapshot out.png    # render the popover to PNG, light and dark
 ```
+
+[SPEC.md](SPEC.md) is the v1 scope, [CONTEXT.md](CONTEXT.md) the vocabulary (Limit Window, Banked
+Reset, Theoretical Cost, …), and [docs/adr/](docs/adr) the decisions behind them.
+
+## Contributing
+
+> [!IMPORTANT]
+> **Open an issue before you write code.** Get the bug or feature agreed first. Subar stays small on
+> purpose: "CodexBar has it" is not a reason on its own, and new providers are added one at a time,
+> only when someone actually uses them.
+
+Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first. It covers the performance budget every change is
+held to and the read-only rule for credentials. Security issues go through
+[SECURITY.md](SECURITY.md), not the issue tracker.
 
 ## License
 
-MIT
+[MIT](LICENSE)
