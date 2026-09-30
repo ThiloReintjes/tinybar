@@ -48,6 +48,9 @@ public struct LimitWindow: Codable, Sendable, Hashable, Identifiable {
     }
 
     public var kind: WindowKind { WindowKind(durationSeconds: durationSeconds) }
+
+    /// What the UI shows: the share of the window still available, 100 → 0.
+    public var remainingPercent: Double { min(max(100 - usedPercent, 0), 100) }
 }
 
 extension WindowKind {

@@ -21,7 +21,7 @@ final class Notifier {
         let content = UNMutableNotificationContent()
         switch alert {
         case let .threshold(provider, window, percent, resetsAt):
-            content.title = "\(provider.displayName) \(window) limit at \(percent)%"
+            content.title = "\(provider.displayName) \(window): \(100 - percent)% left"
             if let resetsAt {
                 content.body = "Resets in \(Format.countdown(to: resetsAt))."
             }

@@ -115,7 +115,7 @@ private struct WindowRow: View {
                         .foregroundStyle(pinned ? Color.accentColor : Color.secondary.opacity(0.5))
                     Text(window.title).font(.subheadline)
                     Spacer()
-                    Text("\(Int(window.usedPercent.rounded()))%")
+                    Text("\(Int(window.remainingPercent.rounded()))% left")
                         .font(.subheadline.monospacedDigit())
                     if let resetsAt = window.resetsAt {
                         Text("· \(Format.countdown(to: resetsAt))")
@@ -124,7 +124,7 @@ private struct WindowRow: View {
                             .help("Resets \(resetsAt.formatted(date: .abbreviated, time: .shortened))")
                     }
                 }
-                UsageBar(fraction: window.usedPercent / 100)
+                RemainingBar(fraction: window.remainingPercent / 100)
             }
             .contentShape(Rectangle())
         }
@@ -134,7 +134,8 @@ private struct WindowRow: View {
     }
 }
 
-private struct UsageBar: View {
+/// Fills with what is left: full at the start of a window, empty when the limit is reached.
+private struct RemainingBar: View {
     let fraction: Double
 
     var body: some View {
@@ -149,8 +150,8 @@ private struct UsageBar: View {
 
     private var color: Color {
         switch fraction {
-        case 0.95...: .red
-        case 0.8...: .orange
+        case ..<0.05: .red
+        case ..<0.2: .orange
         default: .accentColor
         }
     }
