@@ -1,343 +1,620 @@
-import Charts
 import SubarCore
 import SwiftUI
 
+/// Where the popover is. Every page is one click from every other through the tab bar.
+enum Page: Hashable {
+    case overview
+    case provider(ProviderID)
+    case settings
+}
+
 struct PopoverView: View {
     let model: AppModel
-    @State private var showSettings = false
+    @State private var page: Page
+
+    init(model: AppModel, page: Page = .overview) {
+        self.model = model
+        _page = State(initialValue: page)
+    }
+    /// +1 when moving right along the tab bar, -1 when moving left, so pages enter and leave
+    /// along the same path.
+    @State private var direction: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
-            if showSettings {
-                SettingsView(model: model, done: { showSettings = false })
+            if page == .settings {
+                SettingsHeader { go(.overview) }
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if model.enabledProviders.isEmpty {
-                            Text("No subscriptions detected. Sign in with `claude` or `codex login`, or turn on the browser fallback in Settings.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(model.enabledProviders, id: \.self) { id in
-                            ProviderCard(model: model, id: id)
-                        }
-                        UsageSection(model: model)
-                    }
-                    .padding(14)
-                }
-                .frame(maxHeight: 620)
-                .fixedSize(horizontal: false, vertical: true)
-                Divider()
-                Footer(model: model, openSettings: { showSettings = true })
+                TabBar(model: model, page: page, select: go)
             }
+            ScrollView {
+                content
+                    .id(page)
+                    .transition(transition)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
+                    .padding(.bottom, 12)
+            }
+            .scrollIndicators(.never)
+            .frame(maxHeight: 600)
+            .fixedSize(horizontal: false, vertical: true)
+            .clipped()
+            Footer(model: model, page: page, select: go)
         }
-        .frame(width: 340)
+        .frame(width: 344)
+        .background(TabShortcuts(model: model, select: go))
+        .onChange(of: model.enabledProviders) { _, enabled in
+            if case let .provider(id) = page, !enabled.contains(id) { page = .overview }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch page {
+        case .overview: OverviewPage(model: model, open: { go(.provider($0)) })
+        case let .provider(id): ProviderPage(model: model, id: id)
+        case .settings: SettingsPage(model: model)
+        }
+    }
+
+    private var transition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(x: 18 * direction)),
+            removal: .opacity.combined(with: .offset(x: -18 * direction)))
+    }
+
+    private func go(_ next: Page) {
+        guard next != page else { return }
+        direction = order(next) >= order(page) ? 1 : -1
+        withAnimation(reduceMotion ? Motion.reduced : Motion.page) { page = next }
+    }
+
+    private func order(_ p: Page) -> Int {
+        switch p {
+        case .overview: 0
+        case let .provider(id): 1 + (model.enabledProviders.firstIndex(of: id) ?? 0)
+        case .settings: 100
+        }
     }
 }
 
-// MARK: Provider card
+// MARK: Tab bar
 
-private struct ProviderCard: View {
+/// A single glass capsule: Overview plus one tab per subscription. The selection is a lens that
+/// slides between tabs.
+private struct TabBar: View {
+    let model: AppModel
+    let page: Page
+    let select: (Page) -> Void
+    @Namespace private var lens
+
+    var body: some View {
+        HStack(spacing: 2) {
+            tab(.overview) {
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 18)
+                    .accessibilityLabel("Overview")
+            }
+            ForEach(model.enabledProviders, id: \.self) { id in
+                tab(.provider(id)) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(id.color)
+                            .frame(width: 6, height: 6)
+                            .opacity(model.providers[id]?.isStale == true ? 0.35 : 1)
+                        Text(id.displayName)
+                    }
+                }
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(.primary.opacity(0.05)))
+        .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 0.5))
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+    }
+
+    private func tab(_ target: Page, @ViewBuilder label: () -> some View) -> some View {
+        let selected = page == target
+        return Button { select(target) } label: {
+            label()
+                .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                .lineLimit(1)
+                .foregroundStyle(selected ? .primary : .secondary)
+                .padding(.horizontal, 9)
+                .frame(maxWidth: target == .overview ? nil : .infinity, minHeight: 26)
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(.background.opacity(0.9))
+                            .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+                            .overlay(Capsule().strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
+                            .matchedGeometryEffect(id: "lens", in: lens)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressScale())
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Instant feedback on press, before the click commits.
+private struct PressScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 1), value: configuration.isPressed)
+    }
+}
+
+/// 0 for Overview, 1–4 for the subscriptions, and ← → to step through them.
+private struct TabShortcuts: View {
+    let model: AppModel
+    let select: (Page) -> Void
+
+    var body: some View {
+        let pages = [Page.overview] + model.enabledProviders.map { Page.provider($0) }
+        ZStack {
+            ForEach(Array(pages.enumerated()), id: \.offset) { i, page in
+                Button("") { select(page) }
+                    .keyboardShortcut(KeyEquivalent(Character(String(i))), modifiers: [])
+            }
+        }
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct SettingsHeader: View {
+    let back: () -> Void
+
+    var body: some View {
+        HStack {
+            Button(action: back) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressScale())
+            .background(Circle().fill(.primary.opacity(0.06)))
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Back")
+            Spacer()
+            Text("Settings").font(.system(size: 13, weight: .semibold))
+            Spacer()
+            Color.clear.frame(width: 26, height: 26)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+    }
+}
+
+// MARK: Overview
+
+private struct OverviewPage: View {
+    let model: AppModel
+    let open: (ProviderID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if model.enabledProviders.isEmpty {
+                EmptyState()
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(model.enabledProviders, id: \.self) { id in
+                        Button { open(id) } label: { OverviewRow(model: model, id: id) }
+                            .buttonStyle(RowButtonStyle())
+                        if id != model.enabledProviders.last {
+                            Divider().padding(.leading, 64).padding(.trailing, 12).opacity(0.5)
+                        }
+                    }
+                }
+                .platter(cornerRadius: 16)
+            }
+            UsagePanel(model: model, summaries: model.usage, color: .accentColor)
+        }
+    }
+}
+
+/// One subscription at a glance: its rings, the limit closest to running out and when that
+/// resets. The whole row opens the detail page.
+private struct OverviewRow: View {
     let model: AppModel
     let id: ProviderID
 
     var body: some View {
         let state = model.providers[id]
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(id.displayName).font(.headline)
-                if let plan = state?.snapshot?.plan {
-                    Text(plan).font(.caption).foregroundStyle(.secondary)
-                }
-                if let source = state?.snapshot?.source, source != .cli {
-                    Image(systemName: source == .browser ? "globe" : "terminal")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .help(source == .browser ? "Read from your browser session" : "Read via the \(id.cliCommand ?? id.displayName) CLI")
-                }
-                Spacer()
-                if let credits = state?.snapshot?.credits, credits.hasCredits, let balance = credits.balance {
-                    Text("\(balance, format: .number.precision(.fractionLength(0))) credits")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
+        let snapshot = state?.snapshot
+        let binding = snapshot?.bindingWindow
+        let stale = state?.isStale ?? false
 
-            if let state, state.isStale {
-                StaleLine(id: id, state: state)
-            }
-
-            if let windows = state?.snapshot?.windows, !windows.isEmpty {
-                ForEach(windows) { window in
-                    WindowRow(window: window, pinned: model.isPinned(id, window), dimmed: state?.isStale ?? false) {
-                        model.pin(id, window)
+        HStack(spacing: 12) {
+            LimitRings(windows: snapshot?.ringWindows ?? [], color: id.color, lineWidth: 4, gap: 1.5, dimmed: stale)
+                .frame(width: 38, height: 38)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(id.displayName).font(.system(size: 14, weight: .semibold))
+                    if let plan = snapshot?.plan {
+                        Text(plan).font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    if model.pinned?.0 == id {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityLabel("Shown in the menu bar")
                     }
                 }
-            } else if state?.snapshot == nil, state?.error == nil {
+                subtitle(state: state, binding: binding)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let binding {
+                PercentText(percent: binding.remainingPercent, size: 20)
+                    .opacity(stale ? 0.5 : 1)
+            } else if state?.error == nil {
                 ProgressView().controlSize(.small)
             }
-
-            if let banked = state?.snapshot?.bankedResets?.filter(\.isAvailable), !banked.isEmpty {
-                BankedResetsRow(resets: banked)
-            }
-
-            if let extra = state?.snapshot?.extraUsage {
-                HStack {
-                    Image(systemName: "creditcard")
-                    Text("Extra usage")
-                    Spacer()
-                    Text(extra.formatted).foregroundStyle(.secondary)
-                }
-                .font(.caption)
-            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.quaternary)
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func subtitle(state: ProviderState?, binding: LimitWindow?) -> some View {
+        if let error = state?.error {
+            Label(StaleText.short(id: id, error: error), systemImage: "exclamationmark.triangle.fill")
+                .labelStyle(TightLabel())
+                .foregroundStyle(.orange)
+        } else if let binding {
+            Text(ResetText.short(binding)).foregroundStyle(.secondary)
+        } else if state?.snapshot != nil {
+            Text("No limits reported").foregroundStyle(.secondary)
+        } else {
+            Text("Checking…").foregroundStyle(.secondary)
+        }
     }
 }
 
-private struct StaleLine: View {
+private struct TightLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.font(.system(size: 10))
+            configuration.title
+        }
+    }
+}
+
+private struct EmptyState: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            LimitRings(windows: [], color: .secondary, lineWidth: 5)
+                .frame(width: 44, height: 44)
+            Text("No subscriptions found").font(.system(size: 13, weight: .semibold))
+            Text("Sign in with `claude`, `codex` or `agy`, or open Cursor. Subar picks them up on its next check.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+        .padding(.horizontal, 16)
+        .platter(cornerRadius: 16)
+    }
+}
+
+enum StaleText {
+    static func short(id: ProviderID, error: ProviderError) -> String {
+        switch error {
+        case .loginExpired, .notConfigured: "Login expired"
+        case .rateLimited: "Paused, provider asked to slow down"
+        case .network: "Offline"
+        case .unexpected: "Couldn't read limits"
+        }
+    }
+
+    static func long(id: ProviderID, error: ProviderError) -> String {
+        switch error {
+        case .loginExpired, .notConfigured:
+            "Login expired. To refresh it, \(id.loginHint.replacingOccurrences(of: " once to refresh", with: " once"))."
+        case .rateLimited: "\(id.displayName) asked Subar to slow down. It tries again on the next check."
+        case let .network(message): "Couldn't reach \(id.displayName): \(message)"
+        case let .unexpected(message): message
+        }
+    }
+}
+
+// MARK: Provider detail
+
+private struct ProviderPage: View {
+    let model: AppModel
     let id: ProviderID
-    let state: ProviderState
 
     var body: some View {
-        let since = state.snapshot?.fetchedAt
-        let hint: String = switch state.error {
-        case .loginExpired, .notConfigured: id.loginHint
-        case .rateLimited: "provider asked to slow down"
-        default: state.error?.localizedDescription ?? ""
+        let state = model.providers[id]
+        let snapshot = state?.snapshot
+        let stale = state?.isStale ?? false
+
+        VStack(alignment: .leading, spacing: 14) {
+            Hero(id: id, state: state)
+
+            if let error = state?.error {
+                StaleBanner(id: id, error: error, since: snapshot?.fetchedAt)
+            }
+
+            if let windows = snapshot?.windows, !windows.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(windows) { window in
+                        WindowRow(
+                            window: window, color: id.color,
+                            pinned: model.isPinned(id, window), dimmed: stale
+                        ) { model.pin(id, window) }
+                        if window.id != windows.last?.id {
+                            Divider().padding(.horizontal, 14).opacity(0.5)
+                        }
+                    }
+                }
+                .platter(cornerRadius: 16)
+            }
+
+            if let snapshot, snapshot.hasExtras {
+                Extras(snapshot: snapshot)
+            }
+
+            if let summaries = model.providerUsage[id] {
+                UsagePanel(model: model, summaries: summaries, color: id.color, showBreakdown: true)
+            }
         }
-        Label {
-            Text(since.map { "Stale since \($0.formatted(date: .omitted, time: .shortened)) — \(hint)" } ?? hint.prefix(1).uppercased() + hint.dropFirst())
-        } icon: {
-            Image(systemName: "exclamationmark.triangle.fill")
-        }
-        .font(.caption)
-        .foregroundStyle(.orange)
     }
 }
 
+/// The detail page's one large element: the rings, with the tightest limit set beside them.
+private struct Hero: View {
+    let id: ProviderID
+    let state: ProviderState?
+
+    var body: some View {
+        let snapshot = state?.snapshot
+        let binding = snapshot?.bindingWindow
+        HStack(spacing: 16) {
+            ZStack {
+                LimitRings(
+                    windows: snapshot?.ringWindows ?? [], color: id.color,
+                    lineWidth: 9, gap: 3, dimmed: state?.isStale ?? false)
+                if let binding {
+                    PercentText(percent: binding.remainingPercent, size: 17)
+                }
+            }
+            .frame(width: 92, height: 92)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(id.displayName)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .tracking(-0.4)
+                if let plan = snapshot?.plan {
+                    Text(plan).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                }
+                if let snapshot {
+                    Text(caption(snapshot))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+    }
+
+    private func caption(_ snapshot: ProviderSnapshot) -> String {
+        let when = snapshot.fetchedAt.formatted(date: .omitted, time: .shortened)
+        let ringNote = snapshot.ringWindows.count > 1
+            ? "Outer ring \(snapshot.ringWindows[0].title.lowercased()), inner \(snapshot.ringWindows[1].title.lowercased()). "
+            : ""
+        return "\(ringNote)Read at \(when) \(id.sourceDescription(snapshot.source))."
+    }
+}
+
+private struct StaleBanner: View {
+    let id: ProviderID
+    let error: ProviderError
+    let since: Date?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(StaleText.long(id: id, error: error))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let since {
+                    Text("Showing the numbers from \(since.formatted(date: .omitted, time: .shortened)).")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// One Limit Window. Clicking it pins it to the menu bar.
 private struct WindowRow: View {
     let window: LimitWindow
+    let color: Color
     let pinned: Bool
     let dimmed: Bool
     let onPin: () -> Void
 
     var body: some View {
         Button(action: onPin) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(window.title).font(.system(size: 13, weight: .medium))
                     Image(systemName: pinned ? "pin.fill" : "pin")
-                        .font(.caption2)
-                        .foregroundStyle(pinned ? Color.accentColor : Color.secondary.opacity(0.5))
-                    Text(window.title).font(.subheadline)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(pinned ? AnyShapeStyle(color) : AnyShapeStyle(.quaternary))
                     Spacer()
-                    Text("\(Int(window.remainingPercent.rounded()))% left")
-                        .font(.subheadline.monospacedDigit())
-                    if let resetsAt = window.resetsAt {
-                        Text("· \(Format.countdown(to: resetsAt))")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .help("Resets \(resetsAt.formatted(date: .abbreviated, time: .shortened))")
-                    }
+                    PercentText(percent: window.remainingPercent, size: 17)
                 }
-                RemainingBar(fraction: window.remainingPercent / 100)
+                RemainingBar(fraction: window.remainingPercent / 100, color: color)
+                if let resetsAt = window.resetsAt {
+                    Text(ResetText.long(resetsAt))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .opacity(dimmed ? 0.5 : 1)
-        .help(pinned ? "Shown in the menu bar" : "Show in the menu bar")
+        .buttonStyle(RowButtonStyle())
+        .opacity(dimmed ? 0.55 : 1)
+        .help(pinned ? "Shown in the menu bar" : "Click to show in the menu bar")
+        .accessibilityHint(pinned ? "Shown in the menu bar" : "Shows this limit in the menu bar")
     }
 }
 
-/// Fills with what is left: full at the start of a window, empty when the limit is reached.
-private struct RemainingBar: View {
-    let fraction: Double
+extension ProviderSnapshot {
+    var hasExtras: Bool {
+        extraUsage != nil
+            || credits?.hasCredits == true
+            || bankedResets?.contains(where: \.isAvailable) == true
+    }
+}
+
+/// Everything beyond the windows: credits, banked resets, pay-as-you-go spend.
+private struct Extras: View {
+    let snapshot: ProviderSnapshot
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule().fill(color).frame(width: max(4, geo.size.width * min(max(fraction, 0), 1)))
+        VStack(spacing: 0) {
+            if let credits = snapshot.credits, credits.hasCredits {
+                line("Credits", icon: "circle.hexagongrid", value: credits.unlimited
+                    ? "Unlimited"
+                    : credits.balance.map { $0.formatted(.number.precision(.fractionLength(0))) } ?? "—")
+            }
+            if let banked = snapshot.bankedResets?.filter(\.isAvailable), !banked.isEmpty {
+                let next = banked.compactMap(\.expiresAt).min()
+                line(
+                    "\(banked.count) banked reset\(banked.count == 1 ? "" : "s")",
+                    icon: "arrow.counterclockwise",
+                    value: next.map { "next expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")
+            }
+            if let extra = snapshot.extraUsage {
+                line(snapshot.provider == .cursor ? "On-demand spend" : "Extra usage", icon: "creditcard", value: extra.formatted)
             }
         }
-        .frame(height: 6)
+        .padding(.vertical, 4)
+        .platter(cornerRadius: 16)
     }
 
-    private var color: Color {
-        switch fraction {
-        case ..<0.05: .red
-        case ..<0.2: .orange
-        default: .accentColor
-        }
-    }
-}
-
-private struct BankedResetsRow: View {
-    let resets: [BankedReset]
-
-    var body: some View {
-        let nextExpiry = resets.compactMap(\.expiresAt).min()
-        HStack {
-            Image(systemName: "arrow.counterclockwise.circle")
-            Text("\(resets.count) banked reset\(resets.count == 1 ? "" : "s")")
+    private func line(_ title: String, icon: String, value: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(snapshot.provider.color)
+                .frame(width: 16)
+            Text(title)
             Spacer()
-            if let nextExpiry {
-                Text("next expires \(nextExpiry.formatted(.dateTime.month(.abbreviated).day()))")
-                    .foregroundStyle(.secondary)
-            }
+            Text(value).foregroundStyle(.secondary).monospacedDigit()
         }
-        .font(.caption)
-        .help(resets.map { "\($0.title ?? "Reset") — expires \($0.expiresAt?.formatted(date: .abbreviated, time: .omitted) ?? "never")" }.joined(separator: "\n"))
+        .font(.system(size: 12))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
     }
 }
 
-// MARK: Usage section
+// MARK: Usage
 
-private struct UsageSection: View {
+/// Tokens and Theoretical Cost over a range. The overview shows all subscriptions stacked; a
+/// detail page shows one, plus its top models and projects.
+private struct UsagePanel: View {
     let model: AppModel
-    @AppStorage("usageRange") private var rangeRaw = UsageRange.today.rawValue
+    let summaries: [UsageRange: UsageSummary]
+    let color: Color
+    var showBreakdown = false
+    @AppStorage("usageRange") private var rangeRaw = UsageRange.week.rawValue
 
     var body: some View {
-        let range = UsageRange(rawValue: rangeRaw) ?? .today
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Usage").font(.headline)
+        let range = UsageRange(rawValue: rangeRaw) ?? .week
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                Text("Usage").font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Picker("", selection: $rangeRaw) {
+                Picker("Range", selection: $rangeRaw) {
                     ForEach(UsageRange.allCases) { Text($0.label).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 150)
+                .controlSize(.small)
+                .frame(width: 140)
             }
+            .padding(.horizontal, 4)
 
             if let progress = model.importProgress {
                 ProgressView(value: progress) {
-                    Text("Importing history…").font(.caption).foregroundStyle(.secondary)
+                    Text("Reading your history…").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 .controlSize(.small)
+                .padding(.horizontal, 4)
             }
 
-            if let summary = model.usage[range] {
-                SummaryView(summary: summary, model: model)
-            } else if model.importProgress == nil {
-                Text("No local usage yet.").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private struct SummaryView: View {
-    let summary: UsageSummary
-    let model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(Format.tokens(summary.totalTokens)).font(.title2.monospacedDigit().weight(.semibold))
-                Text("tokens").foregroundStyle(.secondary)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text(Format.cost(summary.cost)).font(.title3.monospacedDigit())
-                    Text(summary.range == .today ? "API-equivalent · provisional" : "API-equivalent")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-
-            if summary.range != .today, !summary.days.isEmpty {
-                Chart(summary.days) { bar in
-                    BarMark(
-                        x: .value("Day", DayKeyDate.date(bar.day), unit: .day),
-                        y: .value("Tokens", bar.tokens))
-                        .foregroundStyle(by: .value("Provider", bar.provider.displayName))
-                }
-                .chartForegroundStyleScale(domain: ProviderID.allCases.map(\.displayName), range: ProviderID.allCases.map(\.color))
-                .chartLegend(.hidden)
-                .chartYAxis {
-                    AxisMarks(position: .trailing) { value in
-                        AxisGridLine()
-                        AxisValueLabel { Text(Format.tokens(value.as(Int64.self) ?? 0)) }
-                    }
-                }
-                .frame(height: 90)
-            }
-
-            ProviderFilter(model: model)
-
-            BreakdownList(title: "Models", lines: summary.models)
-            BreakdownList(title: "Projects", lines: PopoverSnapshotOptions.redactProjects
-                ? summary.projects.enumerated().map { i, l in
-                    UsageSummary.Line(name: ["acme-web", "billing-service", "No project", "docs-site", "ml-pipeline"][i % 5], tokens: l.tokens, cost: l.cost)
-                } : summary.projects)
-        }
-    }
-}
-
-/// The chart legend, doubling as the filter: click a Provider to show only it, click it again
-/// (or "All") to show everything.
-private struct ProviderFilter: View {
-    let model: AppModel
-
-    var body: some View {
-        if model.usageProviders.count > 1 || model.usageFilter != nil {
-            HStack(spacing: 6) {
-                chip("All", color: nil, selected: model.usageFilter == nil) { model.usageFilter = nil }
-                ForEach(model.usageProviders, id: \.self) { id in
-                    chip(id.displayName, color: id.color, selected: model.usageFilter == id) {
-                        model.usageFilter = model.usageFilter == id ? nil : id
-                    }
-                }
-                Spacer()
-            }
-        }
-    }
-
-    private func chip(_ title: String, color: Color?, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if let color { Circle().fill(color).frame(width: 7, height: 7) }
-                Text(title)
-            }
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
-            .overlay(Capsule().strokeBorder(.quaternary, lineWidth: selected ? 0 : 1))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(selected ? .primary : .secondary)
-    }
-}
-
-private struct BreakdownList: View {
-    let title: String
-    let lines: [UsageSummary.Line]
-
-    var body: some View {
-        if !lines.isEmpty {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(lines.prefix(5)) { line in
-                    HStack {
-                        Text(line.name).lineLimit(1).truncationMode(.middle)
+            if let summary = summaries[range] {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(Format.tokens(summary.totalTokens))
+                                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                                .tracking(-0.5)
+                                .monospacedDigit()
+                            Text("tokens").font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
                         Spacer()
-                        Text(Format.tokens(line.tokens)).foregroundStyle(.secondary)
-                        Text(Format.cost(line.cost)).frame(width: 64, alignment: .trailing)
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(Format.cost(summary.cost))
+                                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                                .tracking(-0.5)
+                                .monospacedDigit()
+                            Text(range == .today ? "at API prices, so far today" : "at API prices")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
                     }
-                    .font(.caption.monospacedDigit())
+                    if range != .today, !summary.days.isEmpty {
+                        UsageBars(days: summary.days, range: range)
+                            .frame(height: showBreakdown ? 90 : 70)
+                    }
+                    if showBreakdown {
+                        Breakdown(title: "Models", lines: summary.models, total: summary.totalTokens, color: color)
+                        Breakdown(
+                            title: "Projects", lines: PopoverSnapshotOptions.projects(summary.projects),
+                            total: summary.totalTokens, color: color)
+                    }
                 }
+                .padding(14)
+                .platter(cornerRadius: 16)
+            } else if model.importProgress == nil {
+                Text("Nothing used yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
             }
         }
-    }
-}
-
-enum DayKeyDate {
-    static func date(_ key: String) -> Date {
-        let parts = key.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return Date() }
-        return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) ?? Date()
     }
 }
 
@@ -345,117 +622,109 @@ enum DayKeyDate {
 
 private struct Footer: View {
     let model: AppModel
-    let openSettings: () -> Void
+    let page: Page
+    let select: (Page) -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let updated = model.lastUpdated {
-                Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            Group {
+                if model.isRefreshing {
+                    Text("Checking…")
+                } else if let updated = model.lastUpdated {
+                    Text("Checked \(updated.formatted(date: .omitted, time: .shortened))")
+                }
             }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 6)
             Spacer()
-            Button {
+            FooterButton(icon: "arrow.clockwise", label: "Check now") {
                 Task { await model.refresh(force: false, throttle: AppModel.openThrottle) }
-            } label: {
-                Image(systemName: "arrow.clockwise")
             }
             .disabled(model.isRefreshing)
-            .help("Refresh")
-            Button(action: openSettings) { Image(systemName: "gearshape") }
-                .help("Settings")
-            Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }
-                .help("Quit Subar")
+            .keyboardShortcut("r")
+            FooterButton(icon: "gearshape", label: "Settings") {
+                select(page == .settings ? .overview : .settings)
+            }
+            .keyboardShortcut(",")
+            FooterButton(icon: "power", label: "Quit Subar") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+}
+
+private struct FooterButton: View {
+    let icon: String
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 26, height: 26)
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressScale())
+        .foregroundStyle(.secondary)
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
 // MARK: Settings
 
-private struct SettingsView: View {
+private struct SettingsPage: View {
     let model: AppModel
-    let done: () -> Void
 
     var body: some View {
         @Bindable var settings = model.settings
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Button(action: done) { Label("Back", systemImage: "chevron.left") }
-                    .buttonStyle(.borderless)
-                Spacer()
-                Text("Settings").font(.headline)
-                Spacer()
-            }
-            Form {
-                Section("Providers") {
-                    ForEach(ProviderID.allCases, id: \.self) { id in
-                        Toggle(id.displayName, isOn: Binding(
-                            get: { model.providers[id] != nil },
-                            set: { model.setEnabled(id, $0) }))
+        Form {
+            Section {
+                ForEach(ProviderID.allCases, id: \.self) { id in
+                    Toggle(isOn: Binding(
+                        get: { model.providers[id] != nil },
+                        set: { model.setEnabled(id, $0) }))
+                    {
+                        HStack(spacing: 8) {
+                            Circle().fill(id.color).frame(width: 7, height: 7)
+                            Text(id.displayName)
+                        }
                     }
                 }
-                Section {
-                    let _ = settings.browserFallbackRevision
-                    ForEach(ProviderID.allCases.filter(\.hasBrowserFallback), id: \.self) { id in
-                        Toggle("\(id.displayName) (\(id.webDomain))", isOn: Binding(
-                            get: { settings.isBrowserFallbackEnabled(id) },
-                            set: {
-                                settings.setBrowserFallback(id, $0)
-                                if $0 { Task { await model.refresh(force: true) } }
-                            }))
-                    }
-                } header: {
-                    Text("Browser fallback")
-                } footer: {
-                    Text("If a CLI login is missing or expired, read your signed-in browser session instead. Chromium browsers ask once for Keychain access.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Section("General") {
-                    Toggle("Launch at login", isOn: $settings.launchAtLogin)
-                    Toggle("Limit notifications", isOn: $settings.notificationsEnabled)
-                    Toggle("Hide percentage in menu bar", isOn: $settings.hidePercentage)
-                }
+            } header: {
+                Text("Subscriptions")
             }
-            .formStyle(.grouped)
-            .scrollDisabled(true)
-            .fixedSize(horizontal: false, vertical: true)
+            Section {
+                let _ = settings.browserFallbackRevision
+                ForEach(ProviderID.allCases.filter(\.hasBrowserFallback), id: \.self) { id in
+                    Toggle("\(id.displayName) via \(id.webDomain)", isOn: Binding(
+                        get: { settings.isBrowserFallbackEnabled(id) },
+                        set: {
+                            settings.setBrowserFallback(id, $0)
+                            if $0 { Task { await model.refresh(force: true) } }
+                        }))
+                }
+            } header: {
+                Text("Browser fallback")
+            } footer: {
+                Text("When a CLI login is missing or expired, read your signed-in browser session instead. Chromium browsers ask once for Keychain access.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Section("General") {
+                Toggle("Launch at login", isOn: $settings.launchAtLogin)
+                Toggle("Notify when a limit is nearly used up", isOn: $settings.notificationsEnabled)
+                Toggle("Show percentage in menu bar", isOn: Binding(
+                    get: { !settings.hidePercentage }, set: { settings.hidePercentage = !$0 }))
+            }
         }
-        .padding(14)
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .scrollContentBackground(.hidden)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, -14)
     }
-}
-
-extension ProviderID {
-    var webDomain: String {
-        switch self {
-        case .claude: "claude.ai"
-        case .codex: "chatgpt.com"
-        case .gemini: "antigravity.google"
-        case .cursor: "cursor.com"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .claude: Color(red: 0.85, green: 0.47, blue: 0.34)
-        case .codex: .accentColor
-        case .gemini: Color(red: 0.26, green: 0.52, blue: 0.96)
-        case .cursor: .primary
-        }
-    }
-}
-
-extension ExtraUsageSpend {
-    var formatted: String {
-        let used = used.formatted(.currency(code: currency))
-        guard let limit else { return used }
-        return "\(used) of \(limit.formatted(.currency(code: currency)))"
-    }
-}
-
-/// Developer snapshot switches (`--snapshot … --redact-projects` for public screenshots).
-enum PopoverSnapshotOptions {
-    static let redactProjects = CommandLine.arguments.contains("--redact-projects")
 }
