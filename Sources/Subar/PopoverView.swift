@@ -220,7 +220,7 @@ private struct UsageSection: View {
             }
 
             if let summary = model.usage[range] {
-                SummaryView(summary: summary)
+                SummaryView(summary: summary, model: model)
             } else if model.importProgress == nil {
                 Text("No local usage yet.").font(.caption).foregroundStyle(.secondary)
             }
@@ -230,6 +230,7 @@ private struct UsageSection: View {
 
 private struct SummaryView: View {
     let summary: UsageSummary
+    let model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -252,7 +253,7 @@ private struct SummaryView: View {
                         .foregroundStyle(by: .value("Provider", bar.provider.displayName))
                 }
                 .chartForegroundStyleScale(domain: ProviderID.allCases.map(\.displayName), range: ProviderID.allCases.map(\.color))
-                .chartLegend(summary.days.contains { $0.provider != summary.days.first?.provider } ? .visible : .hidden)
+                .chartLegend(.hidden)
                 .chartYAxis {
                     AxisMarks(position: .trailing) { value in
                         AxisGridLine()
@@ -262,9 +263,48 @@ private struct SummaryView: View {
                 .frame(height: 90)
             }
 
+            ProviderFilter(model: model)
+
             BreakdownList(title: "Models", lines: summary.models)
             BreakdownList(title: "Projects", lines: summary.projects)
         }
+    }
+}
+
+/// The chart legend, doubling as the filter: click a Provider to show only it, click it again
+/// (or "All") to show everything.
+private struct ProviderFilter: View {
+    let model: AppModel
+
+    var body: some View {
+        if model.usageProviders.count > 1 || model.usageFilter != nil {
+            HStack(spacing: 6) {
+                chip("All", color: nil, selected: model.usageFilter == nil) { model.usageFilter = nil }
+                ForEach(model.usageProviders, id: \.self) { id in
+                    chip(id.displayName, color: id.color, selected: model.usageFilter == id) {
+                        model.usageFilter = model.usageFilter == id ? nil : id
+                    }
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private func chip(_ title: String, color: Color?, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let color { Circle().fill(color).frame(width: 7, height: 7) }
+                Text(title)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+            .overlay(Capsule().strokeBorder(.quaternary, lineWidth: selected ? 0 : 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selected ? .primary : .secondary)
     }
 }
 
