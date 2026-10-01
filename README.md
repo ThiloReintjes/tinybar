@@ -99,8 +99,13 @@ brew install --cask thiloreintjes/tinybar/tinybar
 Or download `Tinybar-<version>.zip` from [Releases](https://github.com/ThiloReintjes/tinybar/releases),
 unzip it and move `Tinybar.app` to Applications.
 
-Releases aren't notarized yet, so macOS blocks the first launch. Open it once, then go to **System
-Settings → Privacy & Security** and click **Open Anyway**. Or clear the quarantine flag yourself:
+Releases aren't notarized yet, so macOS blocks the first launch:
+
+1. Open Tinybar from Applications. macOS refuses and shows a warning; click **Done**.
+2. Go to **System Settings → Privacy & Security** and click **Open Anyway**. The button only
+   appears after step 1.
+
+Or clear the quarantine flag yourself:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Tinybar.app
