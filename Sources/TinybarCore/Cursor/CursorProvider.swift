@@ -3,7 +3,7 @@ import SQLite3
 
 /// Cursor limits. Source order (as in CodexBar): Cursor.app's stored login → the cursor.com
 /// session cookie in a browser. Both are only read; an expired token is never refreshed
-/// (ADR 0001). Enabling Cursor in Settings is the consent to read its browser cookie, since
+/// (ADR 0001). Enabling Cursor in Settings is the consent to read its browser cookie (ADR 0005), since
 /// many Cursor users have no app login on this Mac.
 public struct CursorProvider: UsageProvider {
     public let id = ProviderID.cursor
