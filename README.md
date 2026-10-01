@@ -93,7 +93,7 @@ transcripts:
 ## Install
 
 ```sh
-brew install --cask thiloreintjes/tinybar/tinybar
+brew install --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
 ```
 
 Or download `Tinybar-<version>.zip` from [Releases](https://github.com/ThiloReintjes/tinybar/releases),
@@ -101,7 +101,8 @@ unzip it and move `Tinybar.app` to Applications.
 
 Releases aren't notarized yet, so macOS blocks the first launch:
 
-1. Open Tinybar from Applications. macOS refuses and shows a warning; click **Done**.
+1. Open Tinybar (the `brew` line above already does). macOS refuses and shows a warning; click
+   **Done**.
 2. Go to **System Settings → Privacy & Security** and click **Open Anyway**. The button only
    appears after step 1.
 
