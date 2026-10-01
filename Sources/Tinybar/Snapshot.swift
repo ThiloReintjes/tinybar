@@ -17,8 +17,13 @@ enum PopoverSnapshot {
             if let p = args.firstIndex(of: "--page"), p + 1 < args.count {
                 page = args[p + 1] == "settings" ? .settings : ProviderID(rawValue: args[p + 1]).map(Page.provider) ?? .overview
             }
+            // `--backdrop` stands in for the worst case behind the glass: a bright window under a
+            // dark popover, a dark one under a light popover.
+            let backdrop = args.contains("--backdrop")
             for (appearance, suffix) in [(NSAppearance.Name.darkAqua, ".dark"), (.aqua, "")] {
-                let host = NSHostingView(rootView: PopoverView(model: model, page: page).background(Color(nsColor: .windowBackgroundColor)))
+                let fill = !backdrop ? Color(nsColor: .windowBackgroundColor)
+                    : appearance == .darkAqua ? Color(white: 0.58) : Color(white: 0.22)
+                let host = NSHostingView(rootView: PopoverView(model: model, page: page).background(fill))
                 host.appearance = NSAppearance(named: appearance)
                 let size = host.fittingSize
                 let window = NSWindow(

@@ -64,6 +64,7 @@ struct PopoverView: View {
             Footer(model: model, page: page, select: go)
         }
         .frame(width: Self.width)
+        .background(GlassTint())
         .background(TabShortcuts(model: model, select: go))
         .onChange(of: model.enabledProviders) { _, enabled in
             if case let .provider(id) = page, !enabled.contains(id) { page = .overview }
@@ -82,6 +83,20 @@ struct PopoverView: View {
     private func go(_ next: Page) {
         guard next != page else { return }
         withAnimation(reduceMotion ? nil : Motion.page) { page = next }
+    }
+}
+
+/// Tints the popover's glass towards the window background. The glass alone passes through
+/// whatever is behind it, so a light window under a dark popover left secondary text grey on
+/// grey. The tint caps how far the backdrop can drift from the appearance while some of it still
+/// shows through. Reduce Transparency already makes the glass opaque, so the tint steps aside.
+private struct GlassTint: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        Color(nsColor: .windowBackgroundColor)
+            .opacity(reduceTransparency ? 0 : 0.7)
+            .ignoresSafeArea()
     }
 }
 
