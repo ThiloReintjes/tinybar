@@ -95,7 +95,7 @@ private struct GlassTint: View {
 
     var body: some View {
         Color(nsColor: .windowBackgroundColor)
-            .opacity(reduceTransparency ? 0 : 0.7)
+            .opacity(reduceTransparency ? 0 : 0.55)
             .ignoresSafeArea()
     }
 }
