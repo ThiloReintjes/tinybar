@@ -671,12 +671,13 @@ private struct SettingsPage: View {
 
     var body: some View {
         @Bindable var settings = model.settings
-        Form {
-            Section {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsSection("Subscriptions") {
                 ForEach(ProviderID.allCases, id: \.self) { id in
-                    Toggle(isOn: Binding(
+                    SettingsToggle(isOn: Binding(
                         get: { model.providers[id] != nil },
-                        set: { model.setEnabled(id, $0) }))
+                        set: { model.setEnabled(id, $0) }),
+                        first: id == ProviderID.allCases.first)
                     {
                         HStack(spacing: 8) {
                             ProviderDot(id: id, size: 7)
@@ -684,37 +685,91 @@ private struct SettingsPage: View {
                         }
                     }
                 }
-            } header: {
-                Text("Subscriptions")
             }
-            Section {
+            SettingsSection(
+                "Browser fallback",
+                footer: "When a CLI login is missing or expired, read your signed-in browser session instead. Chromium browsers ask once for Keychain access.")
+            {
                 let _ = settings.browserFallbackRevision
-                ForEach(ProviderID.allCases.filter(\.hasBrowserFallback), id: \.self) { id in
-                    Toggle("\(id.displayName) via \(id.webDomain)", isOn: Binding(
+                let ids = ProviderID.allCases.filter(\.hasBrowserFallback)
+                ForEach(ids, id: \.self) { id in
+                    SettingsToggle(isOn: Binding(
                         get: { settings.isBrowserFallbackEnabled(id) },
                         set: {
                             settings.setBrowserFallback(id, $0)
                             if $0 { Task { await model.refresh(force: true) } }
-                        }))
+                        }),
+                        first: id == ids.first)
+                    {
+                        Text("\(id.displayName) via \(id.webDomain)")
+                    }
                 }
-            } header: {
-                Text("Browser fallback")
-            } footer: {
-                Text("When a CLI login is missing or expired, read your signed-in browser session instead. Chromium browsers ask once for Keychain access.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
             }
-            Section("General") {
-                Toggle("Launch at login", isOn: $settings.launchAtLogin)
-                Toggle("Notify when a limit is nearly used up", isOn: $settings.notificationsEnabled)
-                Toggle("Show percentage in menu bar", isOn: Binding(
+            SettingsSection("General") {
+                SettingsToggle(isOn: $settings.launchAtLogin, first: true) { Text("Launch at login") }
+                SettingsToggle(isOn: $settings.notificationsEnabled) { Text("Notify when a limit is nearly used up") }
+                SettingsToggle(isOn: Binding(
                     get: { !settings.hidePercentage }, set: { settings.hidePercentage = !$0 }))
+                {
+                    Text("Show percentage in menu bar")
+                }
             }
         }
-        .formStyle(.grouped)
-        .scrollDisabled(true)
-        .scrollContentBackground(.hidden)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, -14)
+        .padding(.top, 4)
+    }
+}
+
+/// A titled platter of rows, like the limit cards. Drawn by hand
+/// rather than with a grouped `Form`, whose section backgrounds mis-measure in the fixed-size
+/// popover and leave the last row outside its card.
+private struct SettingsSection<Content: View>: View {
+    let title: String
+    var footer: String?
+    @ViewBuilder let content: Content
+
+    init(_ title: String, footer: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 4)
+            VStack(spacing: 0) { content }
+                .platter()
+            if let footer {
+                Text(footer)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+}
+
+/// A row with a hairline above it, except the first in its section.
+private struct SettingsToggle<Label: View>: View {
+    @Binding var isOn: Bool
+    var first = false
+    @ViewBuilder let label: Label
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !first { Divider().padding(.leading, 14) }
+            HStack {
+                label.font(.system(size: 13))
+                Spacer(minLength: 8)
+                Toggle(isOn: $isOn) { label }
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
     }
 }
