@@ -414,26 +414,11 @@ private struct Hero: View {
                 if let plan = snapshot?.plan {
                     Text(plan).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                 }
-                if let snapshot {
-                    Text(caption(snapshot))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
-                }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 4)
         .padding(.top, 4)
-    }
-
-    private func caption(_ snapshot: ProviderSnapshot) -> String {
-        let when = snapshot.fetchedAt.formatted(date: .omitted, time: .shortened)
-        let ringNote = snapshot.ringWindows.count > 1
-            ? "Outer ring \(snapshot.ringWindows[0].title.lowercased()), inner \(snapshot.ringWindows[1].title.lowercased()). "
-            : ""
-        return "\(ringNote)Read at \(when) \(id.sourceDescription(snapshot.source))."
     }
 }
 
