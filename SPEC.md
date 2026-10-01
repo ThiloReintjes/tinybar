@@ -2,7 +2,7 @@
 
 A lightweight, native macOS menu bar app showing AI subscription limits, local token usage over time, and the Theoretical Cost of that usage. It is a from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar) (about 309k LOC, 87 providers), built around performance and a small scope.
 
-Vocabulary: see [CONTEXT.md](./CONTEXT.md). Key decision: [ADR 0001](./docs/adr/0001-read-only-credentials.md).
+Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), above all [ADR 0001](./docs/adr/0001-read-only-credentials.md) (read-only credentials).
 
 ## 1. Goals and non-goals
 
@@ -41,7 +41,7 @@ Known CodexBar pitfalls to avoid: full-corpus rescans (#2538), competing caches 
 - Swift, macOS 14+, universal binary (Apple Silicon is the priority for testing).
 - AppKit `NSStatusItem` plus a SwiftUI popover (`NSPopover`). Charts use Swift Charts.
 - Persistence uses the system SQLite (`libsqlite3`).
-- Dependencies: Sparkle (updates). Anything else must justify itself against §2.
+- Plain SwiftPM, no dependencies except Sparkle for updates (ADR 0002).
 - Launch at login via `SMAppService`, on by default.
 
 ## 4. Providers (v1)
@@ -51,7 +51,7 @@ For each Provider, the source order is inspired by CodexBar and everything is st
 ### Claude
 1. **CLI OAuth**: read the token from `~/.claude/.credentials.json`, else Keychain item `Claude Code-credentials`.
    → `GET https://api.anthropic.com/api/oauth/usage` (plus `/api/oauth/profile` for the plan name), with the same headers the official CLI sends.
-2. **Browser cookie fallback** (opt-in in Settings): `sessionKey` from Chromium browsers or Firefox → `claude.ai/api/organizations/{id}/usage`. Safari is out (needs Full Disk Access).
+2. **Browser cookie fallback** (opt-in in Settings, ADR 0005): `sessionKey` from Chromium browsers or Firefox → `claude.ai/api/organizations/{id}/usage`. Safari is out (needs Full Disk Access).
 
 Displayed: 5h session window, weekly window, model-specific weekly windows (e.g. Opus/Sonnet), extra usage spend if present, and a Reset time for each.
 Honor `Retry-After`; on HTTP 429 with no header, back off 5 minutes.
@@ -74,7 +74,7 @@ Enabled automatically when `agy` and `~/.gemini/antigravity-cli` exist.
 
 ### Cursor
 1. **Cursor.app login**: `cursorAuth/accessToken` from `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (read-only, `immutable` when no WAL is present), sent as the `WorkosCursorSessionToken=<userID>::<token>` cookie. Skipped within 60 s of expiry.
-2. **Browser cookie**: `WorkosCursorSessionToken` for `cursor.com`. Not a separate toggle: enabling Cursor is the consent, since many Cursor users have no app login.
+2. **Browser cookie**: `WorkosCursorSessionToken` for `cursor.com`. Not a separate toggle: enabling Cursor is the consent (ADR 0005).
    → `GET https://cursor.com/api/usage-summary` (the dashboard's own call).
 
 Displayed: the billing-cycle window (total plan usage), Auto and API-model windows as model-specific, on-demand spend as extra usage, reset at the cycle end.
@@ -137,7 +137,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 ## 9. Token history
 
 ### Sources
-- **Claude**: `~/.claude/projects/**/*.jsonl`. Assistant messages with `usage` (input, output, cache creation, cache read), `model`, `timestamp`, `cwd`. De-duplicate by message id plus request id; the same response can appear several times.
+- **Claude**: `~/.claude/projects/**/*.jsonl`. Assistant messages with `usage` (input, output, cache creation, cache read), `model`, `timestamp`, `cwd`. De-duplicate by message id; the same response can appear several times, and the most complete copy wins.
 - **Codex**: `~/.codex/sessions/**` (and archived sessions). Token counts are cumulative per session, so store deltas and handle forked sessions without double counting.
 
 Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored/CostUsage/` before implementing.
@@ -147,10 +147,10 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - **Afterwards**: incremental. Store per file (path, inode, size, mtime, byte offset). Only read appended bytes. Re-read a file from zero if it was truncated or replaced.
 - Stored daily totals survive the CLIs deleting old logs (Claude Code deletes after 30 days by default).
 
-### Store (SQLite, `~/Library/Application Support/Tinybar/usage.sqlite`)
+### Store (SQLite, `~/Library/Application Support/Tinybar/usage.sqlite`; ADR 0003)
 - `daily_usage(day, provider, model, project, input, output, cache_write, cache_read)`, primary key (day, provider, model, project).
 - `file_cursor(path, inode, size, mtime, offset)`.
-- Dedupe keys for Claude, pruned after a reasonable horizon.
+- `claude_message(id, …)`: the tokens counted per Claude message id, for de-duplication. Not pruned.
 - The schema allows a future `account` column (multi-account later).
 
 ### Day boundary
@@ -165,7 +165,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - If no repository is found, file it under "No project".
 - Cache path→project lookups in memory.
 
-## 10. Theoretical Cost
+## 10. Theoretical Cost (ADR 0004)
 
 - Prices (input, output, cache write, cache read per model) come from **models.dev**, fetched at most once per 24 h with a single unauthenticated GET. The last successful response is cached on disk.
 - No bundled price table. If no prices have ever been fetched, or a model is not listed, show "—". Never guess from a similar model.
