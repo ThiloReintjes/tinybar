@@ -93,24 +93,16 @@ transcripts:
 ## Install
 
 ```sh
-brew install --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
+curl -fsSL https://raw.githubusercontent.com/ThiloReintjes/tinybar/main/Scripts/install.sh | bash
 ```
 
-Or download `Tinybar-<version>.zip` from [Releases](https://github.com/ThiloReintjes/tinybar/releases),
-unzip it and move `Tinybar.app` to Applications.
+This installs the Homebrew cask and walks you through macOS's one-time approval: Tinybar isn't
+notarized yet, so macOS blocks its first launch. Click **Done** on the warning (not Move to Trash),
+then **Open Anyway** in the Privacy & Security settings the script opens for you.
 
-Releases aren't notarized yet, so macOS blocks the first launch:
-
-1. Open Tinybar (the `brew` line above already does). macOS refuses and shows a warning; click
-   **Done**.
-2. Go to **System Settings → Privacy & Security** and click **Open Anyway**. The button only
-   appears after step 1.
-
-Or clear the quarantine flag yourself:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Tinybar.app
-```
+Already use Homebrew and want to do it by hand: `brew install --cask thiloreintjes/tinybar/tinybar`,
+then `open -a Tinybar` and follow the same two clicks. Or download the zip from
+[Releases](https://github.com/ThiloReintjes/tinybar/releases).
 
 A notarized build, the official Homebrew cask and auto-updates follow once releases are signed. Or build it yourself:
 
