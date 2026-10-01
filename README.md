@@ -92,8 +92,17 @@ transcripts:
 
 ## Install
 
-Not packaged yet. Homebrew, a notarized build and auto-updates are on the way. Until then, build
-it yourself:
+Download `Tinybar-<version>.zip` from [Releases](https://github.com/ThiloReintjes/tinybar/releases),
+unzip it and move `Tinybar.app` to Applications.
+
+Releases aren't notarized yet, so macOS blocks the first launch. Open it once, then go to **System
+Settings → Privacy & Security** and click **Open Anyway**. Or clear the quarantine flag yourself:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Tinybar.app
+```
+
+A notarized build, Homebrew and auto-updates follow once releases are signed. Or build it yourself:
 
 ```sh
 git clone https://github.com/ThiloReintjes/tinybar.git
@@ -120,7 +129,7 @@ Swift 6 toolchain (Xcode 16 or newer), macOS 14+. Plain SwiftPM, no Xcode projec
 ```sh
 swift build                  # debug build
 swift test                   # unit tests
-./Scripts/build-app.sh       # universal, ad-hoc signed build/Tinybar.app
+./Scripts/build-app.sh       # universal, ad-hoc signed build/Tinybar.app (--zip for a release zip)
 swift Scripts/make-icon.swift  # redraw Resources/AppIcon.icns and docs/icon.png
 ```
 

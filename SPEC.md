@@ -175,9 +175,11 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 ## 11. Distribution
 
 - GitHub repo `tinybar`, MIT license.
-- Signed with Developer ID and notarized (the owner provides the Apple Developer account).
-- Released on GitHub Releases, plus a Homebrew cask: `brew install --cask tinybar`.
-- Sparkle for in-app auto-updates (EdDSA-signed appcast).
+- Public GitHub repo; pushing a `v*` tag publishes a GitHub Release with a zipped app.
+- Until an Apple Developer account is available, releases are ad-hoc signed pre-releases and the
+  README explains Gatekeeper's "Open Anyway". Then: Developer ID signing and notarization
+  (`build-app.sh` already supports both), a Homebrew cask (`brew install --cask tinybar`; Homebrew
+  no longer accepts casks that fail Gatekeeper) and Sparkle with an EdDSA-signed appcast.
 - First run needs no configuration: auto-detect Providers, launch at login, request notification permission.
 
 ## 12. Later (explicitly deferred)

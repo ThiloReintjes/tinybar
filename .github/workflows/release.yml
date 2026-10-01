@@ -1,0 +1,30 @@
+name: Release
+
+# Push a tag like v0.1.0 to publish a GitHub Release with Tinybar-<version>.zip attached.
+# Until the repo has signing secrets, the build is ad-hoc signed and marked as a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches Info.plist
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
+          [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} ≠ v${version}"; exit 1; }
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+      - run: swift test
+      - run: ./Scripts/build-app.sh --zip
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "build/Tinybar-${VERSION}.zip" \
+            --title "Tinybar ${VERSION}" --generate-notes --prerelease
