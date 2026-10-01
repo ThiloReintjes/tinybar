@@ -365,17 +365,6 @@ extension ProviderID {
         default: AnyShapeStyle(LinearGradient(colors: [color.opacity(0.7), color], startPoint: .leading, endPoint: .trailing))
         }
     }
-
-    func sourceDescription(_ source: DataSource) -> String {
-        switch (self, source) {
-        case (_, .browser): "from your \(webDomain) browser session"
-        case (.claude, _): "from your Claude Code login"
-        case (.codex, .cli): "from your Codex login"
-        case (.codex, .cliProcess): "from the Codex app server"
-        case (.gemini, _): "from the Antigravity CLI"
-        case (.cursor, _): "from the Cursor app"
-        }
-    }
 }
 
 extension ExtraUsageSpend {

@@ -117,7 +117,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
    - Colours come from each logo: Claude orange, Codex monochrome (black or white), Gemini its
      four-colour spark, Cursor grey.
 2. **Provider page**:
-   - Large rings with the tightest % left, name, plan, and when and where the numbers were read.
+   - Large rings with the tightest % left, name and plan.
    - A banner when Stale: what went wrong and what the user runs to fix it.
    - Every Limit Window: bar, % left, reset time and countdown. Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
