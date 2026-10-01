@@ -174,13 +174,13 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 11. Distribution
 
-- GitHub repo `tinybar`, MIT license.
-- Public GitHub repo; pushing a `v*` tag publishes a GitHub Release with a zipped app and bumps the
-  cask in the `ThiloReintjes/homebrew-tinybar` tap (`brew install --cask thiloreintjes/tinybar/tinybar`).
-- Until an Apple Developer account is available, releases are ad-hoc signed pre-releases and the
-  README explains Gatekeeper's "Open Anyway". Then: Developer ID signing and notarization
-  (`build-app.sh` already supports both), the official Homebrew cask (`brew install --cask tinybar`; Homebrew
-  no longer accepts casks that fail Gatekeeper) and Sparkle with an EdDSA-signed appcast.
+- Public GitHub repo `ThiloReintjes/tinybar`, MIT license.
+- Pushing a `v*` tag publishes a GitHub Release with a zipped app and bumps the cask in the
+  `ThiloReintjes/homebrew-tinybar` tap. `Scripts/install.sh` installs it and guides the first launch.
+- Until an Apple Developer account is available, releases are ad-hoc signed, so macOS asks the user
+  to approve the first launch. With an account: Developer ID signing and notarization
+  (`build-app.sh` supports both), then the official cask (`brew install --cask tinybar`; Homebrew
+  rejects casks that fail Gatekeeper) and Sparkle with an EdDSA-signed appcast.
 - First run needs no configuration: auto-detect Providers, launch at login, request notification permission.
 
 ## 12. Later (explicitly deferred)
