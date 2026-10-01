@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag like v0.1.0 to publish a GitHub Release with Tinybar-<version>.zip attached.
-# Until the repo has signing secrets, the build is ad-hoc signed and marked as a pre-release.
+# Push a tag like v0.1.0 to publish a GitHub Release with Tinybar-<version>.zip attached and
+# bump the cask in ThiloReintjes/homebrew-tinybar. Releases are ad-hoc signed until the repo has
+# Developer ID secrets.
 on:
   push:
     tags: ["v*"]
@@ -27,4 +28,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" "build/Tinybar-${VERSION}.zip" \
-            --title "Tinybar ${VERSION}" --generate-notes --prerelease
+            --title "Tinybar ${VERSION}" --generate-notes
+      - name: Bump the Homebrew cask
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          sha=$(shasum -a 256 "build/Tinybar-${VERSION}.zip" | cut -d' ' -f1)
+          key="$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$key" && chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes"
+          git clone -q git@github.com:ThiloReintjes/homebrew-tinybar.git "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          sed -i '' -E "s/^  version \".*\"/  version \"${VERSION}\"/; s/^  sha256 \".*\"/  sha256 \"${sha}\"/" Casks/tinybar.rb
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qam "Update Tinybar to ${VERSION}"
+          git push -q
