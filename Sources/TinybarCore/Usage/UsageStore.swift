@@ -117,6 +117,7 @@ public actor UsageStore {
             total.bytesRead += r.bytesRead
             total.recordsAdded += r.recordsAdded
         }
+        try pruneClaudeMessagesDaily()
         return total
     }
 
@@ -311,6 +312,29 @@ public actor UsageStore {
         """, [.text(id), .text(day), .text(provider.rawValue), .text(model), .text(project),
               .int(record.tokens.input), .int(record.tokens.output), .int(record.tokens.cacheWrite), .int(record.tokens.cacheRead)])
         return true
+    }
+
+    /// How long a Claude message id is kept for de-duplication. Copies of a message in later
+    /// transcripts (resumed sessions) were seen up to 29 days after it, and Claude Code deletes
+    /// transcripts after 30 days by default, so 90 days leaves a wide margin. A copy older than
+    /// that would be counted twice; daily totals are never touched by pruning (ADR 0003).
+    public static let claudeMessageRetentionDays = 90
+
+    /// Drops Claude message ids older than the retention window. Returns the number removed.
+    @discardableResult
+    public func pruneClaudeMessages(now: Date = Date()) throws -> Int {
+        let cutoff = DayKey.daysAgo(Self.claudeMessageRetentionDays, from: now)
+        try db.run("DELETE FROM claude_message WHERE day < ?", [.text(cutoff)])
+        return db.changes
+    }
+
+    /// Prunes at most once per day, so the 5-minute poll doesn't scan the table each time.
+    private func pruneClaudeMessagesDaily(now: Date = Date()) throws {
+        let today = DayKey.string(for: now)
+        guard try db.run("SELECT value FROM meta WHERE key = 'claude_message_pruned'").first?.first?.text != today
+        else { return }
+        try pruneClaudeMessages(now: now)
+        try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('claude_message_pruned', ?)", [.text(today)])
     }
 
     private func addDaily(day: String, provider: ProviderID, model: String, project: String, _ t: TokenCounts) throws {
