@@ -142,7 +142,7 @@ swift run tinybar-cli limits [--browser]   # fetch limits for all four providers
 swift run tinybar-cli cookies              # which browser holds session cookies
 swift run tinybar-cli ingest [db]          # ingest Claude + Codex logs
 swift run tinybar-cli usage [db]           # print usage summaries
-.build/debug/Tinybar --snapshot out.png [--page claude|settings]  # render to PNG, light and dark
+.build/debug/Tinybar --snapshot out.png [--page claude|settings] [--backdrop]  # PNG, light and dark; --backdrop puts a worst-case window behind it
 ```
 
 [SPEC.md](SPEC.md) is the v1 scope, [CONTEXT.md](CONTEXT.md) the vocabulary (Limit Window, Banked
