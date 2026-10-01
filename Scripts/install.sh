@@ -1,6 +1,6 @@
 #!/bin/bash
-# Installs Tinybar with Homebrew and walks through macOS's first-launch approval, which an app
-# that isn't notarized yet needs once:
+# Installs Tinybar with Homebrew and walks through macOS's one-time approval of an app that isn't
+# notarized:
 #   curl -fsSL https://raw.githubusercontent.com/ThiloReintjes/tinybar/main/Scripts/install.sh | bash
 set -euo pipefail
 
@@ -17,7 +17,7 @@ running() { sleep 2; pgrep -x Tinybar > /dev/null; }
 done_msg() { printf '\n%sTinybar is running.%s Look for the ring in your menu bar.\n' "$green" "$reset"; }
 
 # Read the steps before the warning appears: macOS shows it the moment Tinybar is opened.
-step "macOS blocks Tinybar once, because it isn't notarized yet"
+step "First launch: approve Tinybar in two clicks"
 cat <<MSG
 
     ${yellow}1.${reset} On the "Tinybar Not Opened" warning, click ${bold}Done${reset} (not Move to Trash).

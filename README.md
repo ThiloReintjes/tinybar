@@ -96,15 +96,15 @@ transcripts:
 curl -fsSL https://raw.githubusercontent.com/ThiloReintjes/tinybar/main/Scripts/install.sh | bash
 ```
 
-This installs the Homebrew cask and walks you through macOS's one-time approval: Tinybar isn't
-notarized yet, so macOS blocks its first launch. Click **Done** on the warning (not Move to Trash),
-then **Open Anyway** in the Privacy & Security settings the script opens for you.
+The script installs Tinybar with Homebrew and opens it. Releases aren't notarized yet, so macOS
+blocks the first launch once: click **Done** on the warning, then **Open Anyway** in the Privacy &
+Security settings the script opens.
 
-Already use Homebrew and want to do it by hand: `brew install --cask thiloreintjes/tinybar/tinybar`,
-then `open -a Tinybar` and follow the same two clicks. Or download the zip from
-[Releases](https://github.com/ThiloReintjes/tinybar/releases).
+Without the script, run `brew install --cask thiloreintjes/tinybar/tinybar` or download the zip from
+[Releases](https://github.com/ThiloReintjes/tinybar/releases), open Tinybar, and make the same two
+clicks.
 
-A notarized build, the official Homebrew cask and auto-updates follow once releases are signed. Or build it yourself:
+To build from source:
 
 ```sh
 git clone https://github.com/ThiloReintjes/tinybar.git
