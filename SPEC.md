@@ -150,7 +150,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 ### Store (SQLite, `~/Library/Application Support/Tinybar/usage.sqlite`; ADR 0003)
 - `daily_usage(day, provider, model, project, input, output, cache_write, cache_read)`, primary key (day, provider, model, project).
 - `file_cursor(path, inode, size, mtime, offset)`.
-- `claude_message(id, …)`: the tokens counted per Claude message id, for de-duplication. Not pruned.
+- `claude_message(id, …)`: the tokens counted per Claude message id, for de-duplication. Ids older than 90 days are pruned once a day; daily totals are kept.
 - The schema allows a future `account` column (multi-account later).
 
 ### Day boundary

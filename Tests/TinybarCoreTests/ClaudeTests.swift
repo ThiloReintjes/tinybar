@@ -82,6 +82,22 @@ private func tempRoot() throws -> (URL, URL) {
     #expect(rows.map(\.tokens.input) == [5])
 }
 
+@Test func pruningDropsOldMessageIDsButKeepsTotals() async throws {
+    let (dir, projects) = try tempRoot()
+    try [assistant(id: "msg_old", ts: "2026-01-10T10:00:00.000Z", input: 1, output: 7),
+         assistant(id: "msg_new", ts: "2026-09-25T10:00:00.000Z", input: 1, output: 3)].joined(separator: "\n").appending("\n")
+        .write(to: projects.appendingPathComponent("s.jsonl"), atomically: true, encoding: .utf8)
+
+    let store = try UsageStore(path: dir.appendingPathComponent("db.sqlite"))
+    try await store.ingestClaude(roots: [projects])
+    let before = try await store.daily(since: "2026-01-01").map(\.tokens.output).sorted()
+
+    let now = ISO8601DateFormatter().date(from: "2026-10-01T12:00:00Z")!
+    #expect(try await store.pruneClaudeMessages(now: now) == 1)
+    #expect(try await store.pruneClaudeMessages(now: now) == 0)
+    #expect(try await store.daily(since: "2026-01-01").map(\.tokens.output).sorted() == before)
+}
+
 // MARK: Claude API mapping
 
 @Test func mapsClaudeUsage() throws {
