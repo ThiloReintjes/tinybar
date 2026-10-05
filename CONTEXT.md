@@ -18,6 +18,10 @@ _Avoid_: Quota, rate limit, bucket
 The moment a Limit Window's usage returns to zero.
 _Avoid_: Renewal, refresh
 
+**Run-out Time**:
+When a Limit Window will reach 0% left if usage continues at its average pace since the window started. Only shown when it comes before the Reset.
+_Avoid_: ETA, prediction, burn rate
+
 **Banked Reset**:
 A saved Codex reset coupon the user holds, which can be redeemed to reset a Limit Window early. Tinybar only displays it and never redeems it.
 _Avoid_: Reset credit, rollover

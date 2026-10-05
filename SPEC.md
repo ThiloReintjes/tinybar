@@ -109,7 +109,8 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 
 1. **Overview**:
    - One row per Provider: concentric rings (outer: longest account-wide window, inner: the next),
-     name, plan, the window closest to running out with its reset countdown, and its % left.
+     name, plan, the window closest to running out with its reset countdown (or, in orange, the
+     earliest Run-out Time), and its % left.
      Model-specific windows are left out. A Stale Provider shows "Login expired" (or the reason) in
      orange. Clicking a row opens its page.
    - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
@@ -119,12 +120,20 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 2. **Provider page**:
    - Large rings with the tightest % left, name and plan.
    - A banner when Stale: what went wrong and what the user runs to fix it.
-   - Every Limit Window: bar, % left, reset time and countdown. Click to pin; the pinned one is marked.
+   - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time if that comes
+     before the Reset. Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
    - That Provider's usage only: tokens, cost, chart, top models and Projects. Today is provisional.
 3. **Footer**: last check time, check now (⌘R), settings (⌘,), quit (⌘Q).
 
 **Settings** (replaces the page, back with Esc): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), and hide percentage.
+
+### Run-out Time
+- Pace = % used ÷ time since the window started (Reset minus duration). Run-out Time = now + % left ÷ pace.
+- The window's own average needs no stored history and already includes the idle hours and nights
+  that recur before the Reset.
+- No forecast before 5% of the window has passed (1% steps make early readings noise), for an
+  untouched or used-up window, without a reset time or duration, or while the Provider is Stale.
 
 ## 8. Limit Alerts
 
