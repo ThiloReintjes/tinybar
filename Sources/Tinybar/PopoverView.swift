@@ -275,7 +275,7 @@ private struct OverviewRow: View {
                             .accessibilityLabel("Shown in the menu bar")
                     }
                 }
-                subtitle(state: state, binding: binding)
+                subtitle(state: state, snapshot: snapshot, binding: binding)
                     .font(.system(size: 12))
                     .lineLimit(1)
             }
@@ -296,10 +296,13 @@ private struct OverviewRow: View {
     }
 
     @ViewBuilder
-    private func subtitle(state: ProviderState?, binding: LimitWindow?) -> some View {
+    private func subtitle(state: ProviderState?, snapshot: ProviderSnapshot?, binding: LimitWindow?) -> some View {
         if let error = state?.error {
             Label(StaleText.short(id: id, error: error), systemImage: "exclamationmark.triangle.fill")
                 .labelStyle(TightLabel())
+                .foregroundStyle(.orange)
+        } else if let runOut = snapshot?.firstRunOut(includeModelSpecific: false) {
+            Text("\(runOut.window.title) runs out in \(Format.countdown(to: runOut.at))")
                 .foregroundStyle(.orange)
         } else if let binding {
             Text(ResetText.short(binding)).foregroundStyle(.secondary)
@@ -382,6 +385,7 @@ private struct ProviderPage: View {
                     ForEach(windows) { window in
                         WindowRow(
                             window: window, provider: id,
+                            runOut: stale ? nil : snapshot.flatMap { window.runOutTime(asOf: $0.fetchedAt) },
                             pinned: model.isPinned(id, window), dimmed: stale
                         ) { model.pin(id, window) }
                         if window.id != windows.last?.id {
@@ -466,6 +470,8 @@ private struct StaleBanner: View {
 private struct WindowRow: View {
     let window: LimitWindow
     let provider: ProviderID
+    /// Set only when the window runs out before it resets.
+    let runOut: Date?
     let pinned: Bool
     let dimmed: Bool
     let onPin: () -> Void
@@ -483,9 +489,17 @@ private struct WindowRow: View {
                 }
                 RemainingBar(fraction: window.remainingPercent / 100, provider: provider)
                 if let resetsAt = window.resetsAt {
-                    Text(ResetText.long(resetsAt))
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text(ResetText.long(resetsAt)).foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        if let runOut {
+                            Text("Runs out in \(Format.countdown(to: runOut))")
+                                .fontWeight(.medium)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .font(.system(size: 11).monospacedDigit())
+                    .lineLimit(1)
                 }
             }
             .padding(.horizontal, 14)

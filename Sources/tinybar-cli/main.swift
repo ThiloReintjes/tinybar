@@ -24,7 +24,8 @@ func printLimits(browser: Bool) async {
             let s = try await provider.fetch()
             print("\(provider.id.displayName) \(s.plan ?? "") [source: \(s.source.rawValue)]")
             for w in s.windows {
-                print(String(format: "  %-24@ %5.1f%% left  resets in %@", w.title as NSString, w.remainingPercent, Format.countdown(to: w.resetsAt) as NSString))
+                let runOut = w.runOutTime(asOf: s.fetchedAt).map { "  runs out in \(Format.countdown(to: $0))" } ?? ""
+                print(String(format: "  %-24@ %5.1f%% left  resets in %@%@", w.title as NSString, w.remainingPercent, Format.countdown(to: w.resetsAt) as NSString, runOut as NSString))
             }
             if let c = s.credits, c.hasCredits { print("  credits: \(c.balance.map { String(format: "%.2f", $0) } ?? "-")") }
             if let e = s.extraUsage { print(String(format: "  extra usage: %.2f / %@ %@", e.used, e.limit.map { String(format: "%.2f", $0) } ?? "∞", e.currency)) }

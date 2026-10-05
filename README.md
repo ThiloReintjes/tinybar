@@ -38,6 +38,8 @@ around one idea: a status item should cost nothing while you're not looking at i
   Antigravity), and Cursor's billing cycle, counting down from 100% to 0%, with reset countdowns.
   Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and **banked
   resets** included.
+- **Run-out forecast** — at your pace so far in each window, when it hits 0%, shown only if that
+  comes before the reset.
 - **One overview, one page per subscription** — the overview shows each subscription as rings and
   the limit closest to running out, plus usage across all of them; click a row (or press 1–4) for its limits, resets, extras and
   usage. Everything is one click away.

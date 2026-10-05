@@ -191,3 +191,49 @@ private func snapshot(_ percent: Double, resets: Date) -> ProviderSnapshot {
     #expect(s.windows[2].isModelSpecific)
     #expect(s.credits?.balance == 12.5)
 }
+
+// MARK: Run-out forecast
+
+private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWindow {
+    LimitWindow(
+        id: "session", title: "5-hour", usedPercent: used,
+        resetsAt: asOf.addingTimeInterval((5 - elapsedHours) * 3600), durationSeconds: 5 * 3600)
+}
+
+@Test func runOutFollowsTheWindowsAveragePace() {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    // 50% in 2h: 25% an hour, so the other 50% lasts 2h, an hour before the reset.
+    let fast = fiveHour(used: 50, elapsedHours: 2, asOf: now)
+    #expect(fast.runOutTime(asOf: now) == now.addingTimeInterval(2 * 3600))
+    // 30% in 2h: 70% left needs 4h 40m, but the window resets in 3h.
+    #expect(fiveHour(used: 30, elapsedHours: 2, asOf: now).runOutTime(asOf: now) == nil)
+}
+
+@Test func noRunOutWhenItCantBeForecast() {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    // Too early: 10 minutes is under 5% of the window, however fast it went.
+    #expect(fiveHour(used: 20, elapsedHours: 10.0 / 60, asOf: now).runOutTime(asOf: now) == nil)
+    // Untouched, used up, or a reset time that doesn't fit the window.
+    #expect(fiveHour(used: 0, elapsedHours: 2, asOf: now).runOutTime(asOf: now) == nil)
+    #expect(fiveHour(used: 100, elapsedHours: 2, asOf: now).runOutTime(asOf: now) == nil)
+    #expect(fiveHour(used: 50, elapsedHours: 6, asOf: now).runOutTime(asOf: now) == nil)
+    var noDuration = fiveHour(used: 90, elapsedHours: 2, asOf: now)
+    noDuration.durationSeconds = nil
+    #expect(noDuration.runOutTime(asOf: now) == nil)
+}
+
+@Test func firstRunOutPicksTheEarliestWindow() {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    let weekly = LimitWindow(
+        id: "weekly", title: "Weekly", usedPercent: 60,
+        resetsAt: now.addingTimeInterval(4 * 86400), durationSeconds: 7 * 86400)  // runs out in 2d
+    let session = fiveHour(used: 75, elapsedHours: 3, asOf: now)  // runs out in 1h, resets in 2h
+    var opus = session
+    opus.id = "opus"
+    opus.usedPercent = 90  // runs out in 20m, but model-specific
+    opus.isModelSpecific = true
+    let snapshot = ProviderSnapshot(provider: .claude, plan: nil, windows: [weekly, session, opus], fetchedAt: now)
+    #expect(snapshot.firstRunOut()?.window.id == "opus")
+    #expect(snapshot.firstRunOut(includeModelSpecific: false)?.window.id == "session")
+    #expect(snapshot.firstRunOut(includeModelSpecific: false)?.at == now.addingTimeInterval(3600))
+}
