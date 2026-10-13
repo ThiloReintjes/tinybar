@@ -19,7 +19,7 @@ The moment a Limit Window's usage returns to zero.
 _Avoid_: Renewal, refresh
 
 **Run-out Time**:
-When a Limit Window will reach 0% left if usage continues at its average pace since the window started. Only shown when it comes before the Reset.
+When a Limit Window will reach 0% left if usage continues at its average pace since the window started. It can fall after the Reset; then the limit doesn't bind and the gap shows the headroom.
 _Avoid_: ETA, prediction, burn rate
 
 **Banked Reset**:

@@ -470,7 +470,7 @@ private struct StaleBanner: View {
 private struct WindowRow: View {
     let window: LimitWindow
     let provider: ProviderID
-    /// Set only when the window runs out before it resets.
+    /// When the window runs out at its pace so far, before or after its reset.
     let runOut: Date?
     let pinned: Bool
     let dimmed: Bool
@@ -493,9 +493,14 @@ private struct WindowRow: View {
                         Text(ResetText.long(resetsAt)).foregroundStyle(.secondary)
                         Spacer(minLength: 8)
                         if let runOut {
-                            Text("Runs out in \(Format.countdown(to: runOut))")
-                                .fontWeight(.medium)
-                                .foregroundStyle(.orange)
+                            if window.runsOutBeforeReset(runOut) {
+                                Text("Runs out in \(Format.countdown(to: runOut))")
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Text("Runs out in \(Format.countdown(to: runOut))")
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
                     .font(.system(size: 11).monospacedDigit())
