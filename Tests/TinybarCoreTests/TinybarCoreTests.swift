@@ -205,8 +205,12 @@ private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWi
     // 50% in 2h: 25% an hour, so the other 50% lasts 2h, an hour before the reset.
     let fast = fiveHour(used: 50, elapsedHours: 2, asOf: now)
     #expect(fast.runOutTime(asOf: now) == now.addingTimeInterval(2 * 3600))
-    // 30% in 2h: 70% left needs 4h 40m, but the window resets in 3h.
-    #expect(fiveHour(used: 30, elapsedHours: 2, asOf: now).runOutTime(asOf: now) == nil)
+    #expect(fast.runsOutBeforeReset(now.addingTimeInterval(2 * 3600)))
+    // 30% in 2h: 70% left needs 4h 40m, after the reset in 3h. Still forecast, it shows the headroom.
+    let slow = fiveHour(used: 30, elapsedHours: 2, asOf: now)
+    let slowRunOut = now.addingTimeInterval(70.0 / 15 * 3600)
+    #expect(slow.runOutTime(asOf: now) == slowRunOut)
+    #expect(!slow.runsOutBeforeReset(slowRunOut))
 }
 
 @Test func noRunOutWhenItCantBeForecast() {
@@ -222,7 +226,7 @@ private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWi
     #expect(noDuration.runOutTime(asOf: now) == nil)
 }
 
-@Test func firstRunOutPicksTheEarliestWindow() {
+@Test func firstRunOutPicksTheEarliestWindowThatBinds() {
     let now = Date(timeIntervalSince1970: 2_000_000_000)
     let weekly = LimitWindow(
         id: "weekly", title: "Weekly", usedPercent: 60,
@@ -232,7 +236,10 @@ private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWi
     opus.id = "opus"
     opus.usedPercent = 90  // runs out in 20m, but model-specific
     opus.isModelSpecific = true
-    let snapshot = ProviderSnapshot(provider: .claude, plan: nil, windows: [weekly, session, opus], fetchedAt: now)
+    var ending = fiveHour(used: 90, elapsedHours: 4.75, asOf: now)  // runs out in 32m, but resets in 15m
+    ending.id = "ending"
+    let snapshot = ProviderSnapshot(
+        provider: .claude, plan: nil, windows: [weekly, session, opus, ending], fetchedAt: now)
     #expect(snapshot.firstRunOut()?.window.id == "opus")
     #expect(snapshot.firstRunOut(includeModelSpecific: false)?.window.id == "session")
     #expect(snapshot.firstRunOut(includeModelSpecific: false)?.at == now.addingTimeInterval(3600))

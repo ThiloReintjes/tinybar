@@ -120,8 +120,8 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 2. **Provider page**:
    - Large rings with the tightest % left, name and plan.
    - A banner when Stale: what went wrong and what the user runs to fix it.
-   - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time if that comes
-     before the Reset. Click to pin; the pinned one is marked.
+   - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time: in orange if
+     it comes before the Reset, faint if after (the headroom). Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
    - That Provider's usage only: tokens, cost, chart, top models and Projects. Today is provisional.
 3. **Footer**: last check time, check now (⌘R), settings (⌘,), quit (⌘Q).
@@ -130,6 +130,8 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 
 ### Run-out Time
 - Pace = % used ÷ time since the window started (Reset minus duration). Run-out Time = now + % left ÷ pace.
+- Always shown on the Provider page; only a Run-out Time before the Reset warns (orange, and on the
+  Overview).
 - The window's own average needs no stored history and already includes the idle hours and nights
   that recur before the Reset.
 - No forecast before 5% of the window has passed (1% steps make early readings noise), for an

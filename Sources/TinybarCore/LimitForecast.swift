@@ -10,9 +10,10 @@ extension LimitWindow {
     /// Before this share of the window has passed, a forecast is mostly noise from 1% steps.
     public static let forecastMinimumElapsed = 0.05
 
-    /// When the window reaches 0% left at its average pace so far, if that comes before its Reset.
-    /// nil when it lasts until the Reset, is already used up, or can't be forecast (no reset time
-    /// or duration, or too early in the window). `asOf` is when `usedPercent` was read.
+    /// When the window reaches 0% left at its average pace so far, even if that comes after its
+    /// Reset (which shows how much headroom is left). nil when it's untouched, already used up, or
+    /// can't be forecast (no reset time or duration, or too early in the window). `asOf` is when
+    /// `usedPercent` was read.
     public func runOutTime(asOf: Date) -> Date? {
         guard let resetsAt, let duration = durationSeconds, duration > 0 else { return nil }
         let length = TimeInterval(duration)
@@ -23,8 +24,12 @@ extension LimitWindow {
 
         let used = min(max(usedPercent, 0), 100)
         guard used > 0, used < 100 else { return nil }
-        let untilEmpty = (100 - used) * elapsed / used
-        return untilEmpty < untilReset ? asOf.addingTimeInterval(untilEmpty) : nil
+        return asOf.addingTimeInterval((100 - used) * elapsed / used)
+    }
+
+    /// Whether a Run-out Time comes before this window's Reset, so the limit actually binds.
+    public func runsOutBeforeReset(_ runOut: Date) -> Bool {
+        resetsAt.map { runOut < $0 } ?? false
     }
 }
 
@@ -34,6 +39,7 @@ extension ProviderSnapshot {
         windows
             .filter { includeModelSpecific || !$0.isModelSpecific }
             .compactMap { w in w.runOutTime(asOf: fetchedAt).map { (w, $0) } }
+            .filter { $0.0.runsOutBeforeReset($0.1) }
             .min { $0.1 < $1.1 }
     }
 }
