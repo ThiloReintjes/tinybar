@@ -34,63 +34,26 @@ around one idea: a status item should cost nothing while you're not looking at i
 
 ## Features
 
-- **Limits, as what's left** — the 5-hour and weekly windows for Claude, Codex and Gemini (via
-  Antigravity), and Cursor's billing cycle, counting down from 100% to 0%, with reset countdowns.
-  Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and **banked
-  resets** included.
-- **Run-out forecast** — at your pace so far in each window, when it hits 0%. Orange if that comes
-  before the reset; otherwise the gap to the reset is how much harder you can push.
-- **One overview, one page per subscription** — the overview shows each subscription as rings and
-  the limit closest to running out, plus usage across all of them; click a row (or press 1–4) for its limits, resets, extras and
-  usage. Everything is one click away.
-- **Menu bar at a glance** — a ring and a percentage for the one window you pin. Click any limit on a
+- **What's left of every limit.** The 5-hour and weekly windows for Claude, Codex and Gemini (via
+  Antigravity), and Cursor's billing cycle, counting down from 100% to 0% with reset countdowns.
+  Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and banked resets
+  are included.
+- **Run-out forecast.** At your pace so far, when each window hits 0%. It turns orange if that comes
+  before the reset; otherwise the gap to the reset shows how much harder you can push.
+- **Menu bar at a glance.** A ring and a percentage for the one window you pin. Click any limit on a
   subscription's page to pin it.
-- **Token history** — Today, 7 days and 30 days, read from the local Claude Code and Codex logs
-  (Gemini and Cursor show limits only),
-  with a daily chart and the top models and projects.
-- **Theoretical cost** — what those tokens would have cost at public API prices, from
-  [models.dev](https://models.dev).
-- **Per-subscription usage** — each subscription's page shows only its tokens, cost, chart, models
-  and projects.
-- **Projects from git** — usage is attributed to the repository it happened in; worktrees count as
-  their main repo.
-- **Limit alerts** — a notification at 90% and 95% of a 5-hour or weekly window, and when a window
-  you nearly used up resets.
-- **History that outlives the logs** — daily totals live in a small local database, so they survive
+- **Overview plus one page per subscription.** The overview shows each subscription as rings with
+  the limit closest to running out. Click a row, or press 1–4, for its limits, extras and usage.
+- **Token history and theoretical cost.** Today, 7 days and 30 days from the local Claude Code and
+  Codex logs, with a daily chart, the top models and projects (git worktrees count as their main
+  repo), and what those tokens would have cost at [models.dev](https://models.dev) API prices.
+  Gemini and Cursor show limits only.
+- **History that outlives the logs.** Daily totals live in a small local database, so they survive
   Claude Code deleting transcripts after 30 days.
-- **Browser fallback** — optional, per provider: if a CLI login is missing or expired, read your
-  signed-in browser session instead.
-
-## Safe by design
-
-Tinybar only ever **reads**. It uses the logins your official CLIs already store and calls the same
-read-only endpoints they call for `/usage` and `/status`:
-
-| Provider | Limits | Token history |
-| -------- | ------ | ------------- |
-| Claude   | Claude Code's OAuth login (`~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item) → `api.anthropic.com/api/oauth/usage` | `~/.claude/projects/**/*.jsonl` |
-| Codex    | `~/.codex/auth.json` → `chatgpt.com/backend-api/wham/usage`, falling back to a short-lived `codex app-server` in read-only mode | `~/.codex/sessions`, `~/.codex/archived_sessions` |
-| Gemini   | a short-lived `agy -p /usage` (Antigravity CLI's built-in usage report: no prompt, no tokens spent) | — |
-| Cursor   | Cursor.app's login (`state.vscdb`), else the `cursor.com` session cookie in your browser → `cursor.com/api/usage-summary` | — |
-
-It **never refreshes or rewrites a token**, never sends a prompt, and never redeems a banked reset.
-When a login expires the card turns **stale** and tells you to run `claude`, `codex` or `agy` once
-(or open Cursor); the client renews its own login. Why this matters and what it costs:
-[ADR 0001](docs/adr/0001-read-only-credentials.md).
-
-The only other network call is one unauthenticated GET to `models.dev/api.json`, at most once a day.
-
-## Performance
-
-Measured on an Apple silicon Mac with 16 GB of Codex logs (100k files) and 8 GB of Claude
-transcripts:
-
-| | |
-| --- | --- |
-| Idle CPU | 0.0% — one 5-minute poll, no animations, no timers faster than that |
-| Idle memory | ~20 MB footprint |
-| Keeping up | FSEvents reports which log files changed; only appended bytes are read |
-| First launch | the whole history imports in about two minutes, in a child process that exits when done |
+- **Limit alerts.** A notification at 90% and 95% of a 5-hour or weekly window, and when a window
+  you nearly used up resets.
+- **Browser fallback.** Optional, per provider: if a CLI login is missing or expired, Tinybar reads
+  your signed-in browser session instead.
 
 ## Install
 
@@ -102,53 +65,88 @@ The script installs Tinybar with Homebrew and opens it. Releases aren't notarize
 blocks the first launch once: click **Done** on the warning, then **Open Anyway** in the Privacy &
 Security settings the script opens.
 
-Without the script, run `brew install --cask thiloreintjes/tinybar/tinybar` or download the zip from
-[Releases](https://github.com/ThiloReintjes/tinybar/releases), open Tinybar, and make the same two
-clicks.
+Without the script, run `brew install --cask thiloreintjes/tinybar/tinybar`, or download the zip
+from [Releases](https://github.com/ThiloReintjes/tinybar/releases), and make the same two clicks.
 
-To build from source:
+Tinybar starts at login. On first launch it finds the CLIs you're signed in to and turns those
+providers on, so there's nothing to configure.
+
+**Update.** Homebrew quits Tinybar while it upgrades, so open it again afterwards:
 
 ```sh
-git clone https://github.com/ThiloReintjes/tinybar.git
-cd tinybar
-./Scripts/build-app.sh
-open build/Tinybar.app
+brew upgrade --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
 ```
 
-Tinybar starts at login by default. On first launch it finds the CLIs you're signed in to and turns
-those providers on. There's nothing to configure.
+**Uninstall.** `brew uninstall --cask thiloreintjes/tinybar/tinybar`. Add `--zap` to also delete
+the usage history and settings.
+
+## Safe by design
+
+Tinybar only ever **reads**. It uses the logins your official CLIs already store and calls the same
+read-only endpoints they call for `/usage` and `/status`:
+
+| Provider | Limits | Token history |
+| -------- | ------ | ------------- |
+| Claude   | Claude Code's OAuth login (`~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item) → `api.anthropic.com/api/oauth/usage` | `~/.claude/projects/**/*.jsonl` |
+| Codex    | `~/.codex/auth.json` → `chatgpt.com/backend-api/wham/usage`, falling back to a short-lived `codex app-server` in read-only mode | `~/.codex/sessions`, `~/.codex/archived_sessions` |
+| Gemini   | a short-lived `agy -p /usage` (Antigravity CLI's built-in usage report: no prompt, no tokens spent) | none |
+| Cursor   | Cursor.app's login (`state.vscdb`), else the `cursor.com` session cookie in your browser → `cursor.com/api/usage-summary` | none |
+
+It **never refreshes or rewrites a token**, never sends a prompt, and never redeems a banked reset.
+When a login expires the card turns **stale** and tells you to run `claude`, `codex` or `agy` once
+(or open Cursor), and the client renews its own login. [ADR 0001](docs/adr/0001-read-only-credentials.md)
+explains why and what it costs.
+
+The only other network call is one unauthenticated GET to `models.dev/api.json`, at most once a day.
 
 ## Permissions
 
-- **Notifications** — asked once, for limit alerts. Turn alerts off in Settings any time.
-- **Keychain** — Claude's login is read through `/usr/bin/security`, the tool Claude Code itself
-  uses to store it, so there is no prompt. The **browser fallback** is off by default, and so is
-  Cursor unless Cursor.app is signed in: turning either on for a Chromium browser (Chrome, Arc, Dia, Brave, Edge, Comet) asks once for that browser's
-  "Safe Storage" key. Firefox needs nothing; Safari isn't supported.
+- **Notifications.** Asked once, for limit alerts. Turn alerts off in Settings any time.
+- **Keychain.** Claude's login is read through `/usr/bin/security`, the tool Claude Code itself uses
+  to store it, so there is no prompt. The browser fallback is off by default, and so is Cursor unless
+  Cursor.app is signed in. Turning either on for a Chromium browser (Chrome, Arc, Dia, Brave, Edge,
+  Comet) asks once for that browser's "Safe Storage" key. Firefox needs nothing; Safari isn't
+  supported.
+
+## Performance
+
+Measured on an Apple silicon Mac with 16 GB of Codex logs (100k files) and 8 GB of Claude
+transcripts:
+
+| | |
+| --- | --- |
+| Idle CPU | 0.0%: one 5-minute poll, no animations, no timers faster than that |
+| Idle memory | ~20 MB footprint |
+| Keeping up | FSEvents reports which log files changed; only appended bytes are read |
+| First launch | the whole history imports in about two minutes, in a child process that exits when done |
 
 ## Building from source
 
 Swift 6 toolchain (Xcode 16 or newer), macOS 14+. Plain SwiftPM, no Xcode project.
 
 ```sh
-swift build                  # debug build
-swift test                   # unit tests
-./Scripts/build-app.sh       # universal, ad-hoc signed build/Tinybar.app (--zip for a release zip)
-swift Scripts/make-icon.swift  # redraw Resources/AppIcon.icns and docs/icon.png
+git clone https://github.com/ThiloReintjes/tinybar.git
+cd tinybar
+./Scripts/build-app.sh && open build/Tinybar.app   # universal, ad-hoc signed (--zip for a release zip)
+swift test                                         # unit tests
 ```
 
 Developer tools:
 
 ```sh
-swift run tinybar-cli limits [--browser]   # fetch limits for all four providers
+swift run tinybar-cli limits [--browser]   # limits and run-out times for all four providers
 swift run tinybar-cli cookies              # which browser holds session cookies
 swift run tinybar-cli ingest [db]          # ingest Claude + Codex logs
 swift run tinybar-cli usage [db]           # print usage summaries
-.build/debug/Tinybar --snapshot out.png [--page claude|settings] [--backdrop]  # PNG, light and dark; --backdrop puts a worst-case window behind it
+swift Scripts/make-icon.swift              # redraw Resources/AppIcon.icns and docs/icon.png
+.build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--backdrop] [--redact-projects]
 ```
 
-[SPEC.md](SPEC.md) is the v1 scope, [CONTEXT.md](CONTEXT.md) the vocabulary (Limit Window, Banked
-Reset, Theoretical Cost, …), and [docs/adr/](docs/adr) the decisions behind them.
+`--snapshot` renders the popover to PNG in light and dark; `--backdrop` puts a worst-case window
+behind it and `--redact-projects` hides your project names.
+
+[SPEC.md](SPEC.md) is the v1 scope, [CONTEXT.md](CONTEXT.md) the vocabulary (Limit Window, Run-out
+Time, Banked Reset, Theoretical Cost, …), and [docs/adr/](docs/adr) the decisions behind them.
 
 ## Contributing
 
