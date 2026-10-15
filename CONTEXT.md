@@ -59,11 +59,11 @@ _Avoid_: Spend, cost, bill
 ### Activity
 
 **Activity**:
-What the agents did, read from the same local logs as Usage Records: Prompts, Tool Calls, lines written, Compactions, Agent Time and Output Speed. Claude Code and Codex only.
+What the agents did, read from the same local logs as Usage Records: Prompts, Tool Calls, lines added and removed, Compactions, Agent Time and Output Speed. Claude Code and Codex only. Each piece belongs to the model that produced it.
 _Avoid_: Telemetry, metrics, analytics
 
 **Prompt**:
-A message the user typed into Claude Code or Codex. Tool results, injected context, background-task notifications and messages between agents are not Prompts.
+A message the user typed into Claude Code or Codex that a model answered; it belongs to the model that answered it. Local commands that never reach a model (`/model`, `/clear`), messages that got no answer before the next one, tool results, injected context, background-task notifications and messages between agents are not Prompts.
 _Avoid_: Request, query, turn
 
 **Tool Call**:

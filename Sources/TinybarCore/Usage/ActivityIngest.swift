@@ -78,11 +78,12 @@ struct MessageStats: Codable, Equatable {
 
     var encoded: String { (try? JSONEncoder().encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? "{}" }
 
-    /// The counters this message adds, keyed by stat key (per-model keys only; see StatBatch).
+    /// The counters this message adds, keyed by stat key.
     func contributions(tokens: TokenCounts) -> [String: Int64] {
         var c: [String: Int64] = [StatKey.responses: 1]
         let hour = Calendar.current.component(.hour, from: Date(timeIntervalSince1970: Double(s) / 1000))
         c[StatKey.hour(hour)] = 1
+        c[StatKey.hourTokens(hour)] = tokens.total
         for name in t.values { c[StatKey.tool(name), default: 0] += 1 }
         if let r, SpeedSample.accepts(outputTokens: tokens.output, millis: e - r) {
             c[StatKey.speedTokens] = tokens.output
@@ -108,13 +109,8 @@ struct StatBatch {
     private(set) var sums: [Slot: Int64] = [:]
     private(set) var maxima: [Slot: Int64] = [:]
 
-    /// Which keys are kept per model; the rest are stored under model "".
-    static func isPerModel(_ key: String) -> Bool {
-        key == StatKey.responses || key == StatKey.contextMax || key.hasPrefix("speed.")
-    }
-
     private func slot(_ day: String, _ provider: ProviderID, _ model: String, _ key: String) -> Slot {
-        Slot(day: day, provider: provider, model: Self.isPerModel(key) ? model : "", key: key)
+        Slot(day: day, provider: provider, model: model, key: key)
     }
 
     mutating func add(_ event: StatEvent, provider: ProviderID, model: String) {
@@ -124,8 +120,10 @@ struct StatBatch {
 
     /// A Codex response: counted, bucketed by hour, and its context size.
     mutating func addResponse(day: String, provider: ProviderID, model: String, at: Date, tokens: TokenCounts) {
+        let hour = Calendar.current.component(.hour, from: at)
         sums[slot(day, provider, model, StatKey.responses), default: 0] += 1
-        sums[slot(day, provider, model, StatKey.hour(Calendar.current.component(.hour, from: at))), default: 0] += 1
+        sums[slot(day, provider, model, StatKey.hour(hour)), default: 0] += 1
+        sums[slot(day, provider, model, StatKey.hourTokens(hour)), default: 0] += tokens.total
         addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, tokens.context)
     }
 

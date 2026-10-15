@@ -124,7 +124,10 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
      it comes before the Reset, faint if after (the headroom). Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
    - That Provider's usage only: tokens, cost, chart, top models and Projects. Today is provisional.
-3. **Footer**: last check time, check now (⌘R), Stats (⌘S, §13), settings (⌘,), quit (⌘Q).
+3. **Footer**: last check time, check now (⌘R), Stats (⌘S, §13), how Tinybar counts (⌘I), settings
+   (⌘,), quit (⌘Q). "How Tinybar counts" is a page like Settings: where limits, tokens, API
+   prices and Stats come from, what stays on the Mac, and how much of the last 30 days' tokens
+   Activity was counted from when that is short of all.
 
 **Settings** (replaces the page, back with Esc): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), and hide percentage.
 
@@ -162,7 +165,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - `daily_usage(day, provider, model, project, input, output, cache_write, cache_read)`, primary key (day, provider, model, project).
 - `file_cursor(path, inode, size, mtime, offset)`.
 - `claude_message(id, …, stats)`: the tokens and Activity counted per Claude message id, for de-duplication. Ids older than 90 days are pruned once a day; daily totals are kept.
-- `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`.
+- `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`. Every counter is kept per model, including `hour.HH` (responses started in that hour) and `tokens.hour.HH` (their tokens).
 - `claude_event(id, day)`: Claude Prompts, edit results and Compactions already counted, pruned with message ids.
 - The schema allows a future `account` column (multi-account later).
 
@@ -207,27 +210,52 @@ screenshot. Claude Code and Codex only. Opened from the popover footer (⌘S); b
 released when closed, so it costs nothing otherwise. Activity is counted at ingest (ADR 0006).
 
 **Layout**: one fixed 960 × 600 card under a title bar row with the range (7 days, 30 days, All
-time) and **Copy image**, which puts the card on the clipboard at 2× in the current appearance.
-The card carries its date span and the Tinybar mark, and never shows project names.
+time) and **Copy image**, which puts the card on the clipboard at 2× in the current appearance. The
+card opens with the Tinybar mark and name on the left and its date span on the right, and never
+shows project names.
 
 - **Tokens** in full digits, coloured by each Provider's share (Claude orange, Codex ink), with
-  Theoretical Cost, the share legend and a daily bar chart.
-- **Agent Time**, also as 40-hour weeks (or 8-hour days below a week).
+  Theoretical Cost, the share legend and a bar chart. 7 and 30 days have a bar per day; All time
+  picks the bar so the chart stays readable: a day up to 92 days, a week (Monday to Sunday) up to
+  78 weeks, then a month. A caption says which.
+- **Agent Time**, also as full-time weeks of 40 hours (or full workdays of 8 hours below a week).
 - **Tool Calls**, also per Prompt.
-- **Lines written**: lines added by file edits (Claude Code's Edit, Write and MultiEdit results;
-  Codex file changes and `apply_patch`), with lines removed. Files changed through shell commands
-  aren't seen.
+- **Lines added** by file edits (Claude Code's Edit, Write and MultiEdit results; Codex file
+  changes and `apply_patch`), with lines removed. Files changed through shell commands aren't seen.
 - **Prompts**, with model responses per Prompt.
-- **When your agents work**: responses by weekday and local hour, with the busiest slot.
+- **When your agents work**: tokens by weekday and local hour, with the busiest slot.
 - **Tool Calls by kind**: shell commands, web lookups, MCP tools, file reads, file edits, code
   searches, subagents; each bar split by Provider.
-- **Models**: the top three by tokens, with Output Speed and peak context.
+- **Models**: the top four by tokens, with average Output Speed and peak context. "All N" opens
+  every model in the range, by Provider, in a popover.
 - **Facts**: current and longest Streak, busiest day, share of input read from cache, Compactions
   (and tokens they summarized, Claude), biggest context, Projects and active days.
 
+**Model filter**: clicking a model in the card or in the full list shows that model alone
+everywhere except the model list; clicking it again or Escape goes back. A model from the full list
+takes a fifth row kept free for it. The Streak then counts that model's days. Changing to a range
+the model wasn't used in goes back to all models. The copied image shows the filter as it is.
+
+**Nothing moves**: filtering or new data changes values, never positions. The token count is sized
+to all models' total for the range, every section keeps its rows (empty ones included), and the
+numbers and bars animate to their new values (not with Reduce Motion).
+
+**Details on hover**: pointing at a piece of the card shows its figures and what it means, right
+away, without moving anything else: a bar's tokens by Provider, cost, Prompts, Tool Calls, Agent
+Time and lines; a heat map cell's tokens and responses, summed over the range's weekdays of that
+name; a tool kind's split by Provider and its most used tool names; a model's tokens, share, cost,
+responses, speed and how many responses it was timed over; the definitions of the headline numbers
+and facts; the top Projects by name. The hovered bar, cell or tool row stays lit and the others
+dim. The copied image has no hover state.
+
 ### What counts
 - **Prompt**: a Claude Code user line that is typed text (not a tool result, `isMeta`, a compact
-  summary, a sidechain or a notification); a Codex user message outside subagent sessions.
+  summary, a sidechain or a notification) and is answered: the next main-thread response before
+  another Prompt counts it, under that response's model. Codex: a user message outside subagent
+  sessions, under the turn's model.
+- **Model of other Activity**: a Claude response's own (tool calls, timing); an edit result's is the
+  model that made the call; a Compaction's the latest response's. Codex: the turn's model. GPT
+  models run inside Claude Code count under Codex, as their tokens do.
 - **Tool Call**: Claude Code `tool_use` blocks, deduplicated by their id (MCP tools stored as
   `MCP`). Codex `item_completed` actions (command, file change, web search, MCP call), or in
   older versions the named tool calls. `exec`/`js` wrappers are not Tool Calls themselves.
@@ -247,5 +275,9 @@ The card carries its date span and the Tinybar mark, and never shows project nam
 A database from a version without Activity is backfilled once, in the history import's child
 process: every log is re-read up to its saved offset for Activity only. Token totals and offsets
 are untouched. Activity from logs no longer on disk (deleted, or archived by the CLI) can't be
-recovered, so those sessions show tokens but no Activity; the card notes from which day each
-Provider's Activity is counted when that is later than its token history.
+recovered, so those sessions show tokens but no Activity; "How Tinybar counts" says how much of
+each Provider's tokens the counted logs hold. Codex compresses older sessions to `.jsonl.zst`,
+which Tinybar doesn't read.
+
+0.2.0 kept Prompts, Tool Calls, lines, Agent Time and Compactions without their model. Its
+counters are cleared once (schema 4) and recounted the same way, per model.

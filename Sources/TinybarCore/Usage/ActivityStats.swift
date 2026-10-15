@@ -3,32 +3,35 @@ import Foundation
 /// Counters derived from Claude Code and Codex logs beyond token counts: what the agents did
 /// (tool calls, lines changed, compactions) and how long it took (Agent Time, Output Speed).
 /// Stored per (day, Provider, model, key) as plain sums or maxima, so a new stat needs no schema
-/// change (SPEC §9).
+/// change (SPEC §9). Every key is kept per model, so the Stats window can show one model alone.
 public enum StatKey {
-    /// Model responses. Per model.
+    /// Model responses.
     public static let responses = "responses"
-    /// Prompts the user typed. Model "".
+    /// Prompts the user typed, under the model that answered them.
     public static let prompts = "prompts"
-    /// `tool.<name>`: tool calls by normalized tool name. Per model (Claude) or "" (Codex).
+    /// `tool.<name>`: tool calls by normalized tool name.
     public static let toolPrefix = "tool."
     public static let linesAdded = "lines.added"
     public static let linesRemoved = "lines.removed"
     public static let compactions = "compactions"
     /// Tokens a Claude compaction summarized away (context before minus after).
     public static let compactedTokens = "compacted.tokens"
-    /// Largest context one response read (input plus cache). Stored as a maximum. Per model.
+    /// Largest context one response read (input plus cache). Stored as a maximum.
     public static let contextMax = "context.max"
-    /// Output Speed samples: output tokens, milliseconds and sample count. Per model.
+    /// Output Speed samples: output tokens, milliseconds and sample count.
     public static let speedTokens = "speed.tokens"
     public static let speedMillis = "speed.ms"
     public static let speedSamples = "speed.n"
     /// Agent Time in milliseconds.
     public static let agentMillis = "agent.ms"
-    /// `hour.<HH>`: responses started in that local hour. Model "".
+    /// `hour.<HH>`: responses started in that local hour.
     public static let hourPrefix = "hour."
+    /// `tokens.hour.<HH>`: the tokens of those responses.
+    public static let hourTokensPrefix = "tokens.hour."
 
     public static func tool(_ name: String) -> String { toolPrefix + name }
     public static func hour(_ h: Int) -> String { hourPrefix + String(format: "%02d", h) }
+    public static func hourTokens(_ h: Int) -> String { hourTokensPrefix + String(format: "%02d", h) }
 
     /// Keys stored as maxima rather than sums.
     public static func isMaximum(_ key: String) -> Bool { key == contextMax }
