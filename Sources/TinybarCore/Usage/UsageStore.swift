@@ -9,12 +9,21 @@ public struct DailyUsage: Sendable, Hashable {
     public var tokens: TokenCounts
 }
 
+/// A row of the activity counters (SPEC §9).
+public struct DailyStat: Sendable, Hashable {
+    public var day: String
+    public var provider: ProviderID
+    public var model: String
+    public var key: String
+    public var value: Int64
+}
+
 /// Persistent store of daily token totals plus per-file read cursors, so history survives CLIs
 /// deleting their logs and each ingest only reads appended bytes.
 public actor UsageStore {
     private let db: SQLiteDB
     private let projects = ProjectResolver()
-    private static let schemaVersion: Int64 = 2
+    private static let schemaVersion: Int64 = 3
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
         db = try SQLiteDB(path: path.path)
@@ -24,12 +33,15 @@ public actor UsageStore {
     private static func migrate(_ db: SQLiteDB) throws {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
-        if version >= 1 {
-            // v1 → v2: Claude message table only.
-            try db.exec(claudeMessageSchema + "PRAGMA user_version = \(schemaVersion);")
+        if version == 2 {
+            try db.exec("ALTER TABLE claude_message ADD COLUMN stats TEXT;" + statSchema + "PRAGMA user_version = \(schemaVersion);")
             return
         }
-        try db.exec(claudeMessageSchema)
+        if version == 1 {
+            try db.exec(claudeMessageSchema + statSchema + "PRAGMA user_version = \(schemaVersion);")
+            return
+        }
+        try db.exec(claudeMessageSchema + statSchema)
         try db.exec("""
         CREATE TABLE IF NOT EXISTS daily_usage (
             day TEXT NOT NULL,
@@ -68,7 +80,25 @@ public actor UsageStore {
         input INTEGER NOT NULL,
         output INTEGER NOT NULL,
         cache_write INTEGER NOT NULL,
-        cache_read INTEGER NOT NULL
+        cache_read INTEGER NOT NULL,
+        stats TEXT
+    ) WITHOUT ROWID;
+    """
+
+    /// Activity counters (SPEC §9), and the ids of one-off Claude events (prompts, edits,
+    /// compactions) already counted, since resumed sessions copy them into new transcripts.
+    private static let statSchema = """
+    CREATE TABLE IF NOT EXISTS daily_stat (
+        day TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, provider, model, key)
+    ) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS claude_event (
+        id TEXT PRIMARY KEY,
+        day TEXT NOT NULL
     ) WITHOUT ROWID;
     """
 
@@ -170,8 +200,8 @@ public actor UsageStore {
                     let (read, added) = try autoreleasepool {
                         let cursor = try loadCursor(path: path)
                         switch source {
-                        case .codex: return try ingestCodexFile(path: path, stamp: stamp, cursor: cursor)
-                        case .claude: return try ingestClaudeFile(path: path, stamp: stamp, cursor: cursor)
+                        case .codex: return try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .incremental)
+                        case .claude: return try ingestClaudeFile(path: path, stamp: stamp, cursor: cursor, mode: .incremental)
                         }
                     }
                     result.filesScanned += 1
@@ -198,12 +228,23 @@ public actor UsageStore {
         return FileStamp(inode: known[0].int, size: known[1].int, mtime: known[2].int) != stamp
     }
 
-    private func ingestCodexFile(path: String, stamp: FileStamp, cursor: Cursor?) throws -> (Int64, Int) {
+    /// How a file is read. `backfill` re-reads what an earlier version already counted, up to the
+    /// saved offset, for activity stats only: token totals and offsets stay as they are.
+    enum ReadMode {
+        case incremental
+        case backfill
+    }
+
+    private func ingestCodexFile(path: String, stamp: FileStamp, cursor: Cursor?, mode: ReadMode) throws -> (Int64, Int) {
         let url = URL(fileURLWithPath: path)
         // Resume only if it's the same file and it only grew; otherwise start over.
         var parser = CodexLogParser()
         var offset: Int64 = 0
-        if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset,
+        var until: Int64?
+        if mode == .backfill {
+            guard let cursor else { return (0, 0) }
+            until = cursor.offset
+        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset,
            let state = cursor.state, let decoded = try? JSONDecoder().decode(CodexLogParser.self, from: state)
         {
             parser = decoded
@@ -215,52 +256,92 @@ public actor UsageStore {
         }
 
         var agg: [AggKey: TokenCounts] = [:]
+        var stats = StatBatch()
         var added = 0
-        let endOffset = try JSONLReader.forEachLine(url: url, from: offset) { line in
-            guard let record = parser.consume(line: line) else { return }
-            let key = AggKey(
-                day: DayKey.string(for: record.timestamp),
-                model: ModelName.normalize(record.model),
-                project: projects.project(for: record.cwd))
-            agg[key, default: TokenCounts()] += record.tokens
+        let endOffset = try JSONLReader.forEachLine(url: url, from: offset, until: until) { line in
+            let current = ModelName.normalize(parser.model ?? "unknown")
+            let record = parser.consume(line: line) { stats.add($0, provider: .codex, model: current) }
+            guard let record else { return }
+            let day = DayKey.string(for: record.timestamp)
+            let model = ModelName.normalize(record.model)
+            stats.addResponse(day: day, provider: .codex, model: model, at: record.timestamp, tokens: record.tokens)
+            if mode == .incremental {
+                agg[AggKey(day: day, model: model, project: projects.project(for: record.cwd)), default: TokenCounts()] += record.tokens
+            }
             added += 1
         }
 
         for (key, t) in agg {
             try addDaily(day: key.day, provider: .codex, model: key.model, project: key.project, t)
         }
+        try write(stats)
         let state = (try? JSONEncoder().encode(parser)).map { String(decoding: $0, as: UTF8.self) }
-        try saveCursor(path: path, source: .codex, stamp: stamp, offset: endOffset, state: state)
+        if mode == .backfill, let cursor {
+            try saveCursor(path: path, source: .codex, stamp: cursor.stamp, offset: cursor.offset, state: state)
+        } else {
+            try saveCursor(path: path, source: .codex, stamp: stamp, offset: endOffset, state: state)
+        }
         return (endOffset - offset, added)
     }
 
-    private func ingestClaudeFile(path: String, stamp: FileStamp, cursor: Cursor?) throws -> (Int64, Int) {
+    private func ingestClaudeFile(path: String, stamp: FileStamp, cursor: Cursor?, mode: ReadMode) throws -> (Int64, Int) {
         // Counting is per message id and idempotent, so a replaced or truncated file can simply
         // be re-read from the start.
         var offset: Int64 = 0
-        if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset {
+        var until: Int64?
+        var session = ClaudeLogParser.Session(subagentFile: path.contains("/subagents/"))
+        if mode == .backfill {
+            guard let cursor else { return (0, 0) }
+            until = cursor.offset
+        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset {
             offset = cursor.offset
+            if let state = cursor.state, let decoded = try? JSONDecoder().decode(ClaudeLogParser.Session.self, from: state) {
+                session = decoded
+            }
         }
 
         // Merge within the file first: streaming writes several lines per message.
-        var latest: [String: UsageRecord] = [:]
+        var latest: [String: ClaudeMessage] = [:]
         var order: [String] = []
-        let endOffset = try JSONLReader.forEachLine(url: URL(fileURLWithPath: path), from: offset) { line in
-            guard let entry = ClaudeLogParser.parse(line: line) else { return }
-            if let existing = latest[entry.messageID] {
-                latest[entry.messageID] = Self.merged(existing, entry.record)
-            } else {
-                latest[entry.messageID] = entry.record
-                order.append(entry.messageID)
+        var events: [(id: String, at: Date, values: [String: Int64])] = []
+        let endOffset = try JSONLReader.forEachLine(url: URL(fileURLWithPath: path), from: offset, until: until) { line in
+            switch session.consume(line: line) {
+            case let .message(m):
+                if latest[m.entry.messageID] != nil {
+                    latest[m.entry.messageID]!.merge(m)
+                } else {
+                    latest[m.entry.messageID] = ClaudeMessage(m)
+                    order.append(m.entry.messageID)
+                }
+            case let .prompt(id, at):
+                events.append(("p:" + id, at, [StatKey.prompts: 1]))
+            case let .edit(id, at, added, removed):
+                events.append(("e:" + id, at, [StatKey.linesAdded: added, StatKey.linesRemoved: removed]))
+            case let .compaction(id, at, dropped):
+                events.append(("c:" + id, at, [StatKey.compactions: 1, StatKey.compactedTokens: dropped]))
+            case nil:
+                break
             }
         }
 
         var added = 0
         for id in order {
-            guard let record = latest[id] else { continue }
-            if try upsertClaudeMessage(id: id, record) { added += 1 }
+            guard let message = latest[id] else { continue }
+            if try upsertClaudeMessage(id: id, message, countTokens: mode == .incremental) { added += 1 }
         }
-        try saveCursor(path: path, source: .claude, stamp: stamp, offset: endOffset, state: nil)
+        var stats = StatBatch()
+        for event in events {
+            let day = DayKey.string(for: event.at)
+            try db.run("INSERT OR IGNORE INTO claude_event (id, day) VALUES (?, ?)", [.text(event.id), .text(day)])
+            if db.changes > 0 { stats.add(StatEvent(timestamp: event.at, values: event.values), provider: .claude, model: "") }
+        }
+        try write(stats)
+        let state = (try? JSONEncoder().encode(session)).map { String(decoding: $0, as: UTF8.self) }
+        if mode == .backfill, let cursor {
+            try saveCursor(path: path, source: .claude, stamp: cursor.stamp, offset: cursor.offset, state: state)
+        } else {
+            try saveCursor(path: path, source: .claude, stamp: stamp, offset: endOffset, state: state)
+        }
         return (endOffset - offset, added)
     }
 
@@ -277,27 +358,43 @@ public actor UsageStore {
         return r
     }
 
-    /// Records a message's usage, replacing any earlier count for the same id.
+    /// Records a message's usage and activity, replacing any earlier count for the same id.
+    /// With `countTokens` false (backfill) the daily token totals are left alone.
     /// Returns true for a message seen for the first time.
-    private func upsertClaudeMessage(id: String, _ record: UsageRecord) throws -> Bool {
+    private func upsertClaudeMessage(id: String, _ message: ClaudeMessage, countTokens: Bool = true) throws -> Bool {
+        let record = message.record
         let existing = try db.run(
-            "SELECT day, provider, model, project, input, output, cache_write, cache_read FROM claude_message WHERE id = ?",
+            "SELECT day, provider, model, project, input, output, cache_write, cache_read, stats FROM claude_message WHERE id = ?",
             [.text(id)]).first
 
-        var final = record
         if let e = existing {
             let old = TokenCounts(input: e[4].int, output: e[5].int, cacheWrite: e[6].int, cacheRead: e[7].int)
-            final = Self.merged(UsageRecord(timestamp: record.timestamp, model: record.model, cwd: record.cwd, tokens: old), record)
-            if final.tokens == old { return false }
-            // Undo the old contribution, keeping its original day/model/project.
-            let oldProvider = e[1].text.flatMap(ProviderID.init(rawValue:)) ?? .claude
-            try addDaily(day: e[0].text ?? "", provider: oldProvider, model: e[2].text ?? "", project: e[3].text ?? "",
-                         TokenCounts(input: -old.input, output: -old.output, cacheWrite: -old.cacheWrite, cacheRead: -old.cacheRead))
-            try addDaily(day: e[0].text ?? "", provider: oldProvider, model: e[2].text ?? "", project: e[3].text ?? "", final.tokens)
+            let final = Self.merged(UsageRecord(timestamp: record.timestamp, model: record.model, cwd: record.cwd, tokens: old), record)
+            let oldStats = e[8].text.flatMap { try? JSONDecoder().decode(MessageStats.self, from: Data($0.utf8)) }
+            let newStats = MessageStats(message).merged(with: oldStats)
+            let tokensChanged = final.tokens != old
+            guard tokensChanged || newStats != oldStats else { return false }
+
+            let day = e[0].text ?? ""
+            let provider = e[1].text.flatMap(ProviderID.init(rawValue:)) ?? .claude
+            let model = e[2].text ?? ""
+            if tokensChanged && countTokens {
+                // Undo the old contribution, keeping its original day/model/project.
+                let project = e[3].text ?? ""
+                try addDaily(day: day, provider: provider, model: model, project: project,
+                             TokenCounts(input: -old.input, output: -old.output, cacheWrite: -old.cacheWrite, cacheRead: -old.cacheRead))
+                try addDaily(day: day, provider: provider, model: model, project: project, final.tokens)
+            }
+            var stats = StatBatch()
+            stats.replace(
+                day: day, provider: provider, model: model,
+                old: oldStats?.contributions(tokens: old) ?? [:], new: newStats.contributions(tokens: final.tokens))
+            stats.addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, final.tokens.context)
+            try write(stats)
             try db.run("""
-            UPDATE claude_message SET input = ?, output = ?, cache_write = ?, cache_read = ? WHERE id = ?
+            UPDATE claude_message SET input = ?, output = ?, cache_write = ?, cache_read = ?, stats = ? WHERE id = ?
             """, [.int(final.tokens.input), .int(final.tokens.output), .int(final.tokens.cacheWrite),
-                  .int(final.tokens.cacheRead), .text(id)])
+                  .int(final.tokens.cacheRead), .text(newStats.encoded), .text(id)])
             return false
         }
 
@@ -305,13 +402,86 @@ public actor UsageStore {
         let model = ModelName.normalize(record.model)
         let provider = ClaudeLogParser.provider(forModel: model)
         let project = projects.project(for: record.cwd)
-        try addDaily(day: day, provider: provider, model: model, project: project, record.tokens)
+        if countTokens {
+            try addDaily(day: day, provider: provider, model: model, project: project, record.tokens)
+        }
+        let newStats = MessageStats(message)
+        var stats = StatBatch()
+        stats.replace(day: day, provider: provider, model: model, old: [:], new: newStats.contributions(tokens: record.tokens))
+        stats.addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, record.tokens.context)
+        try write(stats)
         try db.run("""
-        INSERT INTO claude_message (id, day, provider, model, project, input, output, cache_write, cache_read)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO claude_message (id, day, provider, model, project, input, output, cache_write, cache_read, stats)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [.text(id), .text(day), .text(provider.rawValue), .text(model), .text(project),
-              .int(record.tokens.input), .int(record.tokens.output), .int(record.tokens.cacheWrite), .int(record.tokens.cacheRead)])
+              .int(record.tokens.input), .int(record.tokens.output), .int(record.tokens.cacheWrite), .int(record.tokens.cacheRead),
+              .text(newStats.encoded)])
         return true
+    }
+
+    // MARK: Activity stats
+
+    private func write(_ batch: StatBatch) throws {
+        for (slot, value) in batch.sums where value != 0 {
+            try db.run("""
+            INSERT INTO daily_stat (day, provider, model, key, value) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(day, provider, model, key) DO UPDATE SET value = value + excluded.value
+            """, [.text(slot.day), .text(slot.provider.rawValue), .text(slot.model), .text(slot.key), .int(value)])
+        }
+        for (slot, value) in batch.maxima where value > 0 {
+            try db.run("""
+            INSERT INTO daily_stat (day, provider, model, key, value) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(day, provider, model, key) DO UPDATE SET value = max(value, excluded.value)
+            """, [.text(slot.day), .text(slot.provider.rawValue), .text(slot.model), .text(slot.key), .int(value)])
+        }
+    }
+
+    /// Re-reads every log already ingested by a version without activity stats, up to its saved
+    /// offset, counting activity only. Runs once, in the history import's child process.
+    @discardableResult
+    public func backfillStats(progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult {
+        let cursors = try db.run("SELECT path, provider FROM file_cursor").compactMap { r -> (String, LogSource)? in
+            guard let path = r[0].text, let source = r[1].text.flatMap(LogSource.init(rawValue:)) else { return nil }
+            return (path, source)
+        }
+        var result = IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0)
+        let batchSize = 200
+        var index = 0
+        while index < cursors.count {
+            let batch = cursors[index..<min(index + batchSize, cursors.count)]
+            try db.transaction {
+                for (path, source) in batch {
+                    guard let cursor = try loadCursor(path: path), let stamp = Self.stamp(path),
+                          stamp.inode == cursor.stamp.inode, stamp.size >= cursor.offset
+                    else { continue }  // gone or replaced: the next ingest reads it from the start
+                    let (read, added) = try autoreleasepool {
+                        switch source {
+                        case .codex: try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .backfill)
+                        case .claude: try ingestClaudeFile(path: path, stamp: stamp, cursor: cursor, mode: .backfill)
+                        }
+                    }
+                    result.filesScanned += 1
+                    result.bytesRead += read
+                    result.recordsAdded += added
+                }
+            }
+            index += batch.count
+            progress?(IngestProgress(filesDone: index, filesTotal: cursors.count))
+        }
+        try markStatsBackfillDone()
+        if result.filesScanned > batchSize {
+            try? db.exec("PRAGMA shrink_memory")
+            malloc_zone_pressure_relief(nil, 0)
+        }
+        return result
+    }
+
+    public func hasCompletedStatsBackfill() throws -> Bool {
+        try db.run("SELECT value FROM meta WHERE key = 'stats_backfill'").first?.first?.text == "done"
+    }
+
+    public func markStatsBackfillDone() throws {
+        try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('stats_backfill', 'done')")
     }
 
     /// How long a Claude message id is kept for de-duplication. Copies of a message in later
@@ -325,7 +495,9 @@ public actor UsageStore {
     public func pruneClaudeMessages(now: Date = Date()) throws -> Int {
         let cutoff = DayKey.daysAgo(Self.claudeMessageRetentionDays, from: now)
         try db.run("DELETE FROM claude_message WHERE day < ?", [.text(cutoff)])
-        return db.changes
+        let removed = db.changes
+        try db.run("DELETE FROM claude_event WHERE day < ?", [.text(cutoff)])
+        return removed
     }
 
     /// Prunes at most once per day, so the 5-minute poll doesn't scan the table each time.
@@ -377,6 +549,19 @@ public actor UsageStore {
                 project: r[3].text ?? "",
                 tokens: TokenCounts(input: r[4].int, output: r[5].int, cacheWrite: r[6].int, cacheRead: r[7].int))
         }
+    }
+
+    /// Activity counters with `day >= since`.
+    public func stats(since: String) throws -> [DailyStat] {
+        try db.run("SELECT day, provider, model, key, value FROM daily_stat WHERE day >= ?", [.text(since)]).compactMap { r in
+            guard let provider = r[1].text.flatMap(ProviderID.init(rawValue:)) else { return nil }
+            return DailyStat(day: r[0].text ?? "", provider: provider, model: r[2].text ?? "", key: r[3].text ?? "", value: r[4].int)
+        }
+    }
+
+    /// Every day with any tokens, oldest first: streaks span the whole history.
+    public func activeDays() throws -> [String] {
+        try db.run("SELECT DISTINCT day FROM daily_usage ORDER BY day").compactMap { $0.first?.text }
     }
 
     public func hasCompletedInitialImport() throws -> Bool {
@@ -493,7 +678,10 @@ enum JSONLReader {
     static let maxLineBytes = 1024 * 1024
 
     /// Calls `body` with each complete line (no newline) as a raw buffer valid only for the call.
-    static func forEachLine(url: URL, from start: Int64, _ body: (UnsafeRawBufferPointer) -> Void) throws -> Int64 {
+    /// With `until`, stops at the first line that ends past that offset.
+    static func forEachLine(
+        url: URL, from start: Int64, until: Int64? = nil, _ body: (UnsafeRawBufferPointer) -> Void) throws -> Int64
+    {
         let fd = open(url.path, O_RDONLY)
         guard fd >= 0 else { return start }
         defer { close(fd) }
@@ -506,7 +694,8 @@ enum JSONLReader {
         var consumedOffset = start // file offset just past the last complete line
         var skipping = false       // inside an oversized line; drop bytes until the next newline
 
-        while true {
+        var reachedLimit = false
+        while !reachedLimit {
             let n = read(fd, buf + filled, capacity - filled)
             if n <= 0 { break }
             filled += n
@@ -515,10 +704,18 @@ enum JSONLReader {
                   let nl = memchr(buf + lineStart, 0x0A, filled - lineStart)
             {
                 let end = buf.distance(to: nl)
+                if let until, consumedOffset + Int64(end + 1) > until {
+                    reachedLimit = true
+                    break
+                }
                 if skipping {
                     skipping = false
+                } else if end - lineStart > maxLineBytes {
+                    // Skipped whether or not it happens to fit in the buffer, so a full read and an
+                    // incremental one see the same lines.
                 } else if end > lineStart {
-                    body(UnsafeRawBufferPointer(start: buf + lineStart, count: end - lineStart))
+                    // Parsers build Foundation objects per line; release them per line, not per file.
+                    autoreleasepool { body(UnsafeRawBufferPointer(start: buf + lineStart, count: end - lineStart)) }
                 }
                 lineStart = end + 1
             }

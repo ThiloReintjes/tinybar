@@ -37,8 +37,11 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   `/usr/bin/security` for the Keychain, and a copy of Tinybar itself for the first history import.
   Anything that lets an attacker influence those arguments or the executable path is in scope.
 - **Local data.** `~/Library/Application Support/Tinybar/usage.sqlite` stores daily token totals, file
-  paths of the logs it read, project folder paths and Claude message IDs. No prompts, no responses,
-  no tokens. Anything that puts more than that on disk is a bug.
+  paths of the logs it read, project folder paths, Claude message IDs and daily Activity counters.
+  For de-duplication it also keeps, for up to 90 days, the ids of Claude tool calls, prompts, edits
+  and compactions, tool names (MCP tools only as "MCP") and the timestamps of each response. No
+  prompts, no responses, no commands, file contents or diffs, no tokens. Anything that puts more
+  than that on disk is a bug.
 
 ## Out of scope
 

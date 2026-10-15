@@ -74,13 +74,39 @@ func usage() async throws {
     }
 }
 
+/// Raw activity counters per provider and key since a day (default: everything), for checking
+/// against an independent count of the logs.
+func stats() async throws {
+    let store = try UsageStore(path: dbURL)
+    let since = args.first { $0.hasPrefix("--since=") }.map { String($0.dropFirst(8)) } ?? "0000"
+    var totals: [String: Int64] = [:]
+    for row in try await store.stats(since: since) {
+        let key = row.key.hasPrefix(StatKey.hourPrefix) ? "hour.*" : row.key
+        if StatKey.isMaximum(row.key) {
+            totals["\(row.provider.rawValue) \(key)"] = max(totals["\(row.provider.rawValue) \(key)"] ?? 0, row.value)
+        } else {
+            totals["\(row.provider.rawValue) \(key)", default: 0] += row.value
+        }
+    }
+    for (k, v) in totals.sorted(by: { $0.key < $1.key }) { print("\(k) = \(v)") }
+}
+
+func backfill() async throws {
+    let store = try UsageStore(path: dbURL)
+    let start = Date()
+    let r = try await store.backfillStats()
+    print(String(format: "backfill files=%d bytes=%.1fMB in %.1fs", r.filesScanned, Double(r.bytesRead) / 1e6, Date().timeIntervalSince(start)))
+}
+
 switch command {
 case "limits": await printLimits(browser: args.contains("--browser"))
 case "cookies": printCookies()
 case "web": await printWeb()
 case "ingest": try await ingest()
 case "usage": try await usage()
-default: print("usage: tinybar-cli [limits [--browser]|cookies|ingest|usage] [db-path]")
+case "stats": try await stats()
+case "backfill": try await backfill()
+default: print("usage: tinybar-cli [limits [--browser]|cookies|ingest|usage|stats|backfill] [db-path]")
 }
 
 // `tinybar-cli web`: exercises only the browser-cookie paths.

@@ -55,3 +55,32 @@ _Avoid_: Open day, pending day
 **Theoretical Cost**:
 What a set of Usage Records would have cost at the Provider's public API prices. It is not what the user actually paid.
 _Avoid_: Spend, cost, bill
+
+### Activity
+
+**Activity**:
+What the agents did, read from the same local logs as Usage Records: Prompts, Tool Calls, lines written, Compactions, Agent Time and Output Speed. Claude Code and Codex only.
+_Avoid_: Telemetry, metrics, analytics
+
+**Prompt**:
+A message the user typed into Claude Code or Codex. Tool results, injected context, background-task notifications and messages between agents are not Prompts.
+_Avoid_: Request, query, turn
+
+**Tool Call**:
+One action an agent takes through a tool: a shell command, a file edit or read, a code search, a web lookup, a subagent, an MCP tool.
+_Avoid_: Action, function call, step
+
+**Compaction**:
+A CLI summarizing a session's context to make room, by itself or on request.
+_Avoid_: Context reset, summarization
+
+**Agent Time**:
+How long the agents worked: from a Prompt to the end of the agent's last step in that turn, tool execution included. Parallel sessions and subagents add up, so it can exceed the hours in a day.
+_Avoid_: Session time, runtime, compute time
+
+**Output Speed**:
+A model's output tokens per second, from sending a request to its last token, over responses of at least 200 output tokens. It includes the wait for the first token.
+_Avoid_: Throughput, latency, tokens per second (without saying how it is measured)
+
+**Streak**:
+Consecutive local calendar days with any Usage Records.

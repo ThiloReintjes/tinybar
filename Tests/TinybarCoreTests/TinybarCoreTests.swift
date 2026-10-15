@@ -244,3 +244,26 @@ private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWi
     #expect(snapshot.firstRunOut(includeModelSpecific: false)?.window.id == "session")
     #expect(snapshot.firstRunOut(includeModelSpecific: false)?.at == now.addingTimeInterval(3600))
 }
+
+@Test func parsesLogTimestampsWithoutAFormatter() throws {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    for raw in ["2026-10-15T07:52:26.877Z", "2024-02-29T23:59:59.001Z", "1999-12-31T00:00:00.5Z"] {
+        #expect(parseUTCTimestamp(raw) == formatter.date(from: raw))
+    }
+    #expect(parseUTCTimestamp("2026-10-15T07:52:26Z") == ISO8601DateFormatter().date(from: "2026-10-15T07:52:26Z"))
+    #expect(parseUTCTimestamp("2026-10-15T07:52:26+02:00") == nil)
+    #expect(parseISODate("2026-10-15T07:52:26+02:00") != nil)
+}
+
+@Test func countsFileChangeLinesFromRawJSON() {
+    let line = #"{"timestamp":"2026-10-15T07:52:26.877Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"x","changes":{"/a.txt":{"type":"add","content":"one\n\nthree \"q\"\n"},"/b.txt":{"type":"update","unified_diff":"--- a\n+++ b\n@@ -1,2 +1,2 @@\n-old\n+new\n+-- added comment\n keep"},"/c.txt":{"type":"delete","content":"x\ny"}},"status":"completed"}}}"#
+    let (added, removed) = Data(line.utf8).withUnsafeBytes { CodexLogParser.fileChangeLines($0) }
+    #expect(added == 3 + 2)
+    #expect(removed == 1 + 2)
+    var parser = CodexLogParser()
+    var events: [StatEvent] = []
+    _ = parser.consume(line: Data(line.utf8)) { events.append($0) }
+    #expect(events.first?.values[StatKey.linesAdded] == 5)
+    #expect(events.first?.values[StatKey.tool("Edit")] == 1)
+}

@@ -667,6 +667,8 @@ private struct Footer: View {
             }
             .disabled(model.isRefreshing)
             .keyboardShortcut("r")
+            FooterButton(icon: "chart.bar.xaxis", label: "Stats") { model.openStats() }
+                .keyboardShortcut("s")
             FooterButton(icon: "gearshape", label: "Settings") {
                 select(page == .settings ? .overview : .settings)
             }

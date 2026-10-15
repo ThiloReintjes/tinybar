@@ -281,14 +281,6 @@ struct ProviderDot: View {
     }
 }
 
-enum DayKeyDate {
-    static func date(_ key: String) -> Date {
-        let parts = key.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return Date() }
-        return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) ?? Date()
-    }
-}
-
 // MARK: Buttons
 
 /// A full-width row: highlights on hover and the instant it is pressed.
