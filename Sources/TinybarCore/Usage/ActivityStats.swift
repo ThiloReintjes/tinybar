@@ -29,9 +29,42 @@ public enum StatKey {
     /// `tokens.hour.<HH>`: the tokens of those responses.
     public static let hourTokensPrefix = "tokens.hour."
 
+    /// Responses that ran tools in parallel: several tool calls in one Claude response, or a Codex
+    /// script that awaits several at once.
+    public static let parallel = "parallel"
+
+    /// Shell commands whose text was read (`ShellCommand`), and their characters.
+    public static let commands = "cmd.n"
+    public static let commandChars = "cmd.chars"
+    /// `cmd.prog.<name>`: commands that run the program, counted once per command.
+    public static let programPrefix = "cmd.prog."
+    /// `cmd.git.<subcommand>`: commands that run that git subcommand.
+    public static let gitPrefix = "cmd.git."
+    /// Commands that pipe output into `head` or `tail`.
+    public static let pipedHeadTail = "cmd.headtail"
+    /// Commands that send code inline to Python or to a JavaScript runtime.
+    public static let inlinePython = "cmd.inline.py"
+    public static let inlineJS = "cmd.inline.js"
+    /// Commands whose exit status is known, and those that exited non-zero.
+    public static let commandsFinished = "cmd.done"
+    public static let commandsFailed = "cmd.failed"
+
+    /// `ext.added.<ext>`, `ext.removed.<ext>`, `ext.edits.<ext>`: lines and edits by the edited
+    /// file's extension (`FileKind`).
+    public static let extAddedPrefix = "ext.added."
+    public static let extRemovedPrefix = "ext.removed."
+    public static let extEditsPrefix = "ext.edits."
+
     public static func tool(_ name: String) -> String { toolPrefix + name }
     public static func hour(_ h: Int) -> String { hourPrefix + String(format: "%02d", h) }
     public static func hourTokens(_ h: Int) -> String { hourTokensPrefix + String(format: "%02d", h) }
+    public static func program(_ name: String) -> String { programPrefix + name }
+    public static func git(_ sub: String) -> String { gitPrefix + sub }
+
+    /// The counters of one file edit.
+    public static func edit(ext: String, added: Int64, removed: Int64) -> [String: Int64] {
+        [extAddedPrefix + ext: added, extRemovedPrefix + ext: removed, extEditsPrefix + ext: 1]
+    }
 
     /// Keys stored as maxima rather than sums.
     public static func isMaximum(_ key: String) -> Bool { key == contextMax }
@@ -126,6 +159,37 @@ public enum LineCount {
             if line.hasPrefix("+") { added += 1 } else if line.hasPrefix("-") { removed += 1 }
         }
         return (added, removed)
+    }
+
+    /// The same, per file: Codex patches name each file in a `*** Update File: <path>` line
+    /// (or `Add File`, `Delete File`), unified diffs in a `+++ b/<path>` header.
+    public static func files(inPatch patch: String) -> [(path: String, added: Int64, removed: Int64)] {
+        var out: [(path: String, added: Int64, removed: Int64)] = []
+        var inHunk = false
+        func start(_ path: Substring) {
+            out.append((String(path.trimmingCharacters(in: .whitespaces)), 0, 0))
+            inHunk = false
+        }
+        for line in patch.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("*** "), let r = line.range(of: " File: ") {
+                start(line[r.upperBound...])
+                continue
+            }
+            if line.hasPrefix("*** ") { continue }
+            if line.hasPrefix("@@") { inHunk = true; continue }
+            if !inHunk, line.hasPrefix("+++ ") {
+                let path = line.dropFirst(4)
+                if path != "/dev/null" {
+                    let p = path.hasPrefix("b/") ? path.dropFirst(2) : path
+                    if out.last?.path != String(p) { start(p) }
+                }
+                continue
+            }
+            if !inHunk, line.hasPrefix("---") { continue }
+            if out.isEmpty { out.append(("", 0, 0)) }
+            if line.hasPrefix("+") { out[out.count - 1].added += 1 } else if line.hasPrefix("-") { out[out.count - 1].removed += 1 }
+        }
+        return out.filter { !$0.path.isEmpty || $0.added + $0.removed > 0 }
     }
 
     /// Lines in Claude Code's `structuredPatch` hunks (`[{"lines": ["+a", "-b", " c"]}]`).

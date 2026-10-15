@@ -142,21 +142,23 @@ public struct CodexLogParser: Sendable, Codable {
     enum Light {
         case request, prompt, ignore
         case stat(String)
-        case edit(added: Int64, removed: Int64)
+        case values([String: Int64])
     }
 
     static func light(_ line: UnsafeRawBufferPointer) -> Light? {
         let head = UnsafeRawBufferPointer(rebasing: line.prefix(400))
         func has(_ s: String) -> Bool { contains(head, Data(s.utf8)) }
         if has(#""type":"item_completed""#) {
+            if has(#""item":{"type":"CommandExecution""#) {
+                return .values(commandValues(argv: stringArray("command", in: line), exitCode: exitCode(line)))
+            }
             for (item, light) in itemKinds where has(#""item":{"type":""# + item + "\"") { return light }
             if has(#""item":{"type":"Extension""#) {
                 // Web actions carry their results; the kind is all that's needed.
                 return contains(line, Data(#""kind":"web."#.utf8)) ? .stat(StatKey.tool("Web")) : .ignore
             }
             if has(#""item":{"type":"FileChange""#) {
-                let (added, removed) = fileChangeLines(line)
-                return .edit(added: added, removed: removed)
+                return .values(editValues(fileChanges(line)))
             }
             return .ignore
         }
@@ -169,16 +171,46 @@ public struct CodexLogParser: Sendable, Codable {
         if has(#""type":"local_shell_call""#) { return .stat(StatKey.tool("Shell")) }
         if has(#""type":"web_search_call""#) { return .stat(StatKey.tool("Web")) }
         if has(#""type":"custom_tool_call""#) || has(#""type":"function_call""#) {
-            // Newer versions' wrappers; the actions inside them arrive as items.
-            if contains(line, Data(#""name":"exec""#.utf8)) || contains(line, Data(#""name":"js""#.utf8)) { return .ignore }
+            // Newer versions' wrappers; the actions inside them arrive as items. Codex makes one call
+            // per response, so tools run in parallel only inside a script that awaits several at once.
+            if contains(line, Data(#""name":"exec""#.utf8)) || contains(line, Data(#""name":"js""#.utf8)) {
+                return contains(line, Data("Promise.all".utf8)) ? .stat(StatKey.parallel) : .ignore
+            }
         }
         return nil
     }
 
-    /// Added and removed lines of a FileChange item, read from the raw JSON: a new file's whole
-    /// content can be a megabyte, and parsing it into Foundation objects costs far more than
-    /// counting its newlines. Each change is `{"type":"add|update|delete", "content"|"unified_diff": "…"}`.
+    /// The counters of a shell command: a Tool Call, plus what its text and exit status say.
+    static func commandValues(argv: [String]?, exitCode: Int?) -> [String: Int64] {
+        var v: [String: Int64] = [StatKey.tool("Shell"): 1]
+        if let argv, !argv.isEmpty { v.merge(ShellCommand.stats(ShellCommand.text(argv: argv))) { a, _ in a } }
+        if let exitCode {
+            v[StatKey.commandsFinished] = 1
+            if exitCode != 0 { v[StatKey.commandsFailed] = 1 }
+        }
+        return v
+    }
+
+    /// The counters of one file change item or patch: an Edit, its lines, and its files' kinds.
+    static func editValues(_ files: [(path: String, added: Int64, removed: Int64)]) -> [String: Int64] {
+        var v: [String: Int64] = [StatKey.tool("Edit"): 1]
+        for f in files {
+            v[StatKey.linesAdded, default: 0] += f.added
+            v[StatKey.linesRemoved, default: 0] += f.removed
+            v.merge(StatKey.edit(ext: FileKind.of(path: f.path), added: f.added, removed: f.removed)) { $0 + $1 }
+        }
+        return v
+    }
+
+    /// Added and removed lines of a FileChange item, summed.
     static func fileChangeLines(_ line: UnsafeRawBufferPointer) -> (Int64, Int64) {
+        fileChanges(line).reduce((0, 0)) { ($0.0 + $1.added, $0.1 + $1.removed) }
+    }
+
+    /// Added and removed lines per file of a FileChange item, read from the raw JSON: a new file's
+    /// whole content can be a megabyte, and parsing it into Foundation objects costs far more than
+    /// counting its newlines. Changes are `{"<path>": {"type":"add|update|delete", "content"|"unified_diff": "…"}}`.
+    static func fileChanges(_ line: UnsafeRawBufferPointer) -> [(path: String, added: Int64, removed: Int64)] {
         let bytes = line.bindMemory(to: UInt8.self)
         let n = bytes.count
         func find(_ needle: String, from: Int) -> Int? {
@@ -188,14 +220,25 @@ public struct CodexLogParser: Sendable, Codable {
                 return base.distance(to: hit) + nb.count
             }
         }
+        var files: [(path: String, added: Int64, removed: Int64)] = []
         var added: Int64 = 0, removed: Int64 = 0
-        guard var i = find(#""changes":{"#, from: 0) else { return (0, 0) }
+        guard var i = find(#""changes":{"#, from: 0) else { return [] }
         while let t = find(#""type":""#, from: i) {
             var j = t
             while j < n, bytes[j] != UInt8(ascii: "\"") { j += 1 }
             let kind = String(decoding: UnsafeBufferPointer(rebasing: bytes[t..<j]), as: UTF8.self)
             i = j
             guard ["add", "update", "delete"].contains(kind) else { continue }
+            // The change's key, the file path, ends right before `:{"type":"`.
+            var path = ""
+            let open = t - 8
+            if open >= 3, bytes[open - 1] == UInt8(ascii: "{"), bytes[open - 2] == UInt8(ascii: ":"), bytes[open - 3] == UInt8(ascii: "\"") {
+                var p = open - 4
+                while p >= 0, !(bytes[p] == UInt8(ascii: "\"") && (p == 0 || bytes[p - 1] != UInt8(ascii: "\\"))) { p -= 1 }
+                if p >= 0 { path = String(decoding: UnsafeBufferPointer(rebasing: bytes[(p + 1)..<(open - 3)]), as: UTF8.self) }
+            }
+            added = 0
+            removed = 0
             let key = kind == "update" ? #""unified_diff":""# : #""content":""#
             guard let start = find(key, from: i) else { break }
             // Walk the JSON string, splitting lines at `\n` escapes and noting each line's first bytes.
@@ -227,8 +270,9 @@ public struct CodexLogParser: Sendable, Codable {
             }
             if lineHasBytes { endLine() }
             i = k
+            files.append((path, added, removed))
         }
-        return (added, removed)
+        return files
     }
 
     private static let itemKinds: [(String, Light)] = [
@@ -253,8 +297,8 @@ public struct CodexLogParser: Sendable, Codable {
             if subagent != true { stats(StatEvent(timestamp: at, values: [StatKey.prompts: 1])) }
         case let .stat(key):
             stats(StatEvent(timestamp: at, values: [key: 1]))
-        case let .edit(added, removed):
-            stats(StatEvent(timestamp: at, values: [StatKey.tool("Edit"): 1, StatKey.linesAdded: added, StatKey.linesRemoved: removed]))
+        case let .values(values):
+            stats(StatEvent(timestamp: at, values: values))
         case .ignore:
             break
         }
@@ -299,25 +343,26 @@ public struct CodexLogParser: Sendable, Codable {
         case ("event_msg", "item_completed"):
             let item = payload["item"] as? [String: Any] ?? [:]
             switch item["type"] as? String {
-            case "CommandExecution": tool("Shell")
+            case "CommandExecution":
+                emit(Self.commandValues(argv: item["command"] as? [String] ?? (item["command"] as? String).map { [$0] },
+                                        exitCode: (item["exit_code"] as? NSNumber)?.intValue))
             case "WebSearch": tool("Web")
             case "Extension" where (item["kind"] as? String)?.hasPrefix("web.") == true: tool("Web")
             case "McpToolCall": tool("MCP")
             case "ContextCompaction": emit([StatKey.compactions: 1])
             case "UserMessage" where subagent != true: emit([StatKey.prompts: 1])
             case "FileChange":
-                var added: Int64 = 0, removed: Int64 = 0
-                for case let change as [String: Any] in (item["changes"] as? [String: Any] ?? [:]).values {
+                var files: [(path: String, added: Int64, removed: Int64)] = []
+                for case let (path, change as [String: Any]) in item["changes"] as? [String: Any] ?? [:] {
                     switch change["type"] as? String {
-                    case "add": added += LineCount.lines(in: change["content"] as? String ?? "")
-                    case "delete": removed += LineCount.lines(in: change["content"] as? String ?? "")
+                    case "add": files.append((path, LineCount.lines(in: change["content"] as? String ?? ""), 0))
+                    case "delete": files.append((path, 0, LineCount.lines(in: change["content"] as? String ?? "")))
                     default:
                         let d = LineCount.diff(change["unified_diff"] as? String ?? "")
-                        added += d.added
-                        removed += d.removed
+                        files.append((path, d.added, d.removed))
                     }
                 }
-                tool("Edit", [StatKey.linesAdded: added, StatKey.linesRemoved: removed])
+                emit(Self.editValues(files))
             default: break
             }
         case ("response_item", "local_shell_call"):
@@ -328,7 +373,13 @@ public struct CodexLogParser: Sendable, Codable {
             // Older versions only; newer ones wrap every action in `exec` and report items instead.
             let name = payload["name"] as? String ?? ""
             switch name {
-            case "shell", "container.exec", "exec_command", "local_shell": tool("Shell")
+            case "shell", "container.exec", "exec_command", "local_shell":
+                // Arguments are `{"command": ["bash", "-lc", "…"]}` or `{"cmd": "…"}`; the exit
+                // status comes in a separate output line and isn't read.
+                let args = (payload["arguments"] as? String).flatMap { $0.data(using: .utf8) }
+                    .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+                let argv = args["command"] as? [String] ?? (args["cmd"] as? String ?? args["command"] as? String).map { [$0] }
+                emit(Self.commandValues(argv: argv, exitCode: nil))
             case "apply_patch":
                 var patch = payload["input"] as? String ?? ""
                 if patch.isEmpty, let args = (payload["arguments"] as? String)?.data(using: .utf8),
@@ -336,8 +387,7 @@ public struct CodexLogParser: Sendable, Codable {
                 {
                     patch = decoded["input"] as? String ?? ""
                 }
-                let d = LineCount.diff(patch)
-                tool("Edit", [StatKey.linesAdded: d.added, StatKey.linesRemoved: d.removed])
+                emit(Self.editValues(LineCount.files(inPatch: patch)))
             default:
                 // Newer versions' wrappers (`exec`, `js`) and agent messaging aren't tool calls of
                 // their own; MCP tools are, under their server-prefixed names.
@@ -348,6 +398,50 @@ public struct CodexLogParser: Sendable, Codable {
     }
 
     // MARK: Byte-level helpers
+
+    /// The first `"name":[…]` array of strings in compact JSON (or `"name":"…"` as one string),
+    /// cut out of the raw line without parsing the rest.
+    static func stringArray(_ name: String, in line: UnsafeRawBufferPointer) -> [String]? {
+        let bytes = line.bindMemory(to: UInt8.self)
+        guard let base = line.baseAddress else { return nil }
+        let key = Data("\"\(name)\":".utf8)
+        guard let hit = key.withUnsafeBytes({ memmem(base, line.count, $0.baseAddress!, $0.count) }) else { return nil }
+        let start = base.distance(to: hit) + key.count
+        guard start < bytes.count else { return nil }
+        if bytes[start] == UInt8(ascii: "\"") {
+            return stringField(name, in: Data(line)).map { [$0] }
+        }
+        guard bytes[start] == UInt8(ascii: "[") else { return nil }
+        var i = start + 1
+        var inString = false, escaped = false
+        while i < bytes.count {
+            let b = bytes[i]
+            if inString {
+                if escaped { escaped = false } else if b == 0x5C { escaped = true } else if b == 0x22 { inString = false }
+            } else if b == 0x22 {
+                inString = true
+            } else if b == UInt8(ascii: "]") {
+                break
+            }
+            i += 1
+        }
+        guard i < bytes.count else { return nil }
+        let slice = Data(UnsafeRawBufferPointer(rebasing: line[start...i]))
+        return (try? JSONSerialization.jsonObject(with: slice)) as? [String]
+    }
+
+    /// A CommandExecution's `"exit_code"`; nil while unknown (`null`, or a declined command).
+    static func exitCode(_ line: UnsafeRawBufferPointer) -> Int? {
+        let bytes = line.bindMemory(to: UInt8.self)
+        guard let base = line.baseAddress else { return nil }
+        let key = Data(#""exit_code":"#.utf8)
+        guard let hit = key.withUnsafeBytes({ memmem(base, line.count, $0.baseAddress!, $0.count) }) else { return nil }
+        var i = base.distance(to: hit) + key.count
+        var digits = ""
+        if i < bytes.count, bytes[i] == UInt8(ascii: "-") { digits = "-"; i += 1 }
+        while i < bytes.count, (0x30...0x39).contains(bytes[i]) { digits.append(Character(UnicodeScalar(bytes[i]))); i += 1 }
+        return Int(digits)
+    }
 
     private static func contains(_ haystack: UnsafeRawBufferPointer, _ needle: Data) -> Bool {
         guard let base = haystack.baseAddress, haystack.count >= needle.count else { return false }

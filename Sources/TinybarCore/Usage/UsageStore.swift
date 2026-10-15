@@ -23,7 +23,7 @@ public struct DailyStat: Sendable, Hashable {
 public actor UsageStore {
     private let db: SQLiteDB
     private let projects = ProjectResolver()
-    private static let schemaVersion: Int64 = 4
+    private static let schemaVersion: Int64 = 5
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
         db = try SQLiteDB(path: path.path)
@@ -33,9 +33,10 @@ public actor UsageStore {
     private static func migrate(_ db: SQLiteDB) throws {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
-        if version == 3 {
-            // 0.2.0 kept prompts, tool calls, lines and Agent Time without their model. Count all
-            // activity again, per model, from the logs still on disk (the backfill runs next).
+        if version == 3 || version == 4 {
+            // 0.2.0 kept prompts, tool calls, lines and Agent Time without their model; 0.3.0 had
+            // no shell commands, file kinds or parallel tool calls. Count all activity again from
+            // the logs still on disk (the backfill runs next).
             try db.exec("""
             DELETE FROM daily_stat;
             DELETE FROM claude_event;
@@ -328,8 +329,13 @@ public actor UsageStore {
                     }
                 case let .prompt(id, at, model):
                     events.append(("p:" + id, at, model, [StatKey.prompts: 1]))
-                case let .edit(id, at, model, added, removed):
-                    events.append(("e:" + id, at, model, [StatKey.linesAdded: added, StatKey.linesRemoved: removed]))
+                case let .edit(id, at, model, ext, added, removed):
+                    events.append(("e:" + id, at, model, StatKey.edit(ext: ext, added: added, removed: removed)
+                        .merging([StatKey.linesAdded: added, StatKey.linesRemoved: removed]) { a, _ in a }))
+                case let .command(id, at, model, values):
+                    events.append(("b:" + id, at, model, values))
+                case let .commandResult(id, at, model, failed):
+                    events.append(("x:" + id, at, model, [StatKey.commandsFinished: 1, StatKey.commandsFailed: failed ? 1 : 0]))
                 case let .compaction(id, at, model, dropped):
                     events.append(("c:" + id, at, model, [StatKey.compactions: 1, StatKey.compactedTokens: dropped]))
                 }

@@ -165,7 +165,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - `daily_usage(day, provider, model, project, input, output, cache_write, cache_read)`, primary key (day, provider, model, project).
 - `file_cursor(path, inode, size, mtime, offset)`.
 - `claude_message(id, …, stats)`: the tokens and Activity counted per Claude message id, for de-duplication. Ids older than 90 days are pruned once a day; daily totals are kept.
-- `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`. Every counter is kept per model, including `hour.HH` (responses started in that hour) and `tokens.hour.HH` (their tokens).
+- `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`. Every counter is kept per model, including `hour.HH` (responses started in that hour) and `tokens.hour.HH` (their tokens), `cmd.*` (Shell Commands: `cmd.prog.<program>`, `cmd.git.<subcommand>` and habit counts) and `ext.added|removed|edits.<extension>`.
 - `claude_event(id, day)`: Claude Prompts, edit results and Compactions already counted, pruned with message ids.
 - The schema allows a future `account` column (multi-account later).
 
@@ -209,10 +209,12 @@ A separate window for numbers that are fun rather than actionable, built to be s
 screenshot. Claude Code and Codex only. Opened from the popover footer (⌘S); built when opened and
 released when closed, so it costs nothing otherwise. Activity is counted at ingest (ADR 0006).
 
-**Layout**: one fixed 960 × 600 card under a title bar row with the range (7 days, 30 days, All
-time) and **Copy image**, which puts the card on the clipboard at 2× in the current appearance. The
-card opens with the Tinybar mark and name on the left and its date span on the right, and never
-shows project names.
+**Layout**: fixed 960 × 600 cards under a title bar row with the pages (Overview, Commands,
+Models, Languages; ⌘1 to ⌘4, the last one remembered), the range (7 days, 30 days, All time) and
+**Copy image**, which puts the current card on the clipboard at 2× in the current appearance. The
+tabs aren't part of the card. Each card opens with the Tinybar mark, name and (but for the
+overview) its page on the left and its date span on the right, and never shows project names. A
+new page slides in from the side its tab sits on (a cross-fade with Reduce Motion).
 
 - **Tokens** in full digits, coloured by each Provider's share (Claude orange, Codex ink), with
   Theoretical Cost, the share legend and a bar chart. 7 and 30 days have a bar per day; All time
@@ -231,10 +233,29 @@ shows project names.
 - **Facts**: current and longest Streak, busiest day, share of input read from cache, Compactions
   (and tokens they summarized, Claude), biggest context, Projects and active days.
 
+**Commands**: Shell Commands as one number split by Provider; the programs they run (share of
+commands, split by Provider; git's subcommands on hover); and each model's habits, ranked: piped
+into `head` or `tail`, `grep` rather than `rg`, programs written inline (Python solid, JavaScript
+light), average command length, non-zero exits, `git status` per `git commit`.
+
+**Models**: each model ranked by average Output Speed, responses per Prompt, Agent Time per
+Prompt, responses that run tools in parallel, lines added per Prompt and peak context.
+
+**Languages**: lines added as one number split by Provider; Languages by lines added, each in a
+fixed colour; what each model writes (its lines split by the six most written coloured
+Languages, the rest grey); file edits, lines removed, lines per edit and the most written
+Language.
+
+A model shows up in a ranking once it has enough data in the range: 10 Prompts, 50 responses,
+30 Shell Commands, 20 `grep` or `rg` commands, 5 commits, 50 lines, or 10 speed samples.
+
 **Model filter**: clicking a model in the card or in the full list shows that model alone
 everywhere except the model list; clicking it again or Escape goes back. A model from the full list
 takes a fifth row kept free for it. The Streak then counts that model's days. Changing to a range
-the model wasn't used in goes back to all models. The copied image shows the filter as it is.
+the model wasn't used in goes back to all models. The copied image shows the filter as it is. On the Commands and Languages pages the totals filter
+the same way; every ranking keeps all models and lights the picked one's row instead (a picked
+model with too little data for a ranking says so in its last row). On the Models page it only
+lights rows.
 
 **Nothing moves**: filtering or new data changes values, never positions. The token count is sized
 to all models' total for the range, every section keeps its rows (empty ones included), and the
@@ -266,6 +287,19 @@ dim. The copied image has no hover state.
   taking 1 s to 10 min, summed per model; shown from 10 samples. The request is the last user
   line before a Claude response, or the last tool output or turn start before a Codex
   `token_usage_record`.
+- **Shell Command**: a Claude Code `Bash` call's `command`; a Codex `CommandExecution` item's
+  `command` (the script of `bash -lc`), or an older version's `shell` call. Split at `|`, `||`,
+  `&&`, `;`, `&`, newlines, parentheses and backticks outside quotes, skipping heredoc bodies and
+  comments; each part's program is its first word after variable assignments, redirections,
+  keywords and wrappers (`sudo`, `env`, `timeout`, `time`, `nohup`), as a lowercased basename
+  (`python3.12` is `python`). Shell builtins aren't programs; saved scripts (`.sh`, `.py`, …) are
+  `script`. Each program counts once per command. Inline: `python -c`, `python -`, a heredoc fed
+  to Python, `node|bun|deno -e|-p|--eval`. Exit: Claude results whose error starts "Exit code"
+  (blocked or denied calls aren't failures); Codex `exit_code`. Older Codex versions don't log it.
+- **Parallel**: a Claude response with more than one `tool_use`; a Codex `exec` or `js` script
+  with `Promise.all` (Codex makes one call per response).
+- **Language**: an edited file's extension (Claude Code's `filePath`; Codex change paths and patch
+  headers), named for display. A Codex change to several files counts as one edit per file.
 - **Compaction**: Claude `compact_boundary` lines (tokens summarized = before − after); Codex
   `ContextCompaction` items.
 - **Context**: input + cache write + cache read of one response.
@@ -280,4 +314,5 @@ each Provider's tokens the counted logs hold. Codex compresses older sessions to
 which Tinybar doesn't read.
 
 0.2.0 kept Prompts, Tool Calls, lines, Agent Time and Compactions without their model. Its
-counters are cleared once (schema 4) and recounted the same way, per model.
+counters are cleared once (schema 4) and recounted the same way, per model. 0.3.0 had no Shell
+Commands, Languages or parallel counts; schema 5 clears and recounts once more.

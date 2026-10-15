@@ -52,8 +52,10 @@ around one idea: a status item should cost nothing while you're not looking at i
   Claude Code deleting transcripts after 30 days.
 - **Stats for nerds.** A separate window for Claude Code and Codex: every token you burned in full
   digits, agent hours, tool calls, lines added, when your agents work, model speeds, streaks and
-  compactions. Point at anything for its details, click a model to see it alone. **Copy image**
-  puts the card on your clipboard, ready to post.
+  compactions. Three more cards go deeper: the commands your agents run (and whether they reach
+  for `grep` or `rg`), how each model works, and which languages they write. Point at anything for
+  its details, click a model to see it alone. **Copy image** puts the card on your clipboard, ready
+  to post.
 - **Limit alerts.** A notification at 90% and 95% of a 5-hour or weekly window, and when a window
   you nearly used up resets.
 - **Browser fallback.** Optional, per provider: if a CLI login is missing or expired, Tinybar reads
@@ -152,7 +154,7 @@ swift run tinybar-cli usage [db]           # print usage summaries
 swift run tinybar-cli stats [db]           # raw Activity counters, to check against the logs
 swift Scripts/make-icon.swift              # redraw Resources/AppIcon.icns and docs/icon.png
 .build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--backdrop] [--redact-projects]
-.build/debug/Tinybar --snapshot out.png --stats [--range week|month|all] [--model <id>] [--hover x,y]   # the Stats card
+.build/debug/Tinybar --snapshot out.png --stats [--page commands|models|languages] [--range week|month|all] [--model <id>] [--hover x,y]   # a Stats card
 ```
 
 `--snapshot` renders the popover to PNG in light and dark; `--backdrop` puts a worst-case window
