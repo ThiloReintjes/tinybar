@@ -42,15 +42,34 @@ final class StatsWindowController: NSObject, NSWindowDelegate {
     }
 }
 
-/// Window chrome around the card: the range picker and the copy button sit in the title bar row,
-/// outside what gets copied.
+/// The Stats window's cards: the overview, and a closer look at one kind of activity each.
+enum StatsPage: String, CaseIterable, Identifiable {
+    case overview, commands, models, languages
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overview: "Overview"
+        case .commands: "Commands"
+        case .models: "Models"
+        case .languages: "Languages"
+        }
+    }
+}
+
+/// Window chrome around the card: the pages, the range picker and the copy button sit in the title
+/// bar row, outside what gets copied.
 struct StatsView: View {
     let model: AppModel
     @AppStorage("statsRange") private var rangeRaw = StatsRange.month.rawValue
+    @AppStorage("statsPage") private var pageRaw = StatsPage.overview.rawValue
     /// The one model the card is filtered to, if any. Not remembered: the window opens on all models.
     @State private var picked: String?
     @State private var summary: StatsSummary?
     @State private var copied = false
+    /// Which way the last page change went, so the new card comes in from that side.
+    @State private var forward = true
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -60,33 +79,34 @@ struct StatsView: View {
     }
 
     private var range: StatsRange { StatsRange(rawValue: rangeRaw) ?? .month }
+    private var page: StatsPage { StatsPage(rawValue: pageRaw) ?? .overview }
 
     var body: some View {
         let palette = StatsPalette(scheme)
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 12) {
+                PageTabs(page: page, palette: palette, select: show)
                 Spacer()
                 Picker("Range", selection: $rangeRaw) {
                     ForEach(StatsRange.allCases) { Text($0.label).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 240)
-                Spacer()
-            }
-            .overlay(alignment: .trailing) {
+                .frame(width: 210)
                 Button(action: copy) {
                     Label(copied ? "Copied" : "Copy image", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .frame(minWidth: 96)
                 }
                 .disabled(summary?.isEmpty ?? true)
                 .keyboardShortcut("c")
-                .help("Copy the card as an image, ready to paste")
-                .padding(.trailing, 20)
+                .help("Copy this card as an image, ready to paste")
             }
+            // Clear of the window buttons.
+            .padding(.leading, 84)
+            .padding(.trailing, 20)
             .frame(height: 52)
 
-            StatsCard(summary: summary, importing: model.importProgress, palette: palette) { name in
+            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page, forward: forward) { name in
                 picked = picked == name ? nil : name
             }
         }
@@ -104,8 +124,18 @@ struct StatsView: View {
         }
     }
 
+    private func show(_ next: StatsPage) {
+        guard next != page else { return }
+        let all = StatsPage.allCases
+        forward = all.firstIndex(of: next)! > all.firstIndex(of: page)!
+        // A turn later, so the card leaving already knows which way to go.
+        DispatchQueue.main.async {
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35)) { pageRaw = next.rawValue }
+        }
+    }
+
     private func copy() {
-        guard let summary, let image = StatsCard.image(summary, scheme: scheme) else { return }
+        guard let summary, let image = StatsCard.image(summary, page: page, scheme: scheme) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
         copied = true
@@ -161,9 +191,13 @@ struct StatsCard: View {
     let summary: StatsSummary?
     let importing: Double?
     let palette: StatsPalette
+    var page: StatsPage = .overview
+    /// The page came after the previous one: it enters from the right.
+    var forward = true
     /// Filters to a model, or back to all. Nil for the copied image, which is not interactive.
     var pick: ((String) -> Void)?
     @State private var tip: StatsTip?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let size = CGSize(width: 960, height: 600)
     nonisolated static let space = "statsCard"
@@ -207,20 +241,53 @@ struct StatsCard: View {
         .environment(\.statsPick, pick.map { pick in { name in tip = nil; pick(name) } })
         .onChange(of: summary?.model) { tip = nil }
         .onChange(of: summary?.range) { tip = nil }
+        .onChange(of: page) { tip = nil }
     }
 
     private func content(_ s: StatsSummary) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Header(summary: s, palette: palette)
+            Header(summary: s, page: page, palette: palette)
+            ZStack(alignment: .topLeading) {
+                Group {
+                    switch page {
+                    case .overview: overview(s)
+                    case .commands: CommandsPage(summary: s, palette: palette).padding(.top, 18)
+                    case .models: ModelsPage(summary: s, palette: palette).padding(.top, 22)
+                    case .languages: LanguagesPage(summary: s, palette: palette).padding(.top, 18)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .id(page)
+                .transition(pageTransition)
+            }
+            .clipped()
+        }
+        .padding(.horizontal, 36)
+        .padding(.top, 26)
+        .padding(.bottom, 26)
+        .foregroundStyle(palette.ink)
+    }
+
+    /// The next page slides in from the side it sits on in the tabs, the old one out the other way.
+    private var pageTransition: AnyTransition {
+        if reduceMotion { return .opacity }
+        let shift: CGFloat = forward ? 36 : -36
+        return .asymmetric(
+            insertion: .offset(x: shift).combined(with: .opacity),
+            removal: .offset(x: -shift).combined(with: .opacity))
+    }
+
+    private func overview(_ s: StatsSummary) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 44) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Hero(summary: s, palette: palette)
+                    TokensHero(summary: s, palette: palette)
                     Bars(summary: s, palette: palette)
                         .padding(.top, 20)
                     Quartet(summary: s, palette: palette)
                         .padding(.top, 22)
                 }
-                .frame(width: Hero.width, alignment: .leading)
+                .frame(width: TokensHero.width, alignment: .leading)
                 VStack(alignment: .leading, spacing: 22) {
                     HeatMap(summary: s, palette: palette)
                     ToolBars(tools: s.tools, palette: palette)
@@ -233,16 +300,12 @@ struct StatsCard: View {
             Spacer(minLength: 0)
             Facts(summary: s, palette: palette)
         }
-        .padding(.horizontal, 36)
-        .padding(.top, 26)
-        .padding(.bottom, 26)
-        .foregroundStyle(palette.ink)
     }
 
     /// The card as an image at twice its size, for the clipboard.
     @MainActor
-    static func image(_ summary: StatsSummary, scheme: ColorScheme) -> NSImage? {
-        let renderer = ImageRenderer(content: StatsCard(summary: summary, importing: nil, palette: StatsPalette(scheme))
+    static func image(_ summary: StatsSummary, page: StatsPage = .overview, scheme: ColorScheme) -> NSImage? {
+        let renderer = ImageRenderer(content: StatsCard(summary: summary, importing: nil, palette: StatsPalette(scheme), page: page)
             .environment(\.colorScheme, scheme))
         renderer.scale = 2
         return renderer.nsImage
@@ -417,12 +480,18 @@ private struct TipView: View {
 
 private struct Header: View {
     let summary: StatsSummary
+    let page: StatsPage
     let palette: StatsPalette
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             Mark(palette: palette).frame(width: 22, height: 22)
             Text("Tinybar").font(.system(size: 17, weight: .semibold)).foregroundStyle(palette.ink)
+            // The copied image says which card it is; the overview is just Tinybar.
+            if page != .overview {
+                Text(page.title).font(.system(size: 17, weight: .regular)).foregroundStyle(palette.ink3)
+                    .transition(.opacity)
+            }
             Spacer()
             Text(StatsText.span(summary)).font(.system(size: 12, weight: .medium)).foregroundStyle(palette.ink2)
         }
@@ -459,7 +528,7 @@ private struct Mark: View {
 
 /// The token count in full, its digits coloured by each subscription's share: the number is its
 /// own stacked bar.
-private struct Hero: View {
+struct TokensHero: View {
     let summary: StatsSummary
     let palette: StatsPalette
 
@@ -1032,7 +1101,7 @@ private struct Facts: View {
     }
 }
 
-private struct SectionTitle: View {
+struct SectionTitle: View {
     let text: String
     let palette: StatsPalette
 

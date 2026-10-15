@@ -27,8 +27,9 @@ struct CountingNotes: View {
                 """)
             note("Stats", activity)
             note("Your data", """
-                Logs, totals and stats stay on this Mac. Tinybar only asks each provider for your \
-                limits and models.dev for prices.
+                Logs, totals and stats stay on this Mac. Of shell commands, Tinybar keeps only the \
+                names of the programs they run; of edited files, only the extension. It only asks \
+                each provider for your limits and models.dev for prices.
                 """)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

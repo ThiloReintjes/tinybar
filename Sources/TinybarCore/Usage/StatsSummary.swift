@@ -80,6 +80,45 @@ public struct StatsSummary: Sendable {
         public var speed: Double?
         public var speedSamples: Int64
         public var peakContext: Int64
+        /// Every counter summed for this model over the range (hourly ones aside), for the pages
+        /// that compare models.
+        public var values: [String: Int64] = [:]
+
+        public func value(_ key: String) -> Int64 { values[key] ?? 0 }
+    }
+
+    /// Something counted by name and split by subscription: a program, a language.
+    public struct Split: Sendable, Identifiable {
+        public var id: String { name }
+        public var name: String
+        public var byProvider: [ProviderID: Int64]
+        public var total: Int64 { byProvider.values.reduce(0, +) }
+    }
+
+    /// The shell commands the agents ran (SPEC §13).
+    public struct Commands: Sendable {
+        public var count: Int64 = 0
+        public var byProvider: [ProviderID: Int64] = [:]
+        public var chars: Int64 = 0
+        public var pipedHeadTail: Int64 = 0
+        public var inlinePython: Int64 = 0
+        public var inlineJS: Int64 = 0
+        public var finished: Int64 = 0
+        public var failed: Int64 = 0
+        /// Programs by how many commands ran them, most first.
+        public var programs: [Split] = []
+        /// Git subcommands by how many commands ran them, most first.
+        public var git: [Count] = []
+    }
+
+    /// One language's lines written, from the edited files' kinds.
+    public struct Language: Sendable, Identifiable {
+        public var id: String { name }
+        public var name: String
+        public var added: [ProviderID: Int64]
+        public var removed: Int64
+        public var edits: Int64
+        public var totalAdded: Int64 { added.values.reduce(0, +) }
     }
 
     /// One weekday-and-hour cell of the heat map, summed over every such hour in the range.
@@ -119,6 +158,9 @@ public struct StatsSummary: Sendable {
     public var cacheShare: Double?
     /// Every model used in the range, unfiltered, most tokens first.
     public var models: [Model]
+    public var commands: Commands
+    /// Languages by lines added, most first.
+    public var languages: [Language]
     public var projects: Int
     /// Projects by tokens, for the window only: the copied image shows just the count.
     public var topProjects: [Count]
@@ -248,6 +290,43 @@ public struct StatsSummary: Sendable {
             }
         }
 
+        var commands = Commands()
+        var programs: [String: [ProviderID: Int64]] = [:]
+        var git: [String: Int64] = [:]
+        var languages: [String: Language] = [:]
+        for s in stats where s.key.hasPrefix("cmd.") || s.key.hasPrefix("ext.") {
+            switch s.key {
+            case StatKey.commands:
+                commands.count += s.value
+                commands.byProvider[s.provider, default: 0] += s.value
+            case StatKey.commandChars: commands.chars += s.value
+            case StatKey.pipedHeadTail: commands.pipedHeadTail += s.value
+            case StatKey.inlinePython: commands.inlinePython += s.value
+            case StatKey.inlineJS: commands.inlineJS += s.value
+            case StatKey.commandsFinished: commands.finished += s.value
+            case StatKey.commandsFailed: commands.failed += s.value
+            case let k where k.hasPrefix(StatKey.programPrefix):
+                programs[String(k.dropFirst(StatKey.programPrefix.count)), default: [:]][s.provider, default: 0] += s.value
+            case let k where k.hasPrefix(StatKey.gitPrefix):
+                git[String(k.dropFirst(StatKey.gitPrefix.count)), default: 0] += s.value
+            default:
+                for (prefix, part) in [(StatKey.extAddedPrefix, 0), (StatKey.extRemovedPrefix, 1), (StatKey.extEditsPrefix, 2)]
+                where s.key.hasPrefix(prefix) {
+                    let name = FileKind.language(String(s.key.dropFirst(prefix.count)))
+                    var l = languages[name] ?? Language(name: name, added: [:], removed: 0, edits: 0)
+                    switch part {
+                    case 0: l.added[s.provider, default: 0] += s.value
+                    case 1: l.removed += s.value
+                    default: l.edits += s.value
+                    }
+                    languages[name] = l
+                }
+            }
+        }
+        commands.programs = programs.map { Split(name: $0.key, byProvider: $0.value) }
+            .sorted { $0.total != $1.total ? $0.total > $1.total : $0.name < $1.name }
+        commands.git = git.map { Count(name: $0.key, value: $0.value) }.sorted { $0.value > $1.value }
+
         let toolLines = tools.map { category, byProvider in
             Tool(category: category, calls: byProvider.values.reduce(0, +), byProvider: byProvider,
                  names: (toolNames[category] ?? [:]).map { Count(name: $0.key, value: $0.value) }.sorted { $0.value > $1.value })
@@ -276,7 +355,11 @@ public struct StatsSummary: Sendable {
             compactions: sums[StatKey.compactions] ?? 0, compactedTokens: sums[StatKey.compactedTokens] ?? 0,
             peakContext: peak,
             cacheShare: input > 0 ? Double(cacheRead) / Double(input) : nil,
-            models: models(allUsage, allStats, prices), projects: projects.count,
+            models: models(allUsage, allStats, prices),
+            commands: commands,
+            languages: languages.values.filter { $0.totalAdded + $0.removed > 0 }
+                .sorted { $0.totalAdded != $1.totalAdded ? $0.totalAdded > $1.totalAdded : $0.name < $1.name },
+            projects: projects.count,
             topProjects: projects.map { Count(name: $0.key, value: $0.value) }.sorted { $0.value > $1.value },
             heat: heat, weekdays: weekdays, activeDays: dayTotals.count, currentStreak: current, longestStreak: longest,
             busiestDay: busiest.map { (day: $0.key, tokens: $0.value) },
@@ -303,8 +386,12 @@ public struct StatsSummary: Sendable {
             case StatKey.speedTokens: speed[s.model, default: (0, 0)].tokens += s.value
             case StatKey.speedMillis: speed[s.model, default: (0, 0)].ms += s.value
             case StatKey.speedSamples: models[s.model]?.speedSamples += s.value
-            default: break
+            default:
+                if !s.key.hasPrefix(StatKey.hourPrefix), !s.key.hasPrefix(StatKey.hourTokensPrefix) {
+                    models[s.model]?.values[s.key, default: 0] += s.value
+                }
             }
+            if s.key == StatKey.responses { models[s.model]?.values[s.key, default: 0] += s.value }
         }
         for (name, s) in speed {
             guard let m = models[name], m.speedSamples >= minimumSpeedSamples, s.ms > 0 else { continue }

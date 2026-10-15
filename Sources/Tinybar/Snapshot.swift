@@ -13,8 +13,8 @@ enum PopoverSnapshot {
         let model = AppModel(settings: Settings())
         Task { @MainActor in
             await model.refresh(force: true)
-            // `--stats [--range week|month|all] [--model <id>]` renders the Stats card instead, as
-            // Copy image does.
+            // `--stats [--range week|month|all] [--model <id>] [--page commands|models|languages]`
+            // renders a Stats card instead, as Copy image does.
             if args.contains("--stats") {
                 var range = StatsRange.month
                 if let r = args.firstIndex(of: "--range"), r + 1 < args.count { range = StatsRange(rawValue: args[r + 1]) ?? .month }
@@ -26,6 +26,8 @@ enum PopoverSnapshot {
                 }
                 // The window too, chrome included, as `<out>.window.png`.
                 UserDefaults.standard.set(range.rawValue, forKey: "statsRange")
+                let page = args.firstIndex(of: "--page").flatMap { $0 + 1 < args.count ? StatsPage(rawValue: args[$0 + 1]) : nil } ?? .overview
+                UserDefaults.standard.set(page.rawValue, forKey: "statsPage")
                 let host = NSHostingView(rootView: StatsView(model: model, picked: picked))
                 let window = NSWindow(contentRect: NSRect(origin: .zero, size: host.fittingSize),
                                       styleMask: [.borderless], backing: .buffered, defer: false)
@@ -45,7 +47,7 @@ enum PopoverSnapshot {
                 window.orderOut(nil)
                 if let summary = await model.statsSummary(range, model: picked) {
                     for (scheme, suffix) in [(ColorScheme.dark, ".dark"), (.light, "")] {
-                        guard let image = StatsCard.image(summary, scheme: scheme), let tiff = image.tiffRepresentation,
+                        guard let image = StatsCard.image(summary, page: page, scheme: scheme), let tiff = image.tiffRepresentation,
                               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
                         else { continue }
                         try? png.write(to: URL(fileURLWithPath: out.deletingPathExtension().path + suffix + ".png"))

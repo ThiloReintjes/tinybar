@@ -85,6 +85,7 @@ struct MessageStats: Codable, Equatable {
         c[StatKey.hour(hour)] = 1
         c[StatKey.hourTokens(hour)] = tokens.total
         for name in t.values { c[StatKey.tool(name), default: 0] += 1 }
+        if t.count > 1 { c[StatKey.parallel] = 1 }
         if let r, SpeedSample.accepts(outputTokens: tokens.output, millis: e - r) {
             c[StatKey.speedTokens] = tokens.output
             c[StatKey.speedMillis] = e - r

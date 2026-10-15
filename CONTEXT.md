@@ -59,7 +59,7 @@ _Avoid_: Spend, cost, bill
 ### Activity
 
 **Activity**:
-What the agents did, read from the same local logs as Usage Records: Prompts, Tool Calls, lines added and removed, Compactions, Agent Time and Output Speed. Claude Code and Codex only. Each piece belongs to the model that produced it.
+What the agents did, read from the same local logs as Usage Records: Prompts, Tool Calls and Shell Commands, lines added and removed by Language, Compactions, Agent Time and Output Speed. Claude Code and Codex only. Each piece belongs to the model that produced it.
 _Avoid_: Telemetry, metrics, analytics
 
 **Prompt**:
@@ -69,6 +69,14 @@ _Avoid_: Request, query, turn
 **Tool Call**:
 One action an agent takes through a tool: a shell command, a file edit or read, a code search, a web lookup, a subagent, an MCP tool.
 _Avoid_: Action, function call, step
+
+**Shell Command**:
+One command line an agent ran in a shell, a Tool Call of its own. Only the programs it runs are kept (`git`, `rg`, `python`), never its arguments; a saved script counts as `script`. A Codex script that runs several commands is several Shell Commands.
+_Avoid_: Bash call, exec
+
+**Language**:
+What an edited file is written in, from its extension (`.tsx` is TypeScript). An extension without a known language stays itself (`.body`).
+_Avoid_: File type (in the UI)
 
 **Compaction**:
 A CLI summarizing a session's context to make room, by itself or on request.
