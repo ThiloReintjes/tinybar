@@ -11,4 +11,5 @@ The alternative was to store raw events and compute stats when the window opens.
 - Definitions are hard to change. Claude Code deletes transcripts after 30 days, so a changed rule (the 30-minute pause in Agent Time, the 200-token floor for Output Speed) only applies to logs still on disk; older days keep the old rule.
 - Users upgrading from a version without Activity get a one-time backfill from the logs still on disk. Older days show tokens but no Activity, and the Stats window says from when Activity is counted.
 - Output Speed includes the wait for the first token, so it is lower than a provider's generation speed and depends on context size. It is comparable across a user's own models and days, which is what the window uses it for.
+- Every counter carries the model that produced it, so the window can show one model alone. Stats in 0.2.0 stored some without one; the upgrade recounts once, which reaches only the logs still on disk, the same limit as any changed definition.
 - Codex reports agent actions as `item_completed` events in current versions and as named tool calls in older ones. Both are read; the older format could not be checked against real logs.

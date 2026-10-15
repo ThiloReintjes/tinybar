@@ -53,7 +53,7 @@ private func store(with files: [String: [String]]) throws -> (UsageStore, URL) {
 private func totals(_ store: UsageStore) async throws -> [String: Int64] {
     var t: [String: Int64] = [:]
     for row in try await store.stats(since: "0000") {
-        let key = row.key.hasPrefix(StatKey.hourPrefix) ? "hours" : row.key
+        let key = row.key.hasPrefix(StatKey.hourPrefix) ? "hours" : row.key.hasPrefix(StatKey.hourTokensPrefix) ? "hourTokens" : row.key
         if StatKey.isMaximum(key) { t[key] = max(t[key] ?? 0, row.value) } else { t[key, default: 0] += row.value }
     }
     return t
@@ -66,6 +66,7 @@ private func totals(_ store: UsageStore) async throws -> [String: Int64] {
     #expect(t[StatKey.prompts] == 1)
     #expect(t[StatKey.responses] == 2)
     #expect(t["hours"] == 2)
+    #expect(t["hourTokens"] == Int64(2 * 5010 + 400 + 50))
     #expect(t[StatKey.tool("Bash")] == 1)
     #expect(t[StatKey.tool("Edit")] == 1)
     #expect(t[StatKey.linesAdded] == 2)
@@ -114,7 +115,7 @@ private func totals(_ store: UsageStore) async throws -> [String: Int64] {
 @Test func claudeSkipsNotificationsAndNormalizesMCP() {
     var session = ClaudeLogParser.Session()
     func feed(_ line: String) -> ClaudeLogParser.Event? {
-        Data(line.utf8).withUnsafeBytes { session.consume(line: $0) }
+        Data(line.utf8).withUnsafeBytes { session.consume(line: $0) }.first
     }
     let notification = #"{"type":"user","uuid":"n","timestamp":"\#(ts(0))","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>done"}}"#
     #expect(feed(notification) == nil)
@@ -125,6 +126,47 @@ private func totals(_ store: UsageStore) async throws -> [String: Int64] {
         return
     }
     #expect(m.tools.map(\.name) == ["MCP"])
+}
+
+@Test func claudeEventsCountUnderTheModelThatAnswered() async throws {
+    // A prompt is answered by Opus; the next one, after a model switch, by Sonnet, which edits.
+    let sonnet = { (line: String) in line.replacingOccurrences(of: "claude-opus-5-5", with: "claude-sonnet-5-5") }
+    let lines = Array(turn.prefix(2)) + [
+        prompt("p2", at: 30),
+        sonnet(assistantLine("m4", at: 35, output: 10, block: toolUse("t4", "Write"))),
+        toolResult("t4", at: 36, patch: #"["+x"]"#),
+    ]
+    let (store, dir) = try store(with: ["s.jsonl": lines])
+    try await store.ingestClaude(roots: [dir.appendingPathComponent("projects")])
+    var byModel: [String: [String: Int64]] = [:]
+    for row in try await store.stats(since: "0000") { byModel[row.model, default: [:]][row.key, default: 0] += row.value }
+    #expect(byModel["claude-opus-5-5"]?[StatKey.prompts] == 1)
+    #expect(byModel["claude-sonnet-5-5"]?[StatKey.prompts] == 1)
+    #expect(byModel["claude-sonnet-5-5"]?[StatKey.linesAdded] == 1)
+    #expect(byModel["claude-opus-5-5"]?[StatKey.linesAdded] == nil)
+    #expect(byModel[""] == nil)
+}
+
+@Test func claudePromptsWithoutAnAnswerDontCount() async throws {
+    // A local command (/model) gets no response; the prompt after it does.
+    let command = prompt("cmd", at: 0, text: "<command-name>/model</command-name>")
+    let lines = [command, prompt("p1", at: 1)] + Array(turn.dropFirst(1).prefix(2))
+    let (store, dir) = try store(with: ["s.jsonl": lines])
+    try await store.ingestClaude(roots: [dir.appendingPathComponent("projects")])
+    #expect(try await totals(store)[StatKey.prompts] == 1)
+}
+
+@Test func claudePromptWaitsForItsAnswerAcrossReads() {
+    var session = ClaudeLogParser.Session()
+    func feed(_ line: String) -> [ClaudeLogParser.Event] {
+        Data(line.utf8).withUnsafeBytes { session.consume(line: $0) }
+    }
+    #expect(feed(turn[0]).isEmpty)
+    // The state is saved between reads.
+    session = try! JSONDecoder().decode(ClaudeLogParser.Session.self, from: JSONEncoder().encode(session))
+    let events = feed(turn[1])
+    #expect(events.first == .prompt(id: "p1", at: parseISODate(ts(0))!, model: "claude-opus-5-5"))
+    #expect(events.count == 2)
 }
 
 // MARK: Codex activity
@@ -221,6 +263,61 @@ private func codex(_ s: Int, _ type: String, _ payload: String) -> String {
     #expect(s.longest == 3)
 }
 
+@Test func barsFitTheSpan() {
+    #expect(StatsBucket.fitting(days: 30) == .day)
+    #expect(StatsBucket.fitting(days: 92) == .day)
+    #expect(StatsBucket.fitting(days: 400) == .week)
+    #expect(StatsBucket.fitting(days: 900) == .month)
+
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "UTC")!
+    let now = cal.date(from: DateComponents(year: 2026, month: 10, day: 15, hour: 12))!  // a Thursday
+    let usage = [
+        DailyUsage(day: "2025-09-03", provider: .codex, model: "g", project: "", tokens: TokenCounts(input: 5)),  // a Wednesday
+        DailyUsage(day: "2026-10-13", provider: .claude, model: "m", project: "", tokens: TokenCounts(input: 7)),
+        DailyUsage(day: "2026-10-15", provider: .claude, model: "m", project: "", tokens: TokenCounts(input: 1)),
+    ]
+    let s = StatsSummary.build(usage: usage, stats: [], allDays: ["2025-09-03", "2026-10-13", "2026-10-15"],
+                               range: .all, prices: .empty, now: now, calendar: cal)
+    #expect(s.bucket == .week)
+    #expect(s.bars.first?.start == "2025-09-01")
+    #expect(s.bars.first?.end == "2025-09-07")
+    #expect(s.bars.last?.start == "2026-10-12")
+    #expect(s.bars.last?.end == "2026-10-15")
+    #expect(s.bars.last?.totalTokens == 8)
+    #expect(s.bars.reduce(0) { $0 + $1.totalTokens } == 13)
+}
+
+@Test func summaryFiltersToOneModel() {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "UTC")!
+    let now = cal.date(from: DateComponents(year: 2026, month: 10, day: 15, hour: 12))!
+    let usage = [
+        DailyUsage(day: "2026-10-15", provider: .claude, model: "m", project: "/x/a", tokens: TokenCounts(input: 10)),
+        DailyUsage(day: "2026-10-15", provider: .codex, model: "g", project: "/x/b", tokens: TokenCounts(input: 30)),
+    ]
+    let stats = [
+        DailyStat(day: "2026-10-15", provider: .claude, model: "m", key: StatKey.prompts, value: 2),
+        DailyStat(day: "2026-10-15", provider: .codex, model: "g", key: StatKey.prompts, value: 5),
+        DailyStat(day: "2026-10-15", provider: .codex, model: "g", key: StatKey.tool("Shell"), value: 4),
+        DailyStat(day: "2026-10-15", provider: .codex, model: "g", key: StatKey.hourTokens(9), value: 30),
+    ]
+    let all = StatsSummary.build(usage: usage, stats: stats, allDays: ["2026-10-15"], range: .week, prices: .empty, now: now, calendar: cal)
+    #expect(all.prompts == 7)
+    #expect(all.toolCalls == 4)
+    #expect(all.heat[3][9].tokens == 30)
+    let m = StatsSummary.build(usage: usage, stats: stats, allDays: ["2026-10-15"], range: .week, model: "m",
+                               prices: .empty, now: now, calendar: cal)
+    #expect(m.tokens == 10)
+    #expect(m.tokensByProvider == [.claude: 10])
+    #expect(m.prompts == 2)
+    #expect(m.toolCalls == 0)
+    #expect(m.projects == 1)
+    #expect(m.heat[3][9].tokens == 0)
+    // The model list stays whole, so another model can be picked.
+    #expect(m.models.map(\.name) == ["g", "m"])
+}
+
 @Test func summaryBucketsHoursByWeekdayAndPicksSpeed() {
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = TimeZone(identifier: "UTC")!
@@ -238,13 +335,14 @@ private func codex(_ s: Int, _ type: String, _ payload: String) -> String {
     let usage = [DailyUsage(day: "2026-10-15", provider: .claude, model: "m", project: "/x/repo",
                             tokens: TokenCounts(input: 10, output: 10, cacheWrite: 0, cacheRead: 80))]
     let s = StatsSummary.build(usage: usage, stats: stats, allDays: ["2026-10-15"], range: .week, prices: .empty, now: now, calendar: cal)
-    #expect(s.heat[0][14] == 5)
-    #expect(s.heat[3][2] == 3)
+    #expect(s.heat[0][14].responses == 5)
+    #expect(s.heat[3][2].responses == 3)
+    #expect(s.weekdays == [1, 1, 1, 1, 1, 1, 1])
     #expect(s.models.first?.speed == 90)
     #expect(s.tools.first?.category == .shell)
     #expect(s.tools.first?.calls == 10)
     #expect(s.toolCalls == 10)
     #expect(s.cacheShare == 80.0 / 90.0)
-    #expect(s.days.count == 7)
+    #expect(s.bars.count == 7)
     #expect(s.projects == 1)
 }

@@ -218,14 +218,17 @@ final class AppModel {
 
     /// Reads what the Stats window shows for a range. Only runs while that window is open; nothing
     /// is kept afterwards.
-    func statsSummary(_ range: StatsRange) async -> StatsSummary? {
+    func statsSummary(_ range: StatsRange, model: String? = nil) async -> StatsSummary? {
         guard let store else { return nil }
         let since = range.days.map { DayKey.daysAgo($0 - 1) } ?? "0000"
         do {
             let usage = try await store.daily(since: since)
             let stats = try await store.stats(since: since)
+            // All time starts at the first day of any model, so the model list stays complete.
             let days = try await store.activeDays()
-            return StatsSummary.build(usage: usage, stats: stats, allDays: days, range: range, prices: prices)
+            let modelDays = model == nil ? nil : try await store.activeDays(model: model)
+            return StatsSummary.build(
+                usage: usage, stats: stats, allDays: days, streakDays: modelDays, range: range, model: model, prices: prices)
         } catch {
             return nil
         }

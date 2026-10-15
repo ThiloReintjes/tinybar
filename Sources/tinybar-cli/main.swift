@@ -81,7 +81,7 @@ func stats() async throws {
     let since = args.first { $0.hasPrefix("--since=") }.map { String($0.dropFirst(8)) } ?? "0000"
     var totals: [String: Int64] = [:]
     for row in try await store.stats(since: since) {
-        let key = row.key.hasPrefix(StatKey.hourPrefix) ? "hour.*" : row.key
+        let key = row.key.hasPrefix(StatKey.hourPrefix) ? "hour.*" : row.key.hasPrefix(StatKey.hourTokensPrefix) ? "tokens.hour.*" : row.key
         if StatKey.isMaximum(row.key) {
             totals["\(row.provider.rawValue) \(key)"] = max(totals["\(row.provider.rawValue) \(key)"] ?? 0, row.value)
         } else {

@@ -13,18 +13,29 @@ enum PopoverSnapshot {
         let model = AppModel(settings: Settings())
         Task { @MainActor in
             await model.refresh(force: true)
-            // `--stats [--range week|month|all]` renders the Stats card instead, as Copy image does.
+            // `--stats [--range week|month|all] [--model <id>]` renders the Stats card instead, as
+            // Copy image does.
             if args.contains("--stats") {
                 var range = StatsRange.month
                 if let r = args.firstIndex(of: "--range"), r + 1 < args.count { range = StatsRange(rawValue: args[r + 1]) ?? .month }
+                let picked = args.firstIndex(of: "--model").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+                // `--hover x,y` renders the tip for that point of the card, as if pointed at.
+                if let h = args.firstIndex(of: "--hover"), h + 1 < args.count {
+                    let xy = args[h + 1].split(separator: ",").compactMap { Double($0) }
+                    if xy.count == 2 { StatsCard.snapshotHover = CGPoint(x: xy[0], y: xy[1]) }
+                }
                 // The window too, chrome included, as `<out>.window.png`.
                 UserDefaults.standard.set(range.rawValue, forKey: "statsRange")
-                let host = NSHostingView(rootView: StatsView(model: model))
+                let host = NSHostingView(rootView: StatsView(model: model, picked: picked))
                 let window = NSWindow(contentRect: NSRect(origin: .zero, size: host.fittingSize),
                                       styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = host
                 window.orderFrontRegardless()
                 try? await Task.sleep(for: .milliseconds(900))
+                if StatsCard.snapshotHover != nil {
+                    NotificationCenter.default.post(name: StatsCard.snapshotHoverNotification, object: nil)
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
                 host.layoutSubtreeIfNeeded()
                 if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
                     host.cacheDisplay(in: host.bounds, to: rep)
@@ -32,7 +43,7 @@ enum PopoverSnapshot {
                         .write(to: URL(fileURLWithPath: out.deletingPathExtension().path + ".window.png"))
                 }
                 window.orderOut(nil)
-                if let summary = await model.statsSummary(range) {
+                if let summary = await model.statsSummary(range, model: picked) {
                     for (scheme, suffix) in [(ColorScheme.dark, ".dark"), (.light, "")] {
                         guard let image = StatsCard.image(summary, scheme: scheme), let tiff = image.tiffRepresentation,
                               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
@@ -45,7 +56,7 @@ enum PopoverSnapshot {
             // `--page claude` or `--page settings` renders that page instead of the overview.
             var page = Page.overview
             if let p = args.firstIndex(of: "--page"), p + 1 < args.count {
-                page = args[p + 1] == "settings" ? .settings : ProviderID(rawValue: args[p + 1]).map(Page.provider) ?? .overview
+                page = args[p + 1] == "settings" ? .settings : args[p + 1] == "about" ? .about : ProviderID(rawValue: args[p + 1]).map(Page.provider) ?? .overview
             }
             // `--backdrop` stands in for the worst case behind the glass: a bright window under a
             // dark popover, a dark one under a light popover.

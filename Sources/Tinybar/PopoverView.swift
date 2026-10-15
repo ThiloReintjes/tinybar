@@ -6,6 +6,11 @@ enum Page: Hashable {
     case overview
     case provider(ProviderID)
     case settings
+    /// How Tinybar counts: where each number comes from.
+    case about
+
+    /// Pages reached from the footer: they replace the tab bar with a header and a way back.
+    var isAside: Bool { self == .settings || self == .about }
 }
 
 /// The pages sit side by side on one strip that slides under a fixed window. Switching tabs moves
@@ -26,18 +31,18 @@ struct PopoverView: View {
     }
 
     private var pages: [Page] {
-        [.overview] + model.enabledProviders.map(Page.provider) + [.settings]
+        [.overview] + model.enabledProviders.map(Page.provider) + [.settings, .about]
     }
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
                 TabBar(model: model, page: page, select: go)
-                    .opacity(page == .settings ? 0 : 1)
-                    .allowsHitTesting(page != .settings)
-                SettingsHeader { go(.overview) }
-                    .opacity(page == .settings ? 1 : 0)
-                    .allowsHitTesting(page == .settings)
+                    .opacity(page.isAside ? 0 : 1)
+                    .allowsHitTesting(!page.isAside)
+                AsideHeader(title: page == .about ? "How Tinybar counts" : "Settings") { go(.overview) }
+                    .opacity(page.isAside ? 1 : 0)
+                    .allowsHitTesting(page.isAside)
             }
             .padding(.horizontal, 12)
             .padding(.top, 12)
@@ -77,6 +82,7 @@ struct PopoverView: View {
         case .overview: OverviewPage(model: model, open: { go(.provider($0)) })
         case let .provider(id): ProviderPage(model: model, id: id)
         case .settings: SettingsPage(model: model)
+        case .about: AboutPage(model: model, visible: page == .about)
         }
     }
 
@@ -196,7 +202,8 @@ private struct TabShortcuts: View {
     }
 }
 
-private struct SettingsHeader: View {
+private struct AsideHeader: View {
+    let title: String
     let back: () -> Void
 
     var body: some View {
@@ -212,7 +219,7 @@ private struct SettingsHeader: View {
             .keyboardShortcut(.cancelAction)
             .accessibilityLabel("Back")
             Spacer()
-            Text("Settings").font(.system(size: 13, weight: .semibold))
+            Text(title).font(.system(size: 13, weight: .semibold))
             Spacer()
             Color.clear.frame(width: 26, height: 26)
         }
@@ -669,6 +676,10 @@ private struct Footer: View {
             .keyboardShortcut("r")
             FooterButton(icon: "chart.bar.xaxis", label: "Stats") { model.openStats() }
                 .keyboardShortcut("s")
+            FooterButton(icon: "info.circle", label: "How Tinybar counts") {
+                select(page == .about ? .overview : .about)
+            }
+            .keyboardShortcut("i")
             FooterButton(icon: "gearshape", label: "Settings") {
                 select(page == .settings ? .overview : .settings)
             }
@@ -697,6 +708,27 @@ private struct FooterButton: View {
         .foregroundStyle(.secondary)
         .help(label)
         .accessibilityLabel(label)
+    }
+}
+
+// MARK: About
+
+/// How Tinybar counts, with how much of the last 30 days' tokens Activity was counted from. That
+/// share is read only while the page is showing.
+private struct AboutPage: View {
+    let model: AppModel
+    let visible: Bool
+    @State private var coverage: [ProviderID: Double] = [:]
+
+    var body: some View {
+        CountingNotes(coverage: coverage, range: .month)
+            .padding(14)
+            .platter()
+            .padding(.top, 4)
+            .task(id: visible) {
+                guard visible else { return }
+                coverage = await model.statsSummary(.month)?.activityCoverage ?? [:]
+            }
     }
 }
 

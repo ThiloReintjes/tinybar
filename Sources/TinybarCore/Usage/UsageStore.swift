@@ -23,7 +23,7 @@ public struct DailyStat: Sendable, Hashable {
 public actor UsageStore {
     private let db: SQLiteDB
     private let projects = ProjectResolver()
-    private static let schemaVersion: Int64 = 3
+    private static let schemaVersion: Int64 = 4
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
         db = try SQLiteDB(path: path.path)
@@ -33,6 +33,18 @@ public actor UsageStore {
     private static func migrate(_ db: SQLiteDB) throws {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
+        if version == 3 {
+            // 0.2.0 kept prompts, tool calls, lines and Agent Time without their model. Count all
+            // activity again, per model, from the logs still on disk (the backfill runs next).
+            try db.exec("""
+            DELETE FROM daily_stat;
+            DELETE FROM claude_event;
+            UPDATE claude_message SET stats = NULL;
+            DELETE FROM meta WHERE key = 'stats_backfill';
+            PRAGMA user_version = \(schemaVersion);
+            """)
+            return
+        }
         if version == 2 {
             try db.exec("ALTER TABLE claude_message ADD COLUMN stats TEXT;" + statSchema + "PRAGMA user_version = \(schemaVersion);")
             return
@@ -303,24 +315,24 @@ public actor UsageStore {
         // Merge within the file first: streaming writes several lines per message.
         var latest: [String: ClaudeMessage] = [:]
         var order: [String] = []
-        var events: [(id: String, at: Date, values: [String: Int64])] = []
+        var events: [(id: String, at: Date, model: String, values: [String: Int64])] = []
         let endOffset = try JSONLReader.forEachLine(url: URL(fileURLWithPath: path), from: offset, until: until) { line in
-            switch session.consume(line: line) {
-            case let .message(m):
-                if latest[m.entry.messageID] != nil {
-                    latest[m.entry.messageID]!.merge(m)
-                } else {
-                    latest[m.entry.messageID] = ClaudeMessage(m)
-                    order.append(m.entry.messageID)
+            for event in session.consume(line: line) {
+                switch event {
+                case let .message(m):
+                    if latest[m.entry.messageID] != nil {
+                        latest[m.entry.messageID]!.merge(m)
+                    } else {
+                        latest[m.entry.messageID] = ClaudeMessage(m)
+                        order.append(m.entry.messageID)
+                    }
+                case let .prompt(id, at, model):
+                    events.append(("p:" + id, at, model, [StatKey.prompts: 1]))
+                case let .edit(id, at, model, added, removed):
+                    events.append(("e:" + id, at, model, [StatKey.linesAdded: added, StatKey.linesRemoved: removed]))
+                case let .compaction(id, at, model, dropped):
+                    events.append(("c:" + id, at, model, [StatKey.compactions: 1, StatKey.compactedTokens: dropped]))
                 }
-            case let .prompt(id, at):
-                events.append(("p:" + id, at, [StatKey.prompts: 1]))
-            case let .edit(id, at, added, removed):
-                events.append(("e:" + id, at, [StatKey.linesAdded: added, StatKey.linesRemoved: removed]))
-            case let .compaction(id, at, dropped):
-                events.append(("c:" + id, at, [StatKey.compactions: 1, StatKey.compactedTokens: dropped]))
-            case nil:
-                break
             }
         }
 
@@ -333,7 +345,10 @@ public actor UsageStore {
         for event in events {
             let day = DayKey.string(for: event.at)
             try db.run("INSERT OR IGNORE INTO claude_event (id, day) VALUES (?, ?)", [.text(event.id), .text(day)])
-            if db.changes > 0 { stats.add(StatEvent(timestamp: event.at, values: event.values), provider: .claude, model: "") }
+            if db.changes > 0 {
+                stats.add(StatEvent(timestamp: event.at, values: event.values),
+                          provider: ClaudeLogParser.provider(forModel: event.model), model: event.model)
+            }
         }
         try write(stats)
         let state = (try? JSONEncoder().encode(session)).map { String(decoding: $0, as: UTF8.self) }
@@ -560,8 +575,13 @@ public actor UsageStore {
     }
 
     /// Every day with any tokens, oldest first: streaks span the whole history.
-    public func activeDays() throws -> [String] {
-        try db.run("SELECT DISTINCT day FROM daily_usage ORDER BY day").compactMap { $0.first?.text }
+    /// Days with any usage, or with usage of one model.
+    public func activeDays(model: String? = nil) throws -> [String] {
+        if let model {
+            return try db.run("SELECT DISTINCT day FROM daily_usage WHERE model = ? ORDER BY day", [.text(model)])
+                .compactMap { $0.first?.text }
+        }
+        return try db.run("SELECT DISTINCT day FROM daily_usage ORDER BY day").compactMap { $0.first?.text }
     }
 
     public func hasCompletedInitialImport() throws -> Bool {
