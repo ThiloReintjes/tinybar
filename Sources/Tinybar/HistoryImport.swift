@@ -1,20 +1,30 @@
 import Foundation
 import TinybarCore
 
-/// Runs the first-launch history import in a child copy of this executable (`--import-history`),
-/// reporting progress parsed from its stdout.
+/// Runs heavy one-off reads of the whole history in a child copy of this executable, reporting
+/// progress parsed from its stdout: the first-launch import (`--import-history`) and the one-time
+/// activity backfill after upgrading from a version without Stats (`--backfill-stats`).
 enum HistoryImport {
-    static let flag = "--import-history"
+    enum Job: String {
+        case importHistory = "--import-history"
+        case backfillStats = "--backfill-stats"
+    }
 
     /// Child side: ingest everything, printing "done/total" lines. Called before the app starts.
     static func runChildIfRequested() {
-        guard CommandLine.arguments.contains(flag) else { return }
+        guard let job = [Job.importHistory, .backfillStats].first(where: { CommandLine.arguments.contains($0.rawValue) })
+        else { return }
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached(priority: .utility) {
-            if let store = try? UsageStore() {
-                _ = try? await store.ingestAll { p in
+            let path = ProcessInfo.processInfo.environment["TINYBAR_DB"].map { URL(fileURLWithPath: $0) }
+            if let store = try? path.map({ try UsageStore(path: $0) }) ?? UsageStore() {
+                let report: @Sendable (UsageStore.IngestProgress) -> Void = { p in
                     print("\(p.filesDone)/\(p.filesTotal)")
                     fflush(stdout)
+                }
+                switch job {
+                case .importHistory: _ = try? await store.ingestAll(progress: report)
+                case .backfillStats: _ = try? await store.backfillStats(progress: report)
                 }
             }
             semaphore.signal()
@@ -23,13 +33,13 @@ enum HistoryImport {
         exit(0)
     }
 
-    /// Parent side. Falls back to in-process ingestion if the child can't be launched.
+    /// Parent side. Falls back to running in-process if the child can't be launched.
     @MainActor
-    static func run(progress: @escaping @MainActor (Double) -> Void) async {
+    static func run(_ job: Job, progress: @escaping @MainActor (Double) -> Void) async {
         guard let executable = Bundle.main.executableURL else { return }
         let process = Process()
         process.executableURL = executable
-        process.arguments = [flag]
+        process.arguments = [job.rawValue]
         process.qualityOfService = .utility
         let out = Pipe()
         process.standardOutput = out
@@ -55,8 +65,11 @@ enum HistoryImport {
             }
         }
         out.fileHandleForReading.readabilityHandler = nil
-        if done == nil {
-            _ = try? await UsageStore().ingestAll()
+        if done == nil, let store = try? UsageStore() {
+            switch job {
+            case .importHistory: _ = try? await store.ingestAll()
+            case .backfillStats: _ = try? await store.backfillStats()
+            }
         }
     }
 }

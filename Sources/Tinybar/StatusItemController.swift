@@ -11,6 +11,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let model: AppModel
     private var lastRendered: RenderKey?
     private var appearanceObservation: NSKeyValueObservation?
+    private lazy var stats = StatsWindowController(model: model)
 
     private struct RenderKey: Equatable {
         var percent: Int?
@@ -45,6 +46,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
         render()
         observe()
+        model.openStats = { [weak self] in
+            self?.popover.performClose(nil)
+            self?.stats.show()
+        }
     }
 
     /// Re-renders whenever a value `render()` reads changes (Observation tracking, one-shot per change).

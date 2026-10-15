@@ -49,7 +49,9 @@ final class AppModel {
             .gemini: GeminiProvider(),
             .cursor: CursorProvider(),
         ]
-        store = try? UsageStore()
+        // `TINYBAR_DB` points development runs (snapshots) at a scratch database.
+        store = try? ProcessInfo.processInfo.environment["TINYBAR_DB"].map { try UsageStore(path: URL(fileURLWithPath: $0)) }
+            ?? UsageStore()
         alertPlanner = settings.loadAlertState()
         for (id, source) in sources where settings.isEnabled(id, detected: source.isConfigured()) {
             providers[id] = ProviderState()
@@ -168,8 +170,16 @@ final class AppModel {
             // The first import can read gigabytes of logs. Run it in a child process so the
             // memory it churns through goes back to the OS when it exits.
             importProgress = 0
-            await HistoryImport.run { [weak self] fraction in self?.importProgress = fraction }
+            await HistoryImport.run(.importHistory) { [weak self] fraction in self?.importProgress = fraction }
             try? await store.markInitialImportDone()
+            // That import counted activity too.
+            try? await store.markStatsBackfillDone()
+            importProgress = nil
+        } else if !((try? await store.hasCompletedStatsBackfill()) ?? true) {
+            // Upgraded from a version without Stats: count activity in the logs read so far, once.
+            importProgress = 0
+            await HistoryImport.run(.backfillStats) { [weak self] fraction in self?.importProgress = fraction }
+            try? await store.markStatsBackfillDone()
             importProgress = nil
         }
         // Incremental ingestion runs on the store's actor, off the main thread. Only files
@@ -199,6 +209,26 @@ final class AppModel {
             perProvider[id] = summaries(usageRows.filter { $0.provider == id })
         }
         providerUsage = perProvider
+    }
+
+    // MARK: Stats
+
+    /// Opens the Stats window; set by the status item, which owns the window and the popover.
+    @ObservationIgnored var openStats: () -> Void = {}
+
+    /// Reads what the Stats window shows for a range. Only runs while that window is open; nothing
+    /// is kept afterwards.
+    func statsSummary(_ range: StatsRange) async -> StatsSummary? {
+        guard let store else { return nil }
+        let since = range.days.map { DayKey.daysAgo($0 - 1) } ?? "0000"
+        do {
+            let usage = try await store.daily(since: since)
+            let stats = try await store.stats(since: since)
+            let days = try await store.activeDays()
+            return StatsSummary.build(usage: usage, stats: stats, allDays: days, range: range, prices: prices)
+        } catch {
+            return nil
+        }
     }
 
     // MARK: Pinned Limit

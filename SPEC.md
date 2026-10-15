@@ -20,7 +20,7 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), 
 - Refreshing tokens or writing to CLI credential files (ADR 0001).
 - Token usage from web/desktop chat apps (no local logs).
 - Historical pricing.
-- A separate window. Everything lives in the popover.
+- More windows. Limits and usage live in the popover; the only window is Stats (§13).
 - Widgets, CLI companion, config files.
 
 ## 2. Performance budget (acceptance criteria)
@@ -124,7 +124,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
      it comes before the Reset, faint if after (the headroom). Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
    - That Provider's usage only: tokens, cost, chart, top models and Projects. Today is provisional.
-3. **Footer**: last check time, check now (⌘R), settings (⌘,), quit (⌘Q).
+3. **Footer**: last check time, check now (⌘R), Stats (⌘S, §13), settings (⌘,), quit (⌘Q).
 
 **Settings** (replaces the page, back with Esc): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), and hide percentage.
 
@@ -161,7 +161,9 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 ### Store (SQLite, `~/Library/Application Support/Tinybar/usage.sqlite`; ADR 0003)
 - `daily_usage(day, provider, model, project, input, output, cache_write, cache_read)`, primary key (day, provider, model, project).
 - `file_cursor(path, inode, size, mtime, offset)`.
-- `claude_message(id, …)`: the tokens counted per Claude message id, for de-duplication. Ids older than 90 days are pruned once a day; daily totals are kept.
+- `claude_message(id, …, stats)`: the tokens and Activity counted per Claude message id, for de-duplication. Ids older than 90 days are pruned once a day; daily totals are kept.
+- `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`.
+- `claude_event(id, day)`: Claude Prompts, edit results and Compactions already counted, pruned with message ids.
 - The schema allows a future `account` column (multi-account later).
 
 ### Day boundary
@@ -196,4 +198,54 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 12. Later (explicitly deferred)
 
-Grok and Kimi providers; token history for other CLIs; multiple accounts; token refresh (would need a new ADR); historical pricing; a separate Usage window.
+Grok and Kimi providers; token history for other CLIs; multiple accounts; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
+
+## 13. Stats window
+
+A separate window for numbers that are fun rather than actionable, built to be shared as a
+screenshot. Claude Code and Codex only. Opened from the popover footer (⌘S); built when opened and
+released when closed, so it costs nothing otherwise. Activity is counted at ingest (ADR 0006).
+
+**Layout**: one fixed 960 × 600 card under a title bar row with the range (7 days, 30 days, All
+time) and **Copy image**, which puts the card on the clipboard at 2× in the current appearance.
+The card carries its date span and the Tinybar mark, and never shows project names.
+
+- **Tokens** in full digits, coloured by each Provider's share (Claude orange, Codex ink), with
+  Theoretical Cost, the share legend and a daily bar chart.
+- **Agent Time**, also as 40-hour weeks (or 8-hour days below a week).
+- **Tool Calls**, also per Prompt.
+- **Lines written**: lines added by file edits (Claude Code's Edit, Write and MultiEdit results;
+  Codex file changes and `apply_patch`), with lines removed. Files changed through shell commands
+  aren't seen.
+- **Prompts**, with model responses per Prompt.
+- **When your agents work**: responses by weekday and local hour, with the busiest slot.
+- **Tool Calls by kind**: shell commands, web lookups, MCP tools, file reads, file edits, code
+  searches, subagents; each bar split by Provider.
+- **Models**: the top three by tokens, with Output Speed and peak context.
+- **Facts**: current and longest Streak, busiest day, share of input read from cache, Compactions
+  (and tokens they summarized, Claude), biggest context, Projects and active days.
+
+### What counts
+- **Prompt**: a Claude Code user line that is typed text (not a tool result, `isMeta`, a compact
+  summary, a sidechain or a notification); a Codex user message outside subagent sessions.
+- **Tool Call**: Claude Code `tool_use` blocks, deduplicated by their id (MCP tools stored as
+  `MCP`). Codex `item_completed` actions (command, file change, web search, MCP call), or in
+  older versions the named tool calls. `exec`/`js` wrappers are not Tool Calls themselves.
+- **Agent Time**: Claude: for each response, the time from the step's start (the Prompt, or the
+  end of the previous response, so tool execution counts) to its last line; steps over 30 minutes
+  are left out as waiting. Codex: each turn's `duration_ms`.
+- **Output Speed**: output tokens ÷ (last line − request sent) for responses of 200+ output tokens
+  taking 1 s to 10 min, summed per model; shown from 10 samples. The request is the last user
+  line before a Claude response, or the last tool output or turn start before a Codex
+  `token_usage_record`.
+- **Compaction**: Claude `compact_boundary` lines (tokens summarized = before − after); Codex
+  `ContextCompaction` items.
+- **Context**: input + cache write + cache read of one response.
+- Lines over 1 MB are skipped, as for tokens.
+
+### Upgrades
+A database from a version without Activity is backfilled once, in the history import's child
+process: every log is re-read up to its saved offset for Activity only. Token totals and offsets
+are untouched. Activity from logs no longer on disk (deleted, or archived by the CLI) can't be
+recovered, so those sessions show tokens but no Activity; the card notes from which day each
+Provider's Activity is counted when that is later than its token history.
