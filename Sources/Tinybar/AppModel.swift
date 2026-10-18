@@ -312,7 +312,8 @@ final class AppModel {
                 }
             }
         }
-        let all = candidates(stale: false).isEmpty ? candidates(stale: true) : candidates(stale: false)
+        let fresh = candidates(stale: false)
+        let all = fresh.isEmpty ? candidates(stale: true) : fresh
         if let first = all.filter({ $0.2 != nil }).min(by: { $0.2! < $1.2! }) { return (first.0, first.1) }
         return all.min {
             ($0.1.remainingPercent, $0.1.resetsAt ?? .distantFuture) < ($1.1.remainingPercent, $1.1.resetsAt ?? .distantFuture)
