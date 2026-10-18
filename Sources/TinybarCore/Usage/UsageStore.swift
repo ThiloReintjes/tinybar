@@ -444,7 +444,8 @@ public actor UsageStore {
 
         if let e = existing {
             let old = TokenCounts(input: e[4].int, output: e[5].int, cacheWrite: e[6].int, cacheRead: e[7].int)
-            let final = old.mergingCopy(record.tokens)
+            // Activity-only replay must not change the snapshot paired with daily totals.
+            let final = countTokens ? old.mergingCopy(record.tokens) : old
             let oldStats = e[8].text.flatMap { try? JSONDecoder().decode(MessageStats.self, from: Data($0.utf8)) }
             let newStats = MessageStats(message).merged(with: oldStats)
             let tokensChanged = final != old

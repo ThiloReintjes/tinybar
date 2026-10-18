@@ -6,6 +6,31 @@ private func streamedUsage(input: Int, output: Int, cached: Int) -> String {
     #"{"type":"assistant","timestamp":"2026-09-25T10:00:00Z","message":{"id":"same-message","model":"gpt-test","usage":{"input_tokens":\#(input),"output_tokens":\#(output),"cache_read_input_tokens":\#(cached)}}}"# + "\n"
 }
 
+@Test func activityReplayPreservesSnapshotPairedWithDailyTokens() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let file = dir.appendingPathComponent("a.jsonl"), url = dir.appendingPathComponent("db.sqlite")
+    try streamedUsage(input: 1000, output: 10, cached: 0).write(to: file, atomically: true, encoding: .utf8)
+    let initial = try UsageStore(path: url)
+    try await initial.ingestClaude(roots: [dir])
+    let db = try SQLiteDB(path: url.path)
+    try db.exec("DELETE FROM meta WHERE key GLOB 'stats_backfill*'; DELETE FROM daily_stat; UPDATE claude_message SET stats = NULL")
+    let store = try UsageStore(path: url) // Freezes the preliminary prefix.
+    for backfill in [true, false] {
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(streamedUsage(input: 100, output: 10, cached: 900).utf8))
+        try handle.close()
+        try await store.ingestClaude(roots: [dir])
+        if backfill { try await store.backfillStats() }
+    }
+    #expect(try await store.daily(since: "0000").first?.tokens == TokenCounts(input: 100, output: 10, cacheRead: 900))
+    let saved = try #require(try db.run("SELECT input, cache_read FROM claude_message").first)
+    #expect(saved[0].int == 100)
+    #expect(saved[1].int == 900)
+}
+
 @Test func gptInClaudeKeepsWholeFinalUsageAcrossFilesAndReads() async throws {
     let preliminary = streamedUsage(input: 61_384, output: 0, cached: 0)
     let final = streamedUsage(input: 6_167, output: 61, cached: 54_400)

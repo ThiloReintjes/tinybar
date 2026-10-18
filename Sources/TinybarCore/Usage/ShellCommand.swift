@@ -124,6 +124,11 @@ public enum ShellCommand {
             case UInt8(ascii: "#") where !inWord:
                 while i < b.count, b[i] != 0x0A { i += 1 }
             case UInt8(ascii: "<") where i + 1 < b.count && b[i + 1] == UInt8(ascii: "<"):
+                // An adjacent descriptor belongs to this redirection, not the executable.
+                if !word.isEmpty, word.allSatisfy({ (48...57).contains($0) }) {
+                    word.removeAll(keepingCapacity: true)
+                    inWord = false
+                }
                 if i + 2 < b.count, b[i + 2] == UInt8(ascii: "<") {
                     // A here-string: its text is an argument.
                     endWord()

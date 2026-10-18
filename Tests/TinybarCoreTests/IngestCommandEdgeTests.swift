@@ -3,6 +3,8 @@ import Foundation
 import Testing
 
 @Test func attachedRedirectionsNeverCountDestinationNames() {
+    #expect(ShellCommand.parse("0<<<'{}' jq .").programs == ["jq"])
+    #expect(ShellCommand.parse("0<<EOF python3\nprint(1)\nEOF").programs == ["python"])
     #expect(ShellCommand.parse("ls>/dev/null").programs == ["ls"])
     #expect(ShellCommand.parse("2>/dev/null git status").programs == ["git"])
     #expect(ShellCommand.parse("2>&1 git status").programs == ["git"])
