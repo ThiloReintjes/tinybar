@@ -120,16 +120,11 @@ enum CodexUsageAPI {
         }
     }
 
-    actor ResetBackoff {
-        private var until = Date.distantPast
-        func permitsRequest(at now: Date) -> Bool { now >= until }
-        func deferRequests(until date: Date) { until = max(until, date) }
-    }
-    private static let resetBackoff = ResetBackoff()
+    private static let resetBackoff = HTTP.Backoff()
 
     /// An optional extra's 429 must not hide fresh limits or make us retry that endpoint early.
     static func fetchBankedResets(
-        _ creds: CodexCredentials, session: URLSession, backoff: ResetBackoff = resetBackoff,
+        _ creds: CodexCredentials, session: URLSession, backoff: HTTP.Backoff = resetBackoff,
         now: @Sendable () -> Date = { Date() }) async throws -> [BankedReset]?
     {
         guard await backoff.permitsRequest(at: now()) else { return nil }
@@ -225,7 +220,7 @@ enum CodexUsageAPI {
         }
     }
 
-    private static func slugify(_ s: String) -> String {
+    static func slugify(_ s: String) -> String {
         let lowered = s.lowercased()
         let mapped = lowered.map { $0.isLetter || $0.isNumber ? $0 : "-" }
         return String(mapped).split(separator: "-").joined(separator: "-")

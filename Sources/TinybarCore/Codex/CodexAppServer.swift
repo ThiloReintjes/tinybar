@@ -56,9 +56,9 @@ enum CodexAppServer {
         let extras = (r.rateLimitsByLimitId ?? [:])
             .filter { $0.key != (main.limitId ?? "codex") }
             .sorted { $0.key < $1.key }
-        for (snapshot, isExtra) in [(main, false)] + extras.map({ ($0.value, true) }) {
-            let name = isExtra ? (snapshot.limitName ?? snapshot.limitId) : nil
-            let prefix = name.map { $0.lowercased().replacingOccurrences(of: " ", with: "-") }
+        for (snapshot, isExtra, key) in [(main, false, "codex")] + extras.map({ ($0.value, true, $0.key) }) {
+            let name = isExtra ? (snapshot.limitName ?? snapshot.limitId ?? key) : nil
+            let prefix = name.map(CodexUsageAPI.slugify)
             for (w, fallbackID) in [(snapshot.primary, "primary"), (snapshot.secondary, "secondary")] {
                 guard let w else { continue }
                 let seconds = w.windowDurationMins.flatMap { minutes -> Int? in

@@ -1,6 +1,13 @@
 import Foundation
 
 enum HTTP {
+    /// Each optional endpoint keeps its own deadline without hiding fresh primary usage.
+    actor Backoff {
+        private var until = Date.distantPast
+        func permitsRequest(at now: Date) -> Bool { now >= until }
+        func deferRequests(until date: Date) { until = max(until, date) }
+    }
+
     /// Explicit Cookie headers survive URLSession redirects, even with its cookie jar disabled.
     private final class CredentialRedirectGuard: NSObject, URLSessionTaskDelegate {
         let origin: URL
