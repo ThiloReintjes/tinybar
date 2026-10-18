@@ -41,7 +41,7 @@ final class AppModel {
     private var pollTimer: Timer?
     private var isAsleep = false
     private var isLocked = false
-    private var refreshPending = false
+    private var pendingRefreshThrottle: TimeInterval?
     private var historyImportFailed = false
     private var initialImportFailed = false
     private var pendingIngest = LogWatcher.Changes.paths([])
@@ -113,7 +113,7 @@ final class AppModel {
             pollTimer?.invalidate()
         } else if wasPaused {
             schedulePoll()
-            if isRefreshing { refreshPending = true }
+            if isRefreshing { pendingRefreshThrottle = 0 }
             else { Task { await refresh(force: false) } }
         }
     }
@@ -128,15 +128,15 @@ final class AppModel {
     func refresh(force: Bool, throttle: TimeInterval = 0) async {
         guard !isAsleep, !isLocked else { return }
         guard !isRefreshing else {
-            if force { refreshPending = true }
+            if force { pendingRefreshThrottle = 0 }
             return
         }
         isRefreshing = true
         defer {
             isRefreshing = false
-            if refreshPending {
-                refreshPending = false
-                Task { await refresh(force: false, throttle: Self.openThrottle) }
+            if let throttle = pendingRefreshThrottle {
+                pendingRefreshThrottle = nil
+                Task { await refresh(force: false, throttle: throttle) }
             }
         }
 
@@ -237,6 +237,7 @@ final class AppModel {
                 if !((try? await store.hasCompletedLongContextBackfill()) ?? true) { jobs.append(.backfillLongContext) }
             }
             for job in jobs {
+                guard !isAsleep, !isLocked else { return }
                 importProgress = 0
                 let succeeded = await HistoryImport.run(job) { [weak self] fraction in
                     guard self?.importProgress != nil else { return }
@@ -250,6 +251,7 @@ final class AppModel {
                 }
             }
         }
+        guard !isAsleep, !isLocked else { return }
         // A failed initial import must not fall back to a heavy read in this process.
         // A failed backfill can wait for relaunch without stopping new usage from being counted.
         if !initialImportFailed {
@@ -269,7 +271,9 @@ final class AppModel {
             }
         }
 
+        guard !isAsleep, !isLocked else { return }
         prices = await pricing.refreshIfNeeded()
+        guard !isAsleep, !isLocked else { return }
         usageRows = (try? await store.daily(since: DayKey.daysAgo(UsageRange.month.days - 1))) ?? []
         rebuildUsage()
     }
@@ -371,7 +375,7 @@ final class AppModel {
         settings.setEnabled(id, enabled)
         if enabled {
             providers[id] = providers[id] ?? ProviderState()
-            if isRefreshing { refreshPending = true }
+            if isRefreshing { pendingRefreshThrottle = pendingRefreshThrottle ?? Self.openThrottle }
             else { Task { await refresh(force: false, throttle: Self.openThrottle) } }
         } else {
             providers[id] = nil

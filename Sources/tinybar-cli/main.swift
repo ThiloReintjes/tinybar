@@ -93,6 +93,7 @@ func stats() async throws {
 
 func backfill() async throws {
     let store = try UsageStore(path: dbURL)
+    guard !(try await store.hasCompletedStatsBackfill()) else { return }
     let start = Date()
     let r = try await store.backfillStats()
     print(String(format: "backfill files=%d bytes=%.1fMB in %.1fs", r.filesScanned, Double(r.bytesRead) / 1e6, Date().timeIntervalSince(start)))
@@ -100,6 +101,7 @@ func backfill() async throws {
 
 func backfillLong() async throws {
     let store = try UsageStore(path: dbURL)
+    guard !(try await store.hasCompletedLongContextBackfill()) else { return }
     let start = Date()
     let r = try await store.backfillLongContext()
     print(String(format: "long-context files=%d bytes=%.1fMB in %.1fs", r.filesScanned, Double(r.bytesRead) / 1e6, Date().timeIntervalSince(start)))
