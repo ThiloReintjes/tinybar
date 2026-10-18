@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Observation
 import TinybarCore
 
@@ -29,7 +30,9 @@ final class AppModel {
     private var lastStatusCheck: Date?
     private(set) var importProgress: Double?
     private(set) var lastUpdated: Date?
-    private(set) var isRefreshing = false
+    var isRefreshing: Bool { isFetching || usageTask != nil }
+    private var isFetching = false
+    private var usageTask: Task<Void, Never>?
 
     let settings: Settings
     let updater = Updater()
@@ -76,8 +79,11 @@ final class AppModel {
     func start() {
         notifier.requestAuthorizationOnce()
         observeSleepAndLock()
-        schedulePoll()
-        Task { await refresh(force: true) }
+        isLocked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+        if !isLocked {
+            schedulePoll()
+            Task { await refresh(force: true) }
+        }
     }
 
     private func schedulePoll() {
@@ -115,7 +121,7 @@ final class AppModel {
             pollTimer?.invalidate()
         } else if wasPaused {
             schedulePoll()
-            if isRefreshing { pendingRefreshThrottle = 0 }
+            if isFetching { pendingRefreshThrottle = 0 }
             else { Task { await refresh(force: false) } }
         }
     }
@@ -128,14 +134,19 @@ final class AppModel {
     }
 
     func refresh(force: Bool, throttle: TimeInterval = 0) async {
-        guard !isAsleep, !isLocked else { return }
-        guard !isRefreshing else {
+        if let task = await fetchAndStartUsage(force: force, throttle: throttle) { await task.value }
+    }
+
+    /// Network polls stay independent of a slow history import. Every caller shares one usage task.
+    private func fetchAndStartUsage(force: Bool, throttle: TimeInterval) async -> Task<Void, Never>? {
+        guard !isAsleep, !isLocked else { return nil }
+        guard !isFetching else {
             if force { pendingRefreshThrottle = 0 }
-            return
+            return nil
         }
-        isRefreshing = true
+        isFetching = true
         defer {
-            isRefreshing = false
+            isFetching = false
             if let throttle = pendingRefreshThrottle {
                 pendingRefreshThrottle = nil
                 Task { await refresh(force: false, throttle: throttle) }
@@ -167,15 +178,21 @@ final class AppModel {
                 apply(outcome, to: id)
             }
         }
-        guard !isAsleep, !isLocked else { return }
+        guard !isAsleep, !isLocked else { return nil }
         await refreshIncidents(throttle: throttle)
-        guard !isAsleep, !isLocked else { return }
+        guard !isAsleep, !isLocked else { return nil }
         if let release = await updater.checkIfDue(), settings.notificationsEnabled {
             notifier.send(update: release)
         }
-        guard !isAsleep, !isLocked else { return }
-        await refreshUsage()
-        lastUpdated = Date()
+        guard !isAsleep, !isLocked else { return nil }
+        if usageTask == nil {
+            usageTask = Task {
+                await refreshUsage()
+                lastUpdated = Date()
+                usageTask = nil
+            }
+        }
+        return usageTask
     }
 
     /// Reads the status pages of the enabled subscriptions that have one. A page that can't be
@@ -379,7 +396,7 @@ final class AppModel {
         settings.setEnabled(id, enabled)
         if enabled {
             providers[id] = providers[id] ?? disabledProviders.removeValue(forKey: id) ?? ProviderState()
-            if isRefreshing { pendingRefreshThrottle = pendingRefreshThrottle ?? Self.openThrottle }
+            if isFetching { pendingRefreshThrottle = pendingRefreshThrottle ?? Self.openThrottle }
             else { Task { await refresh(force: false, throttle: Self.openThrottle) } }
         } else if let state = providers.removeValue(forKey: id) {
             disabledProviders[id] = state
