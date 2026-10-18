@@ -55,6 +55,14 @@ public struct CodexLogParser: Sendable, Codable {
     private var forkInstant: Date?
     private var lastTotal: [Int64]?
     private var sawMeta = false
+    private var lastTimestamp: Date?
+    private var replayThrough: Date?
+
+    /// Rebuild context from a rewritten file without counting its already-seen prefix again.
+    init(replaying previous: CodexLogParser) {
+        replayThrough = previous.lastTimestamp ?? previous.replayThrough
+        lastTimestamp = replayThrough
+    }
     // Activity state. Optional so cursors saved by earlier versions still decode.
     /// When the request for the next response was sent: a tool's output or the start of a turn.
     private var requestAt: Date?
@@ -62,8 +70,6 @@ public struct CodexLogParser: Sendable, Codable {
     private var subagent: Bool?
 
     public init() {}
-
-    static let forkReplaySlack: TimeInterval = 1
 
     public mutating func consume(line: Data, stats: (StatEvent) -> Void = { _ in }) -> UsageRecord? {
         line.withUnsafeBytes { consume(line: $0, stats: stats) }
@@ -73,16 +79,21 @@ public struct CodexLogParser: Sendable, Codable {
     /// reports activity (tool calls, edits, timing) to `stats`.
     /// Only the few interesting line types are copied out of the raw buffer.
     public mutating func consume(line: UnsafeRawBufferPointer, stats: (StatEvent) -> Void = { _ in }) -> UsageRecord? {
+        let timestamp = Self.stringField("timestamp", in: Data(line.prefix(200))).flatMap(parseISODate)
+        if let timestamp { lastTimestamp = max(lastTimestamp ?? timestamp, timestamp) }
+        let replay = timestamp.map { at in replayThrough.map { at <= $0 } ?? false } ?? false
+        let emit: (StatEvent) -> Void = { event in if !replay { stats(event) } }
         // Cheap type sniffing on the line head; the envelope's type lives in the first ~100 bytes.
         let head = UnsafeRawBufferPointer(rebasing: line.prefix(160))
         if Self.contains(head, Self.tokenCountMarker) {
-            return consumeTokenCount(Data(line))
+            let record = consumeTokenCount(Data(line))
+            return replay ? nil : record
         }
         if Self.activityMarkers.contains(where: { Self.contains(head, $0) }) {
             if let light = Self.light(line) {
-                consumeLight(light, line, stats: stats)
+                consumeLight(light, line, stats: emit)
             } else {
-                consumeActivity(Data(line), stats: stats)
+                consumeActivity(Data(line), stats: emit)
             }
             return nil
         }
@@ -123,7 +134,7 @@ public struct CodexLogParser: Sendable, Codable {
             if key == lastTotal { return nil }
             lastTotal = key
         }
-        if let forkInstant, ts.timeIntervalSince(forkInstant) <= Self.forkReplaySlack {
+        if let forkInstant, ts <= forkInstant {
             return nil
         }
 
@@ -290,7 +301,7 @@ public struct CodexLogParser: Sendable, Codable {
     private mutating func consumeLight(_ light: Light, _ line: UnsafeRawBufferPointer, stats: (StatEvent) -> Void) {
         if case .ignore = light { return }
         guard let at = Self.stringField("timestamp", in: Data(line.prefix(200))).flatMap(parseISODate) else { return }
-        if let forkInstant, at.timeIntervalSince(forkInstant) <= Self.forkReplaySlack { return }
+        if let forkInstant, at <= forkInstant { return }
         switch light {
         case .request:
             requestAt = at
@@ -316,7 +327,7 @@ public struct CodexLogParser: Sendable, Codable {
               let payload = obj["payload"] as? [String: Any],
               let at = (obj["timestamp"] as? String).flatMap(parseISODate)
         else { return }
-        if let forkInstant, at.timeIntervalSince(forkInstant) <= Self.forkReplaySlack { return }
+        if let forkInstant, at <= forkInstant { return }
         let envelope = obj["type"] as? String
         let type = payload["type"] as? String
         func emit(_ values: [String: Int64]) { stats(StatEvent(timestamp: at, values: values)) }

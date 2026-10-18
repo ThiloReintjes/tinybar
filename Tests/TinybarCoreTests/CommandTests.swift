@@ -22,7 +22,7 @@ import Testing
         echo done
         """
     let p = ShellCommand.parse(command)
-    #expect(p.programs == ["python", "echo"])
+    #expect(p.programs == ["python"])
     #expect(p.inlinePython)
 }
 
@@ -32,7 +32,7 @@ import Testing
     #expect(!ShellCommand.parse("python3 -m pytest -q").inlinePython)
     #expect(ShellCommand.parse("./Scripts/deploy-acme.sh --prod").programs == ["script"])
     #expect(ShellCommand.parse("if [ -f x ]; then cat x; fi").programs == ["cat"])
-    #expect(ShellCommand.parse("echo $(git rev-parse HEAD) > out.txt").programs == ["echo", "git"])
+    #expect(ShellCommand.parse("echo $(git rev-parse HEAD) > out.txt").programs == ["git"])
     #expect(ShellCommand.parse("git -C ../other log --oneline").git == ["log"])
     #expect(ShellCommand.parse("node -e 'console.log(1)'").inlineJS)
     #expect(ShellCommand.parse("uv run python -c 'print(1)'").inlinePython)

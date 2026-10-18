@@ -57,6 +57,7 @@ public final class ProjectResolver: @unchecked Sendable {
         if !gitdir.hasPrefix("/") {
             gitdir = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(gitdir)
         }
+        gitdir = (gitdir as NSString).standardizingPath
         guard let range = gitdir.range(of: "/.git/worktrees/") else { return nil }
         return String(gitdir[..<range.lowerBound])
     }
