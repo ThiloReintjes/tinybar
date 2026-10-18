@@ -342,3 +342,10 @@ Commands, Languages or parallel counts; schema 5 clears and recounts once more.
 Schema 6 (0.5.0) adds Context Bands. Claude's come at once from the message ids kept for
 de-duplication (90 days); Codex logs still on disk are re-read once, in the child process, up to
 their saved offsets, for long requests only. Older days stay at base prices.
+
+A backfill reads each file only up to the offset it had when the backfill was first armed, and
+records each finished file, so an interrupted one resumes without counting anything twice while
+normal ingestion carries on. Migrations run in one transaction. Before 0.5.1, GPT responses
+logged by Claude Code were counted from the largest value of each field across their streamed
+copies, which counted cached context twice; stored totals from those days are not rewritten, but
+a message seen again is replaced by its complete copy.
