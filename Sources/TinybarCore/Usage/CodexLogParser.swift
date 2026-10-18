@@ -24,6 +24,10 @@ public struct TokenCounts: Sendable, Hashable, Codable {
         lhs.cacheWrite += rhs.cacheWrite
         lhs.cacheRead += rhs.cacheRead
     }
+
+    public static prefix func - (t: TokenCounts) -> TokenCounts {
+        TokenCounts(input: -t.input, output: -t.output, cacheWrite: -t.cacheWrite, cacheRead: -t.cacheRead)
+    }
 }
 
 /// One model response from a local CLI log (see CONTEXT.md: Usage Record).

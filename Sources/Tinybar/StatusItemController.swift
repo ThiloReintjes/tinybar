@@ -19,6 +19,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         var stale: Bool
         var hidePercent: Bool
         var dark: Bool
+        var alert: Incident.Severity?
     }
 
     init(model: AppModel) {
@@ -70,7 +71,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             provider: pinned?.0,
             stale: stale,
             hidePercent: model.settings.hidePercentage,
-            dark: button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+            dark: button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua,
+            alert: model.disruption?.severity)
         guard key != lastRendered else { return }
         lastRendered = key
 
@@ -80,12 +82,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             fraction: key.percent.map { Double($0) / 100 },
             label: key.hidePercent ? nil : key.percent.map { "\($0)%" },
             tint: key.stale ? nil : key.provider.flatMap(RingIcon.tint),
-            dark: key.dark)
+            dark: key.dark,
+            alert: key.alert?.nsColor)
         button.title = ""
         button.appearsDisabled = stale
-        if let (provider, window) = pinned {
-            button.toolTip = "\(provider.displayName) \(window.title): \(Int(window.remainingPercent.rounded()))% left"
+        var tip = pinned.map { "\($0.0.displayName) \($0.1.title): \(Int($0.1.remainingPercent.rounded()))% left" }
+        if let incident = model.disruption {
+            tip = [tip, "\(incident.provider.displayName): \(incident.title)"].compactMap { $0 }.joined(separator: "\n")
         }
+        button.toolTip = tip
+        // The image carries the incident's light; VoiceOver gets it from the label.
+        button.setAccessibilityLabel(tip)
     }
 
     @objc private func togglePopover() {
@@ -130,7 +137,8 @@ enum RingIcon {
         }
     }
 
-    static func image(fraction: Double?, label: String?, tint: Tint?, dark: Bool) -> NSImage {
+    /// `alert` puts a status light on the ring's top right (an Incident somewhere).
+    static func image(fraction: Double?, label: String?, tint: Tint?, dark: Bool, alert: NSColor? = nil) -> NSImage {
         let ink: NSColor = dark ? .white : .black
         let text = label.map { NSAttributedString(string: $0, attributes: [.font: font, .foregroundColor: ink]) }
         let textSize = text?.size() ?? .zero
@@ -170,6 +178,16 @@ enum RingIcon {
                 case nil:
                     arc(center: center, radius: radius, sweep: sweep, color: ink)
                 }
+            }
+
+            if let alert {
+                // Punch a gap into the ring so the light reads as its own mark, then draw it.
+                let light = NSRect(x: ringRect.maxX - 5, y: ringRect.maxY - 5, width: 5.5, height: 5.5)
+                NSGraphicsContext.current?.compositingOperation = .clear
+                NSBezierPath(ovalIn: light.insetBy(dx: -1.25, dy: -1.25)).fill()
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                alert.setFill()
+                NSBezierPath(ovalIn: light).fill()
             }
 
             if let text {

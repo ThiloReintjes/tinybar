@@ -7,6 +7,20 @@ public struct DailyUsage: Sendable, Hashable {
     public var model: String
     public var project: String
     public var tokens: TokenCounts
+    /// The part of `tokens` from long requests, by Context Band, for Long-context Prices.
+    public var long: [Int64: TokenCounts] = [:]
+}
+
+/// Requests are filed by how far their context goes past these sizes, so Long-context Prices can
+/// be applied at display time whatever tiers models.dev lists then (SPEC §10). Each request is
+/// in one band: the largest size its context exceeds. A tier at a size between two bands is
+/// applied from the next band up.
+public enum ContextBand {
+    public static let sizes: [Int64] = [100_000, 200_000, 272_000, 400_000, 1_000_000]
+
+    public static func of(_ tokens: TokenCounts) -> Int64? {
+        sizes.last { tokens.context > $0 }
+    }
 }
 
 /// A row of the activity counters (SPEC §9).
@@ -23,7 +37,7 @@ public struct DailyStat: Sendable, Hashable {
 public actor UsageStore {
     private let db: SQLiteDB
     private let projects = ProjectResolver()
-    private static let schemaVersion: Int64 = 5
+    private static let schemaVersion: Int64 = 6
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
         db = try SQLiteDB(path: path.path)
@@ -33,6 +47,23 @@ public actor UsageStore {
     private static func migrate(_ db: SQLiteDB) throws {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
+        if version >= 2 {
+            // 0.5.0 files long requests by Context Band. Claude's come from the messages kept for
+            // de-duplication; Codex logs are read again by `backfillLongContext`.
+            try db.exec(longContextSchema)
+            try db.exec("""
+            INSERT OR REPLACE INTO daily_long_context
+                (day, provider, model, project, band, input, output, cache_write, cache_read)
+            SELECT day, provider, model, project, \(bandSQL("input + cache_write + cache_read")),
+                   sum(input), sum(output), sum(cache_write), sum(cache_read)
+            FROM claude_message WHERE input + cache_write + cache_read > \(ContextBand.sizes[0])
+            GROUP BY 1, 2, 3, 4, 5;
+            """)
+        }
+        if version == 5 {
+            try db.exec("PRAGMA user_version = \(schemaVersion);")
+            return
+        }
         if version == 3 || version == 4 {
             // 0.2.0 kept prompts, tool calls, lines and Agent Time without their model; 0.3.0 had
             // no shell commands, file kinds or parallel tool calls. Count all activity again from
@@ -51,11 +82,12 @@ public actor UsageStore {
             return
         }
         if version == 1 {
-            try db.exec(claudeMessageSchema + statSchema + "PRAGMA user_version = \(schemaVersion);")
+            try db.exec(claudeMessageSchema + statSchema + longContextSchema + "PRAGMA user_version = \(schemaVersion);")
             return
         }
-        try db.exec(claudeMessageSchema + statSchema)
+        try db.exec(claudeMessageSchema + statSchema + longContextSchema)
         try db.exec("""
+        INSERT OR REPLACE INTO meta (key, value) VALUES ('long_context_backfill', 'done');
         CREATE TABLE IF NOT EXISTS daily_usage (
             day TEXT NOT NULL,
             provider TEXT NOT NULL,
@@ -76,9 +108,30 @@ public actor UsageStore {
             offset INTEGER NOT NULL,
             state BLOB
         ) WITHOUT ROWID;
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID;
         PRAGMA user_version = \(schemaVersion);
         """)
+    }
+
+    /// The tokens of long requests (SPEC §10), a subset of `daily_usage` by Context Band.
+    private static let longContextSchema = """
+    CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS daily_long_context (
+        day TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        project TEXT NOT NULL,
+        band INTEGER NOT NULL,
+        input INTEGER NOT NULL DEFAULT 0,
+        output INTEGER NOT NULL DEFAULT 0,
+        cache_write INTEGER NOT NULL DEFAULT 0,
+        cache_read INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, provider, model, project, band)
+    ) WITHOUT ROWID;
+    """
+
+    /// `ContextBand.of` in SQL, for a context expression.
+    private static func bandSQL(_ context: String) -> String {
+        "CASE " + ContextBand.sizes.reversed().map { "WHEN \(context) > \($0) THEN \($0)" }.joined(separator: " ") + " END"
     }
 
     /// One row per Claude message id: the usage we have counted for it, so a later, more
@@ -243,9 +296,11 @@ public actor UsageStore {
 
     /// How a file is read. `backfill` re-reads what an earlier version already counted, up to the
     /// saved offset, for activity stats only: token totals and offsets stay as they are.
+    /// `longContext` is the same for the tokens of long requests (Codex only; schema 6).
     enum ReadMode {
         case incremental
         case backfill
+        case longContext
     }
 
     private func ingestCodexFile(path: String, stamp: FileStamp, cursor: Cursor?, mode: ReadMode) throws -> (Int64, Int) {
@@ -254,7 +309,7 @@ public actor UsageStore {
         var parser = CodexLogParser()
         var offset: Int64 = 0
         var until: Int64?
-        if mode == .backfill {
+        if mode != .incremental {
             guard let cursor else { return (0, 0) }
             until = cursor.offset
         } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset,
@@ -269,17 +324,22 @@ public actor UsageStore {
         }
 
         var agg: [AggKey: TokenCounts] = [:]
+        var long: [AggKey: TokenCounts] = [:]
         var stats = StatBatch()
         var added = 0
         let endOffset = try JSONLReader.forEachLine(url: url, from: offset, until: until) { line in
             let current = ModelName.normalize(parser.model ?? "unknown")
-            let record = parser.consume(line: line) { stats.add($0, provider: .codex, model: current) }
+            let record = parser.consume(line: line) { if mode != .longContext { stats.add($0, provider: .codex, model: current) } }
             guard let record else { return }
             let day = DayKey.string(for: record.timestamp)
             let model = ModelName.normalize(record.model)
-            stats.addResponse(day: day, provider: .codex, model: model, at: record.timestamp, tokens: record.tokens)
-            if mode == .incremental {
-                agg[AggKey(day: day, model: model, project: projects.project(for: record.cwd)), default: TokenCounts()] += record.tokens
+            if mode != .longContext {
+                stats.addResponse(day: day, provider: .codex, model: model, at: record.timestamp, tokens: record.tokens)
+            }
+            if mode != .backfill {
+                let key = AggKey(day: day, model: model, project: projects.project(for: record.cwd))
+                if mode == .incremental { agg[key, default: TokenCounts()] += record.tokens }
+                if let band = ContextBand.of(record.tokens) { long[key.band(band), default: TokenCounts()] += record.tokens }
             }
             added += 1
         }
@@ -287,9 +347,12 @@ public actor UsageStore {
         for (key, t) in agg {
             try addDaily(day: key.day, provider: .codex, model: key.model, project: key.project, t)
         }
+        for (key, t) in long {
+            try addLong(day: key.day, provider: .codex, model: key.model, project: key.project, band: key.band, t)
+        }
         try write(stats)
         let state = (try? JSONEncoder().encode(parser)).map { String(decoding: $0, as: UTF8.self) }
-        if mode == .backfill, let cursor {
+        if mode != .incremental, let cursor {
             try saveCursor(path: path, source: .codex, stamp: cursor.stamp, offset: cursor.offset, state: state)
         } else {
             try saveCursor(path: path, source: .codex, stamp: stamp, offset: endOffset, state: state)
@@ -402,9 +465,14 @@ public actor UsageStore {
             if tokensChanged && countTokens {
                 // Undo the old contribution, keeping its original day/model/project.
                 let project = e[3].text ?? ""
-                try addDaily(day: day, provider: provider, model: model, project: project,
-                             TokenCounts(input: -old.input, output: -old.output, cacheWrite: -old.cacheWrite, cacheRead: -old.cacheRead))
+                try addDaily(day: day, provider: provider, model: model, project: project, -old)
                 try addDaily(day: day, provider: provider, model: model, project: project, final.tokens)
+                if let band = ContextBand.of(old) {
+                    try addLong(day: day, provider: provider, model: model, project: project, band: band, -old)
+                }
+                if let band = ContextBand.of(final.tokens) {
+                    try addLong(day: day, provider: provider, model: model, project: project, band: band, final.tokens)
+                }
             }
             var stats = StatBatch()
             stats.replace(
@@ -425,6 +493,9 @@ public actor UsageStore {
         let project = projects.project(for: record.cwd)
         if countTokens {
             try addDaily(day: day, provider: provider, model: model, project: project, record.tokens)
+            if let band = ContextBand.of(record.tokens) {
+                try addLong(day: day, provider: provider, model: model, project: project, band: band, record.tokens)
+            }
         }
         let newStats = MessageStats(message)
         var stats = StatBatch()
@@ -497,6 +568,49 @@ public actor UsageStore {
         return result
     }
 
+    /// Re-reads Codex logs up to their saved offsets, filing long requests by Context Band.
+    /// Runs once after upgrading to schema 6, in the history import's child process.
+    @discardableResult
+    public func backfillLongContext(progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult {
+        let paths = try db.run("SELECT path FROM file_cursor WHERE provider = ?", [.text(LogSource.codex.rawValue)])
+            .compactMap { $0.first?.text }
+        var result = IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0)
+        let batchSize = 200
+        var index = 0
+        while index < paths.count {
+            let batch = paths[index..<min(index + batchSize, paths.count)]
+            try db.transaction {
+                for path in batch {
+                    guard let cursor = try loadCursor(path: path), let stamp = Self.stamp(path),
+                          stamp.inode == cursor.stamp.inode, stamp.size >= cursor.offset
+                    else { continue }
+                    let (read, added) = try autoreleasepool {
+                        try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .longContext)
+                    }
+                    result.filesScanned += 1
+                    result.bytesRead += read
+                    result.recordsAdded += added
+                }
+            }
+            index += batch.count
+            progress?(IngestProgress(filesDone: index, filesTotal: paths.count))
+        }
+        try markLongContextBackfillDone()
+        if result.filesScanned > batchSize {
+            try? db.exec("PRAGMA shrink_memory")
+            malloc_zone_pressure_relief(nil, 0)
+        }
+        return result
+    }
+
+    public func hasCompletedLongContextBackfill() throws -> Bool {
+        try db.run("SELECT value FROM meta WHERE key = 'long_context_backfill'").first?.first?.text == "done"
+    }
+
+    public func markLongContextBackfillDone() throws {
+        try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('long_context_backfill', 'done')")
+    }
+
     public func hasCompletedStatsBackfill() throws -> Bool {
         try db.run("SELECT value FROM meta WHERE key = 'stats_backfill'").first?.first?.text == "done"
     }
@@ -543,6 +657,19 @@ public actor UsageStore {
               .int(t.input), .int(t.output), .int(t.cacheWrite), .int(t.cacheRead)])
     }
 
+    private func addLong(day: String, provider: ProviderID, model: String, project: String, band: Int64, _ t: TokenCounts) throws {
+        try db.run("""
+        INSERT INTO daily_long_context (day, provider, model, project, band, input, output, cache_write, cache_read)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(day, provider, model, project, band) DO UPDATE SET
+            input = input + excluded.input,
+            output = output + excluded.output,
+            cache_write = cache_write + excluded.cache_write,
+            cache_read = cache_read + excluded.cache_read
+        """, [.text(day), .text(provider.rawValue), .text(model), .text(project), .int(band),
+              .int(t.input), .int(t.output), .int(t.cacheWrite), .int(t.cacheRead)])
+    }
+
     private func saveCursor(path: String, source: LogSource, stamp: FileStamp, offset: Int64, state: String?) throws {
         try db.run("""
         INSERT OR REPLACE INTO file_cursor (path, provider, inode, size, mtime, offset, state)
@@ -561,14 +688,24 @@ public actor UsageStore {
             sql += " AND provider = ?"
             params.append(.text(provider.rawValue))
         }
+        struct Key: Hashable { var day, provider, model, project: String }
+        var long: [Key: [Int64: TokenCounts]] = [:]
+        for r in try db.run(sql.replacingOccurrences(of: "project, input", with: "project, band, input")
+            .replacingOccurrences(of: "daily_usage", with: "daily_long_context"), params)
+        {
+            let key = Key(day: r[0].text ?? "", provider: r[1].text ?? "", model: r[2].text ?? "", project: r[3].text ?? "")
+            long[key, default: [:]][r[4].int] = TokenCounts(input: r[5].int, output: r[6].int, cacheWrite: r[7].int, cacheRead: r[8].int)
+        }
         return try db.run(sql, params).compactMap { r in
             guard let provider = r[1].text.flatMap(ProviderID.init(rawValue:)) else { return nil }
+            let key = Key(day: r[0].text ?? "", provider: r[1].text ?? "", model: r[2].text ?? "", project: r[3].text ?? "")
             return DailyUsage(
-                day: r[0].text ?? "",
+                day: key.day,
                 provider: provider,
-                model: r[2].text ?? "",
-                project: r[3].text ?? "",
-                tokens: TokenCounts(input: r[4].int, output: r[5].int, cacheWrite: r[6].int, cacheRead: r[7].int))
+                model: key.model,
+                project: key.project,
+                tokens: TokenCounts(input: r[4].int, output: r[5].int, cacheWrite: r[6].int, cacheRead: r[7].int),
+                long: long[key] ?? [:])
         }
     }
 
@@ -628,6 +765,9 @@ public actor UsageStore {
         var day: String
         var model: String
         var project: String
+        var band: Int64 = 0
+
+        func band(_ b: Int64) -> AggKey { AggKey(day: day, model: model, project: project, band: b) }
     }
 
     private func loadCursor(path: String) throws -> Cursor? {

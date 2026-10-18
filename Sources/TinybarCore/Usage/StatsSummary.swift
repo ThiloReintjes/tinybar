@@ -241,7 +241,7 @@ public struct StatsSummary: Sendable {
             counts += r.tokens
             byProvider[r.provider, default: 0] += t
             dayTotals[r.day, default: 0] += t
-            let c = prices.cost(provider: r.provider, model: r.model, tokens: r.tokens)
+            let c = prices.cost(r)
             if let c { cost += c; priced = true }
             if let i = barIndex[r.day] {
                 bars[i].tokens[r.provider, default: 0] += t
@@ -372,7 +372,7 @@ public struct StatsSummary: Sendable {
             var m = models[r.model] ?? Model(name: r.model, provider: r.provider, tokens: 0, cost: 0, responses: 0,
                                               speed: nil, speedSamples: 0, peakContext: 0)
             m.tokens += r.tokens.total
-            let c = prices.cost(provider: r.provider, model: r.model, tokens: r.tokens)
+            let c = prices.cost(r)
             m.cost = c.flatMap { c in m.cost.map { $0 + c } }
             models[r.model] = m
         }

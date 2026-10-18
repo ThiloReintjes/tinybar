@@ -6,6 +6,22 @@ public struct ModelPrice: Sendable, Hashable, Codable {
     public var output: Double
     public var cacheRead: Double?
     public var cacheWrite: Double?
+    /// Long-context Prices: a whole request whose context is over `size` tokens costs these
+    /// instead (CONTEXT.md). Smallest size first.
+    public var tiers: [Tier]?
+
+    public struct Tier: Sendable, Hashable, Codable {
+        public var size: Int64
+        public var price: ModelPrice
+    }
+
+    public init(input: Double, output: Double, cacheRead: Double? = nil, cacheWrite: Double? = nil, tiers: [Tier]? = nil) {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+        self.tiers = tiers
+    }
 
     public func cost(_ t: TokenCounts) -> Double {
         let m = 1_000_000.0
@@ -13,6 +29,17 @@ public struct ModelPrice: Sendable, Hashable, Codable {
             + Double(t.output) * output / m
             + Double(t.cacheRead) * (cacheRead ?? input) / m
             + Double(t.cacheWrite) * (cacheWrite ?? input) / m
+    }
+
+    /// `total` priced at the base rates, except the long requests in it: `long` holds their
+    /// tokens by Context Band, and each band takes the highest tier its requests all exceed.
+    public func cost(_ total: TokenCounts, long: [Int64: TokenCounts]) -> Double {
+        var c = cost(total)
+        for (band, t) in long {
+            guard let tier = tiers?.last(where: { $0.size <= band }) else { continue }
+            c += tier.price.cost(t) - cost(t)
+        }
+        return c
     }
 }
 
@@ -35,12 +62,26 @@ public struct PriceTable: Sendable {
         return nil
     }
 
-    public func cost(provider: ProviderID, model: String, tokens: TokenCounts) -> Double? {
-        price(provider: provider, model: model)?.cost(tokens)
+    public func cost(provider: ProviderID, model: String, tokens: TokenCounts, long: [Int64: TokenCounts] = [:]) -> Double? {
+        price(provider: provider, model: model)?.cost(tokens, long: long)
+    }
+
+    public func cost(_ row: DailyUsage) -> Double? {
+        cost(provider: row.provider, model: row.model, tokens: row.tokens, long: row.long)
     }
 
     /// models.dev provider ids for each Provider.
     static let sourceProviders: [ProviderID: String] = [.codex: "openai", .claude: "anthropic"]
+
+    private static func rates(_ cost: [String: Any]) -> ModelPrice? {
+        guard let input = (cost["input"] as? NSNumber)?.doubleValue,
+              let output = (cost["output"] as? NSNumber)?.doubleValue
+        else { return nil }
+        return ModelPrice(
+            input: input, output: output,
+            cacheRead: (cost["cache_read"] as? NSNumber)?.doubleValue,
+            cacheWrite: (cost["cache_write"] as? NSNumber)?.doubleValue)
+    }
 
     static func parse(_ data: Data, fetchedAt: Date?) throws -> PriceTable {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -51,15 +92,21 @@ public struct PriceTable: Sendable {
             guard let models = (root[key] as? [String: Any])?["models"] as? [String: Any] else { continue }
             var table: [String: ModelPrice] = [:]
             for (id, value) in models {
-                guard let cost = (value as? [String: Any])?["cost"] as? [String: Any],
-                      let input = (cost["input"] as? NSNumber)?.doubleValue,
-                      let output = (cost["output"] as? NSNumber)?.doubleValue
+                guard let cost = (value as? [String: Any])?["cost"] as? [String: Any], var price = rates(cost)
                 else { continue }
-                table[ModelName.normalize(id)] = ModelPrice(
-                    input: input,
-                    output: output,
-                    cacheRead: (cost["cache_read"] as? NSNumber)?.doubleValue,
-                    cacheWrite: (cost["cache_write"] as? NSNumber)?.doubleValue)
+                // `tiers` lists context tiers; older entries only carry `context_over_200k`.
+                var tiers: [ModelPrice.Tier] = []
+                for tier in cost["tiers"] as? [[String: Any]] ?? [] {
+                    guard let spec = tier["tier"] as? [String: Any], spec["type"] as? String == "context",
+                          let size = (spec["size"] as? NSNumber)?.int64Value, let p = rates(tier)
+                    else { continue }
+                    tiers.append(.init(size: size, price: p))
+                }
+                if tiers.isEmpty, let over = cost["context_over_200k"] as? [String: Any], let p = rates(over) {
+                    tiers.append(.init(size: 200_000, price: p))
+                }
+                price.tiers = tiers.isEmpty ? nil : tiers.sorted { $0.size < $1.size }
+                table[ModelName.normalize(id)] = price
             }
             prices[provider] = table
         }
@@ -108,6 +155,8 @@ public actor PricingService {
     private struct CacheFile: Codable {
         var fetchedAt: Date
         var prices: [String: [String: ModelPrice]]
+        /// 2 since Long-context Prices. An older cache is used but fetched again right away.
+        var format: Int?
     }
 
     private func loadCache() -> PriceTable? {
@@ -116,13 +165,14 @@ public actor PricingService {
         else { return nil }
         var prices: [ProviderID: [String: ModelPrice]] = [:]
         for (k, v) in file.prices { if let p = ProviderID(rawValue: k) { prices[p] = v } }
-        return PriceTable(prices: prices, fetchedAt: file.fetchedAt)
+        return PriceTable(prices: prices, fetchedAt: file.format == 2 ? file.fetchedAt : nil)
     }
 
     private func saveCache(_ t: PriceTable) {
         let file = CacheFile(
             fetchedAt: t.fetchedAt ?? Date(),
-            prices: Dictionary(uniqueKeysWithValues: t.prices.map { ($0.key.rawValue, $0.value) }))
+            prices: Dictionary(uniqueKeysWithValues: t.prices.map { ($0.key.rawValue, $0.value) }),
+            format: 2)
         if let data = try? JSONEncoder().encode(file) {
             try? data.write(to: cacheURL, options: .atomic)
         }

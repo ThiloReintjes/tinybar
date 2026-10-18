@@ -3,16 +3,18 @@ import TinybarCore
 
 /// Runs heavy one-off reads of the whole history in a child copy of this executable, reporting
 /// progress parsed from its stdout: the first-launch import (`--import-history`) and the one-time
-/// activity backfill after upgrading from a version without Stats (`--backfill-stats`).
+/// activity backfill after upgrading from a version without Stats (`--backfill-stats`), and the
+/// one-time filing of long Codex requests after upgrading to schema 6 (`--backfill-long-context`).
 enum HistoryImport {
     enum Job: String {
         case importHistory = "--import-history"
         case backfillStats = "--backfill-stats"
+        case backfillLongContext = "--backfill-long-context"
     }
 
     /// Child side: ingest everything, printing "done/total" lines. Called before the app starts.
     static func runChildIfRequested() {
-        guard let job = [Job.importHistory, .backfillStats].first(where: { CommandLine.arguments.contains($0.rawValue) })
+        guard let job = [Job.importHistory, .backfillStats, .backfillLongContext].first(where: { CommandLine.arguments.contains($0.rawValue) })
         else { return }
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached(priority: .utility) {
@@ -25,6 +27,7 @@ enum HistoryImport {
                 switch job {
                 case .importHistory: _ = try? await store.ingestAll(progress: report)
                 case .backfillStats: _ = try? await store.backfillStats(progress: report)
+                case .backfillLongContext: _ = try? await store.backfillLongContext(progress: report)
                 }
             }
             semaphore.signal()
@@ -69,6 +72,7 @@ enum HistoryImport {
             switch job {
             case .importHistory: _ = try? await store.ingestAll()
             case .backfillStats: _ = try? await store.backfillStats()
+            case .backfillLongContext: _ = try? await store.backfillLongContext()
             }
         }
     }

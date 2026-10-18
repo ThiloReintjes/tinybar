@@ -74,7 +74,7 @@ public struct UsageSummary: Sendable {
 
         for r in rows {
             let t = r.tokens.total
-            let c = prices.cost(provider: r.provider, model: r.model, tokens: r.tokens)
+            let c = prices.cost(r)
             total += t
             if let c { cost += c; priced = true } else { unpriced = true }
 

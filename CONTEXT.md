@@ -23,12 +23,16 @@ When a Limit Window will reach 0% left if usage continues at its average pace si
 _Avoid_: ETA, prediction, burn rate
 
 **Banked Reset**:
-A saved Codex reset coupon the user holds, which can be redeemed to reset a Limit Window early. Tinybar only displays it and never redeems it.
+A saved reset the user holds (a Codex reset coupon, a Claude "Reset for free" grant), which can be redeemed to reset a Limit Window early. Tinybar only displays it and never redeems it.
 _Avoid_: Reset credit, rollover
 
 **Pinned Limit**:
-The single Limit Window the user picked in the popover to show in the menu bar.
+The single Limit Window the user picked in the popover to show in the menu bar. Without one, the menu bar shows Auto: the account-wide window that runs out first.
 _Avoid_: Primary limit, featured limit
+
+**Incident**:
+A problem a Provider reports on its own public status page that affects the parts Tinybar's users rely on (for Claude: claude.ai, the API and Claude Code), from degraded service to a major outage, or maintenance in progress.
+_Avoid_: Outage (it's one severity), downtime, alert
 
 **Limit Alert**:
 A macOS notification sent when a 5-hour or weekly Limit Window crosses 90% or 95% used, or when it Resets after having crossed 90%.
@@ -55,6 +59,10 @@ _Avoid_: Open day, pending day
 **Theoretical Cost**:
 What a set of Usage Records would have cost at the Provider's public API prices. It is not what the user actually paid.
 _Avoid_: Spend, cost, bill
+
+**Long-context Price**:
+The higher API price a Provider charges for a whole request whose context is over a size (272K tokens for current GPT models).
+_Avoid_: Tier pricing, surcharge
 
 ### Activity
 

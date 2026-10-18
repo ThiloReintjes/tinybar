@@ -23,13 +23,15 @@ struct CountingNotes: View {
                 """)
             note("At API prices", """
                 What those tokens would cost on each provider's pay-as-you-go API, at today's prices \
-                from models.dev. Your subscription doesn't charge per token.
+                from models.dev, including the higher rate some models charge for a request with a \
+                long context. Your subscription doesn't charge per token.
                 """)
             note("Stats", activity)
             note("Your data", """
                 Logs, totals and stats stay on this Mac. Of shell commands, Tinybar keeps only the \
                 names of the programs they run; of edited files, only the extension. It only asks \
-                each provider for your limits and models.dev for prices.
+                each provider for your limits, their status pages for outages, models.dev for \
+                prices and GitHub for new versions of Tinybar.
                 """)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
