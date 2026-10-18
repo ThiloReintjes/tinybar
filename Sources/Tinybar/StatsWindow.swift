@@ -67,6 +67,7 @@ struct StatsView: View {
     /// The one model the card is filtered to, if any. Not remembered: the window opens on all models.
     @State private var picked: String?
     @State private var summary: StatsSummary?
+    @State private var summaryRevision = 0
     @State private var loadFailed = false
     @State private var copied = false
     /// Which way the last page change went, so the new card comes in from that side.
@@ -107,7 +108,8 @@ struct StatsView: View {
             .padding(.trailing, 20)
             .frame(height: 52)
 
-            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page, forward: forward, loadFailed: loadFailed) { name in
+            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page,
+                      forward: forward, loadFailed: loadFailed, summaryRevision: summaryRevision) { name in
                 picked = picked == name ? nil : name
             }
         }
@@ -125,7 +127,10 @@ struct StatsView: View {
                 return
             }
             // Everything stays in place and the figures move to their new values.
-            withAnimation(summary == nil || reduceMotion ? nil : .smooth(duration: 0.35)) { summary = next }
+            withAnimation(summary == nil || reduceMotion ? nil : .smooth(duration: 0.35)) {
+                summary = next
+                summaryRevision += 1
+            }
         }
     }
 
@@ -200,6 +205,7 @@ struct StatsCard: View {
     /// The page came after the previous one: it enters from the right.
     var forward = true
     var loadFailed = false
+    var summaryRevision = 0
     /// Filters to a model, or back to all. Nil for the copied image, which is not interactive.
     var pick: ((String) -> Void)?
     @State private var tip: StatsTip?
@@ -261,8 +267,7 @@ struct StatsCard: View {
         })
         .environment(\.statsTipID, tip?.id)
         .environment(\.statsPick, pick.map { pick in { name in tip = nil; pick(name) } })
-        .onChange(of: summary?.model) { tip = nil }
-        .onChange(of: summary?.range) { tip = nil }
+        .onChange(of: summaryRevision) { tip = nil }
         .onChange(of: page) { tip = nil }
     }
 
