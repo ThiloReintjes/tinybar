@@ -122,7 +122,8 @@ public enum StatusFeed {
     /// `summary.json`: unresolved incidents and in-progress maintenance, each with the components
     /// it affects. An incident that names no component counts when it has an impact.
     static func statuspage(_ data: Data, provider: ProviderID, base: URL, components: [String]?) throws -> [Incident] {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let incidents = root["incidents"] as? [[String: Any]] else {
             throw ProviderError.unexpected("Unexpected status page response")
         }
         func counts(_ name: String) -> Bool {
@@ -131,7 +132,7 @@ public enum StatusFeed {
         let maintenance = (root["scheduled_maintenances"] as? [[String: Any]] ?? [])
             .filter { $0["status"] as? String == "in_progress" }
         var out: [Incident] = []
-        for (entry, planned) in (root["incidents"] as? [[String: Any]] ?? []).map({ ($0, false) }) + maintenance.map({ ($0, true) }) {
+        for (entry, planned) in incidents.map({ ($0, false) }) + maintenance.map({ ($0, true) }) {
             guard let title = entry["name"] as? String, entry["status"] as? String != "resolved" else { continue }
             let affected = (entry["components"] as? [[String: Any]] ?? []).filter { ($0["name"] as? String).map(counts) ?? false }
             let named = !(entry["components"] as? [Any] ?? []).isEmpty
@@ -153,10 +154,12 @@ public enum StatusFeed {
 
     /// The group's components that the native feed lists as affected, with their worst status.
     static func incidentIOAffected(_ data: Data, group: String) throws -> [(name: String, severity: Incident.Severity)] {
-        guard let summary = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["summary"] as? [String: Any]
+        guard let summary = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["summary"] as? [String: Any],
+              let items = (summary["structure"] as? [String: Any])?["items"] as? [[String: Any]],
+              let affected = summary["affected_components"] as? [[String: Any]]
         else { throw ProviderError.unexpected("Unexpected status page response") }
         var names: [String: String] = [:]
-        for item in (summary["structure"] as? [String: Any])?["items"] as? [[String: Any]] ?? [] {
+        for item in items {
             guard let g = item["group"] as? [String: Any], g["name"] as? String == group else { continue }
             for c in g["components"] as? [[String: Any]] ?? [] {
                 // "CLI" alone reads as anything; the page means Codex's.
@@ -165,7 +168,7 @@ public enum StatusFeed {
             }
         }
         var worst: [String: Incident.Severity] = [:]
-        for c in summary["affected_components"] as? [[String: Any]] ?? [] {
+        for c in affected {
             guard let id = c["component_id"] as? String, let name = names[id],
                   let level = (c["status"] as? String).flatMap(severity(componentStatus:))
             else { continue }

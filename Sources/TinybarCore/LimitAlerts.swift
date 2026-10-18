@@ -35,7 +35,7 @@ public struct LimitAlertPlanner: Codable, Sendable, Equatable {
                 }
                 state = CycleState(resetsAt: w.resetsAt, notified: [])
             }
-            state.resetsAt = w.resetsAt
+            if let reset = w.resetsAt { state.resetsAt = reset }
 
             // Only the highest newly crossed threshold, so a jump to 97% sends one alert.
             let crossed = Self.thresholds.filter { Double($0) <= w.usedPercent && !state.notified.contains($0) }
