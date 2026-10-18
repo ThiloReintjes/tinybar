@@ -99,17 +99,20 @@ public enum BrowserCookies {
     }
 
     /// WAL contents are read from a private copy, never by opening the browser's live sidecars.
-    static func readRows(db: URL, domain: String, firefox: Bool) -> [Row]? {
+    static func readRows(db: URL, domain: String, firefox: Bool, now: Date = Date()) -> [Row]? {
         CredentialDatabase.read(db) { handle in
             let sql = firefox
-                ? "SELECT host, name, value, NULL FROM moz_cookies WHERE host = ? OR host = ?"
-                : "SELECT host_key, name, value, encrypted_value FROM cookies WHERE host_key = ? OR host_key = ?"
+                ? "SELECT host, name, value, NULL FROM moz_cookies WHERE (host = ? OR host = ?) AND expiry > ?"
+                : "SELECT host_key, name, value, encrypted_value FROM cookies WHERE (host_key = ? OR host_key = ?) AND (expires_utc = 0 OR expires_utc > ?)"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
             defer { sqlite3_finalize(stmt) }
             let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
             sqlite3_bind_text(stmt, 1, domain, -1, transient)
             sqlite3_bind_text(stmt, 2, "." + domain, -1, transient)
+            // Firefox uses Unix seconds; Chromium uses microseconds since 1601 (zero is a session cookie).
+            let expiry = firefox ? now.timeIntervalSince1970 : (now.timeIntervalSince1970 + 11_644_473_600) * 1_000_000
+            sqlite3_bind_double(stmt, 3, expiry)
 
             var rows: [Row] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
