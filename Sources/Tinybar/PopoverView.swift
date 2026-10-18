@@ -263,8 +263,8 @@ private struct OverviewRow: View {
     var body: some View {
         let state = model.providers[id]
         let snapshot = state?.snapshot
-        let binding = snapshot?.bindingWindow
         let stale = state?.isStale ?? false
+        let binding = (stale ? nil : snapshot?.firstRunOut(includeModelSpecific: false)?.window) ?? snapshot?.bindingWindow
 
         HStack(spacing: 12) {
             LimitRings(windows: snapshot?.ringWindows ?? [], provider: id, lineWidth: 4, gap: 1.5, dimmed: stale)
@@ -513,7 +513,7 @@ private struct StaleBanner: View {
                 Text(StaleText.long(id: id, error: error))
                     .fixedSize(horizontal: false, vertical: true)
                 if let since {
-                    Text("Showing the numbers from \(since.formatted(date: .omitted, time: .shortened)).")
+                    Text("Showing the numbers from \(since.formatted(date: Calendar.current.isDateInToday(since) ? .omitted : .abbreviated, time: .shortened)).")
                         .foregroundStyle(.secondary)
                 }
             }
