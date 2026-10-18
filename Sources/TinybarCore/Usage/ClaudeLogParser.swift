@@ -122,6 +122,7 @@ public enum ClaudeLogParser {
         private static let compactMarker = Data(#""compact_boundary""#.utf8)
         private static let toolResultMarker = Data(#""type":"tool_result""#.utf8)
         private static let patchMarker = Data(#""structuredPatch""#.utf8)
+        private static let createMarker = Data(#""type":"create""#.utf8)
         private static let sidechainMarker = Data(#""isSidechain":true"#.utf8)
         private static let errorMarker = Data(#""is_error":true"#.utf8)
 
@@ -137,7 +138,7 @@ public enum ClaudeLogParser {
                 return assistant(obj)
             }
             if has(Self.userMarker) {
-                if has(Self.toolResultMarker), !has(Self.patchMarker) {
+                if has(Self.toolResultMarker), !has(Self.patchMarker), !has(Self.createMarker) {
                     // A tool result that isn't an edit: only its time matters, and its output can be
                     // large. The first `"timestamp"` is the line's own (results come after it).
                     guard let at = CodexLogParser.stringField("timestamp", in: Data(line)).flatMap(parseISODate) else { return [] }
@@ -236,9 +237,9 @@ public enum ClaudeLogParser {
             let blocks = content as? [[String: Any]] ?? []
             let result = blocks.first { $0["type"] as? String == "tool_result" }
 
-            if timed(obj) {
+            if timed(obj), result != nil {
                 lastUser = at
-                lastUserWasPrompt = result == nil
+                lastUserWasPrompt = false
             }
             if let result {
                 guard let id = result["tool_use_id"] as? String else { return [] }
@@ -267,6 +268,10 @@ public enum ClaudeLogParser {
                 let text = content as? String
                     ?? blocks.first { $0["type"] as? String == "text" }?["text"] as? String ?? ""
                 if Self.notTyped.contains(where: text.hasPrefix) { return [] }
+            }
+            if timed(obj) {
+                lastUser = at
+                lastUserWasPrompt = true
             }
             unanswered = Prompt(id: id, at: at)
             return []
