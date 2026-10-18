@@ -58,6 +58,8 @@ struct MessageStats: Codable, Equatable {
     var e: Int64
     var r: Int64?
     var p: Int64?
+    /// The hour originally counted, unaffected by later timezone changes.
+    var h: Int?
 
     init(_ m: ClaudeMessage) {
         t = m.tools
@@ -65,6 +67,7 @@ struct MessageStats: Codable, Equatable {
         e = m.end.millis
         r = m.request?.millis
         p = m.stepStart?.millis
+        h = Calendar.current.component(.hour, from: m.start)
     }
 
     func merged(with old: MessageStats?) -> MessageStats {
@@ -75,6 +78,7 @@ struct MessageStats: Codable, Equatable {
         m.e = max(old.e, e)
         m.r = [old.r, r].compactMap { $0 }.min()
         m.p = [old.p, p].compactMap { $0 }.min()
+        m.h = old.h ?? h
         return m
     }
 
@@ -83,7 +87,7 @@ struct MessageStats: Codable, Equatable {
     /// The counters this message adds, keyed by stat key.
     func contributions(tokens: TokenCounts) -> [String: Int64] {
         var c: [String: Int64] = [StatKey.responses: 1]
-        let hour = Calendar.current.component(.hour, from: Date(timeIntervalSince1970: Double(s) / 1000))
+        let hour = h ?? Calendar.current.component(.hour, from: Date(timeIntervalSince1970: Double(s) / 1000))
         c[StatKey.hour(hour)] = 1
         c[StatKey.hourTokens(hour)] = tokens.total
         for name in t.values { c[StatKey.tool(name), default: 0] += 1 }
