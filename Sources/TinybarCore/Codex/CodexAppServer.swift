@@ -122,6 +122,9 @@ enum CodexAppServer {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
+        guard fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
+            throw ProviderError.unexpected("Could not prepare codex input")
+        }
 
         do { try process.run() } catch { throw ProviderError.unexpected("Could not launch codex: \(error.localizedDescription)") }
         // Process creates its own group on macOS; include the npm launcher's native child.
@@ -141,7 +144,8 @@ enum CodexAppServer {
         func send(_ object: [String: Any]) throws {
             var data = try JSONSerialization.data(withJSONObject: object)
             data.append(0x0A)
-            try stdin.fileHandleForWriting.write(contentsOf: data)
+            do { try stdin.fileHandleForWriting.write(contentsOf: data) }
+            catch { throw ProviderError.unexpected("codex app-server closed its input") }
         }
 
         var reader = LineReader(handle: stdout.fileHandleForReading)
@@ -164,7 +168,7 @@ enum CodexAppServer {
         try send(["method": "initialized", "params": [String: Any]()])
         try send(["id": 2, "method": "account/rateLimits/read", "params": [String: Any]()])
         let message = try response(id: 2)
-        guard let result = message["result"] else { throw ProviderError.unexpected("codex app-server: no result") }
+        guard let result = message["result"] as? [String: Any] else { throw ProviderError.unexpected("codex app-server: no result") }
         let data = try JSONSerialization.data(withJSONObject: result)
         do {
             return try JSONDecoder().decode(Response.self, from: data)
