@@ -29,13 +29,14 @@ public struct LimitAlertPlanner: Codable, Sendable, Equatable {
             let key = "\(snapshot.provider.rawValue)/\(w.id)"
             var state = cycles[key] ?? CycleState(resetsAt: w.resetsAt, notified: [])
 
-            if Self.isNewCycle(previous: state.resetsAt, current: w.resetsAt, now: now) {
+            let observedReset = !state.notified.isEmpty && w.usedPercent == 0
+            if observedReset || Self.isNewCycle(previous: state.resetsAt, current: w.resetsAt, now: now) {
                 if state.notified.contains(90) {
                     alerts.append(.reset(provider: snapshot.provider, window: w.title))
                 }
                 state = CycleState(resetsAt: w.resetsAt, notified: [])
             }
-            state.resetsAt = w.resetsAt
+            if let reset = w.resetsAt { state.resetsAt = reset }
 
             // Only the highest newly crossed threshold, so a jump to 97% sends one alert.
             let crossed = Self.thresholds.filter { Double($0) <= w.usedPercent && !state.notified.contains($0) }

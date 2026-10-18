@@ -151,43 +151,67 @@ public enum LineCount {
     /// Added and removed lines in a unified diff or Codex patch. `---`/`+++` file headers before
     /// the first hunk are skipped; inside a hunk they are content (a removed `-- comment`).
     public static func diff(_ patch: String) -> (added: Int64, removed: Int64) {
-        var added: Int64 = 0, removed: Int64 = 0
-        var inHunk = false
-        for line in patch.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.hasPrefix("@@") { inHunk = true; continue }
-            if !inHunk, line.hasPrefix("+++") || line.hasPrefix("---") { continue }
-            if line.hasPrefix("+") { added += 1 } else if line.hasPrefix("-") { removed += 1 }
+        files(inPatch: patch).reduce((added: 0, removed: 0)) {
+            ($0.added + $1.added, $0.removed + $1.removed)
         }
-        return (added, removed)
     }
 
     /// The same, per file: Codex patches name each file in a `*** Update File: <path>` line
-    /// (or `Add File`, `Delete File`), unified diffs in a `+++ b/<path>` header.
+    /// (or `Add File`, `Delete File`), unified diffs in `---`/`+++` headers.
     public static func files(inPatch patch: String) -> [(path: String, added: Int64, removed: Int64)] {
         var out: [(path: String, added: Int64, removed: Int64)] = []
         var inHunk = false
+        var remaining: Int?
+        var oldPath: Substring?
         func start(_ path: Substring) {
             out.append((String(path.trimmingCharacters(in: .whitespaces)), 0, 0))
             inHunk = false
+            remaining = nil
         }
         for line in patch.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("diff --git ") { inHunk = false; oldPath = nil; continue }
             if line.hasPrefix("*** "), let r = line.range(of: " File: ") {
                 start(line[r.upperBound...])
+                inHunk = true
                 continue
             }
             if line.hasPrefix("*** ") { continue }
-            if line.hasPrefix("@@") { inHunk = true; continue }
-            if !inHunk, line.hasPrefix("+++ ") {
-                let path = line.dropFirst(4)
-                if path != "/dev/null" {
-                    let p = path.hasPrefix("b/") ? path.dropFirst(2) : path
-                    if out.last?.path != String(p) { start(p) }
+            if line.hasPrefix("@@") {
+                inHunk = true
+                let ranges = line.split(separator: " ").dropFirst().prefix(2)
+                let counts = ranges.compactMap { range -> Int? in
+                    guard range.first == "-" || range.first == "+" else { return nil }
+                    let parts = range.dropFirst().split(separator: ",")
+                    guard let first = parts.first, Int(first) != nil else { return nil }
+                    return parts.count == 2 ? Int(parts[1]) : 1
+                }
+                remaining = nil
+                if counts.count == 2 {
+                    let sum = counts[0].addingReportingOverflow(counts[1])
+                    if !sum.overflow, sum.partialValue >= 0 { remaining = sum.partialValue }
                 }
                 continue
             }
-            if !inHunk, line.hasPrefix("---") { continue }
+            if !inHunk, line.hasPrefix("--- ") {
+                let path = line.dropFirst(4).split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                oldPath = path.hasPrefix("a/") ? path.dropFirst(2) : path
+                continue
+            }
+            if !inHunk, line.hasPrefix("+++ ") {
+                let path = line.dropFirst(4).split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                let target = path == "/dev/null" ? oldPath : (path.hasPrefix("b/") ? path.dropFirst(2) : path)
+                if let target { start(target) }
+                oldPath = nil
+                continue
+            }
+            if !inHunk, line.hasPrefix("---") || line.hasPrefix("+++") { continue }
             if out.isEmpty { out.append(("", 0, 0)) }
             if line.hasPrefix("+") { out[out.count - 1].added += 1 } else if line.hasPrefix("-") { out[out.count - 1].removed += 1 }
+            if let n = remaining {
+                let consumed = line.hasPrefix(" ") ? 2 : (line.hasPrefix("+") || line.hasPrefix("-")) ? 1 : 0
+                remaining = n - consumed
+                if n <= consumed { inHunk = false }
+            }
         }
         return out.filter { !$0.path.isEmpty || $0.added + $0.removed > 0 }
     }
