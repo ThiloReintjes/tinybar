@@ -1201,6 +1201,12 @@ enum StatsText {
 
     static func percent(_ f: Double) -> String { "\(Int((f * 100).rounded()))%" }
 
+    /// "1 full workday", "1.5 full workdays".
+    static func count(_ x: Double, _ unit: String) -> String {
+        let n = one(x)
+        return n == "1.0" || n == "1" ? "1 \(unit)" : "\(n) \(unit)s"
+    }
+
     static func one(_ x: Double) -> String {
         x >= 10 ? "\(Int(x.rounded()))" : x.formatted(.number.precision(.fractionLength(1)))
     }
@@ -1219,8 +1225,8 @@ enum StatsText {
     /// Agent Time as full-time work: 40-hour weeks, or 8-hour days below one week.
     static func workTime(_ ms: Int64) -> String? {
         let hours = Double(ms) / 3_600_000
-        if hours >= 40 { return "\(one(hours / 40)) full-time weeks" }
-        if hours >= 8 { return "\(one(hours / 8)) full workdays" }
+        if hours >= 40 { return count(hours / 40, "full-time week") }
+        if hours >= 8 { return count(hours / 8, "full workday") }
         return nil
     }
 
