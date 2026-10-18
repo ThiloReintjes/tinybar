@@ -146,11 +146,15 @@ enum AntigravityCLI {
         process.standardError = FileHandle.nullDevice
 
         do { try process.run() } catch { throw ProviderError.unexpected("Could not launch agy: \(error.localizedDescription)") }
-        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        let pid = process.processIdentifier
+        let target = getpgid(pid) == pid ? -pid : pid
+        // Kill the whole CLI group, including descendants that inherited stdout.
+        let watchdog = DispatchWorkItem { kill(target, SIGKILL) }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
         defer {
             watchdog.cancel()
-            if process.isRunning { process.terminate() }
+            kill(target, SIGKILL)
+            process.waitUntilExit()
         }
 
         var output = Data()
@@ -160,9 +164,11 @@ enum AntigravityCLI {
             if chunk.isEmpty { break }
             output.append(chunk)
         }
-        if process.isRunning, output.count > maxOutput { process.terminate() }
+        guard output.count <= maxOutput else { throw ProviderError.unexpected("agy usage report is too large") }
         process.waitUntilExit()
-        guard !output.isEmpty else { throw ProviderError.unexpected("agy exited without a usage report") }
+        guard process.terminationReason == .exit, !output.isEmpty else {
+            throw ProviderError.unexpected("agy exited without a usage report")
+        }
         return output
     }
 }

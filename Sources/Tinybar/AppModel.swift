@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Observation
 import TinybarCore
 
@@ -16,6 +17,8 @@ struct ProviderState {
 @Observable
 final class AppModel {
     private(set) var providers: [ProviderID: ProviderState] = [:]
+    /// Keep Retry-After and the last attempt when a Provider is toggled off and on.
+    private var disabledProviders: [ProviderID: ProviderState] = [:]
     /// All Providers together, for the overview.
     private(set) var usage: [UsageRange: UsageSummary] = [:]
     /// One Provider each, for its detail view.
@@ -27,7 +30,9 @@ final class AppModel {
     private var lastStatusCheck: Date?
     private(set) var importProgress: Double?
     private(set) var lastUpdated: Date?
-    private(set) var isRefreshing = false
+    var isRefreshing: Bool { isFetching || usageTask != nil }
+    private var isFetching = false
+    private var usageTask: Task<Void, Never>?
 
     let settings: Settings
     let updater = Updater()
@@ -40,6 +45,11 @@ final class AppModel {
 
     private var pollTimer: Timer?
     private var isAsleep = false
+    private var isLocked = false
+    private var pendingRefreshThrottle: TimeInterval?
+    private var historyImportFailed = false
+    private var initialImportFailed = false
+    private var pendingIngest = LogWatcher.Changes.paths([])
 
     static let pollInterval: TimeInterval = 5 * 60
     static let openThrottle: TimeInterval = 60
@@ -69,8 +79,11 @@ final class AppModel {
     func start() {
         notifier.requestAuthorizationOnce()
         observeSleepAndLock()
-        schedulePoll()
-        Task { await refresh(force: true) }
+        isLocked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+        if !isLocked {
+            schedulePoll()
+            Task { await refresh(force: true) }
+        }
     }
 
     private func schedulePoll() {
@@ -86,24 +99,31 @@ final class AppModel {
     private func observeSleepAndLock() {
         let ws = NSWorkspace.shared.notificationCenter
         let dnc = DistributedNotificationCenter.default()
-        let pause: @Sendable (Notification) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.isAsleep = true
-                self?.pollTimer?.invalidate()
-            }
+        ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setPaused(asleep: true) }
         }
-        let resume: @Sendable (Notification) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.isAsleep else { return }
-                self.isAsleep = false
-                self.schedulePoll()
-                Task { await self.refresh(force: false) }
-            }
+        ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setPaused(asleep: false) }
         }
-        ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main, using: pause)
-        ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: resume)
-        dnc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main, using: pause)
-        dnc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main, using: resume)
+        dnc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setPaused(locked: true) }
+        }
+        dnc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setPaused(locked: false) }
+        }
+    }
+
+    private func setPaused(asleep: Bool? = nil, locked: Bool? = nil) {
+        let wasPaused = isAsleep || isLocked
+        if let asleep { isAsleep = asleep }
+        if let locked { isLocked = locked }
+        if isAsleep || isLocked {
+            pollTimer?.invalidate()
+        } else if wasPaused {
+            schedulePoll()
+            if isFetching { pendingRefreshThrottle = 0 }
+            else { Task { await refresh(force: false) } }
+        }
     }
 
     // MARK: Refresh
@@ -114,17 +134,32 @@ final class AppModel {
     }
 
     func refresh(force: Bool, throttle: TimeInterval = 0) async {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
+        if let task = await fetchAndStartUsage(force: force, throttle: throttle) { await task.value }
+    }
+
+    /// Network polls stay independent of a slow history import. Every caller shares one usage task.
+    private func fetchAndStartUsage(force: Bool, throttle: TimeInterval) async -> Task<Void, Never>? {
+        guard !isAsleep, !isLocked else { return nil }
+        guard !isFetching else {
+            if force { pendingRefreshThrottle = 0 }
+            return nil
+        }
+        isFetching = true
+        defer {
+            isFetching = false
+            if let throttle = pendingRefreshThrottle {
+                pendingRefreshThrottle = nil
+                Task { await refresh(force: false, throttle: throttle) }
+            }
+        }
 
         let now = Date()
         await withTaskGroup(of: (ProviderID, Result<ProviderSnapshot, ProviderError>)?.self) { group in
             for id in enabledProviders {
                 guard let source = sources[id] else { continue }
                 let state = providers[id] ?? ProviderState()
+                if let until = state.backoffUntil, until > now { continue }
                 if !force {
-                    if let until = state.backoffUntil, until > now { continue }
                     if throttle > 0, let last = state.lastAttempt, now.timeIntervalSince(last) < throttle { continue }
                 }
                 providers[id, default: ProviderState()].lastAttempt = now
@@ -143,12 +178,21 @@ final class AppModel {
                 apply(outcome, to: id)
             }
         }
-        lastUpdated = Date()
+        guard !isAsleep, !isLocked else { return nil }
         await refreshIncidents(throttle: throttle)
+        guard !isAsleep, !isLocked else { return nil }
         if let release = await updater.checkIfDue(), settings.notificationsEnabled {
             notifier.send(update: release)
         }
-        await refreshUsage()
+        guard !isAsleep, !isLocked else { return nil }
+        if usageTask == nil {
+            usageTask = Task {
+                await refreshUsage()
+                lastUpdated = Date()
+                usageTask = nil
+            }
+        }
+        return usageTask
     }
 
     /// Reads the status pages of the enabled subscriptions that have one. A page that can't be
@@ -181,13 +225,14 @@ final class AppModel {
     }
 
     private func apply(_ outcome: Result<ProviderSnapshot, ProviderError>, to id: ProviderID) {
-        var state = providers[id] ?? ProviderState()
+        let enabled = providers[id] != nil
+        guard var state = providers[id] ?? disabledProviders[id] else { return }
         switch outcome {
         case let .success(snapshot):
             state.snapshot = snapshot
             state.error = nil
             state.backoffUntil = nil
-            if settings.notificationsEnabled {
+            if enabled, settings.notificationsEnabled {
                 for alert in alertPlanner.evaluate(snapshot) { notifier.send(alert) }
                 settings.saveAlertState(alertPlanner)
             }
@@ -197,45 +242,59 @@ final class AppModel {
                 state.backoffUntil = Date().addingTimeInterval(retryAfter ?? Self.pollInterval)
             }
         }
-        providers[id] = state
+        if enabled { providers[id] = state }
+        else { disabledProviders[id] = state }
     }
 
     private func refreshUsage() async {
         guard let store else { return }
-        let firstImport = !((try? await store.hasCompletedInitialImport()) ?? false)
-        if firstImport {
-            // The first import can read gigabytes of logs. Run it in a child process so the
-            // memory it churns through goes back to the OS when it exits.
-            importProgress = 0
-            await HistoryImport.run(.importHistory) { [weak self] fraction in self?.importProgress = fraction }
-            try? await store.markInitialImportDone()
-            // That import counted activity and long requests too.
-            try? await store.markStatsBackfillDone()
-            try? await store.markLongContextBackfillDone()
-            importProgress = nil
-        } else if !((try? await store.hasCompletedStatsBackfill()) ?? true) {
-            // Upgraded from a version without Stats: count activity in the logs read so far, once.
-            importProgress = 0
-            await HistoryImport.run(.backfillStats) { [weak self] fraction in self?.importProgress = fraction }
-            try? await store.markStatsBackfillDone()
-            importProgress = nil
+        if !historyImportFailed {
+            let firstImport = !((try? await store.hasCompletedInitialImport()) ?? false)
+            var jobs: [HistoryImport.Job] = []
+            if firstImport {
+                jobs = [.importHistory]
+            } else {
+                if !((try? await store.hasCompletedStatsBackfill()) ?? true) { jobs.append(.backfillStats) }
+                if !((try? await store.hasCompletedLongContextBackfill()) ?? true) { jobs.append(.backfillLongContext) }
+            }
+            for job in jobs {
+                guard !isAsleep, !isLocked else { return }
+                importProgress = 0
+                let succeeded = await HistoryImport.run(job) { [weak self] fraction in
+                    guard self?.importProgress != nil else { return }
+                    self?.importProgress = fraction
+                }
+                importProgress = nil
+                if !succeeded {
+                    historyImportFailed = true
+                    initialImportFailed = job == .importHistory
+                    break
+                }
+            }
         }
-        if !((try? await store.hasCompletedLongContextBackfill()) ?? true) {
-            // Upgraded to Long-context Prices: file the long Codex requests already read, once.
-            importProgress = 0
-            await HistoryImport.run(.backfillLongContext) { [weak self] fraction in self?.importProgress = fraction }
-            try? await store.markLongContextBackfillDone()
-            importProgress = nil
-        }
-        // Incremental ingestion runs on the store's actor, off the main thread. Only files
-        // FSEvents saw change are checked; a full walk happens on launch or if events were dropped.
-        switch logWatcher.drain() {
-        case .all: _ = try? await store.ingestAll()
-        case let .paths(paths) where !paths.isEmpty: _ = try? await store.ingestAll(only: paths)
-        case .paths: break
+        guard !isAsleep, !isLocked else { return }
+        // A failed initial import must not fall back to a heavy read in this process.
+        // A failed backfill can wait for relaunch without stopping new usage from being counted.
+        if !initialImportFailed {
+            switch (pendingIngest, logWatcher.drain()) {
+            case (.all, _), (_, .all): pendingIngest = .all
+            case let (.paths(old), .paths(new)): pendingIngest = .paths(old.union(new))
+            }
+            do {
+                switch pendingIngest {
+                case .all: _ = try await store.ingestAll()
+                // Empty batches still perform daily ID pruning without scanning any logs.
+                case let .paths(paths): _ = try await store.ingestAll(only: paths)
+                }
+                pendingIngest = .paths([])
+            } catch {
+                // Keep the drained paths for the next poll, even if no more events arrive.
+            }
         }
 
+        guard !isAsleep, !isLocked else { return }
         prices = await pricing.refreshIfNeeded()
+        guard !isAsleep, !isLocked else { return }
         usageRows = (try? await store.daily(since: DayKey.daysAgo(UsageRange.month.days - 1))) ?? []
         rebuildUsage()
     }
@@ -272,8 +331,14 @@ final class AppModel {
             // All time starts at the first day of any model, so the model list stays complete.
             let days = try await store.activeDays()
             let modelDays = model == nil ? nil : try await store.activeDays(model: model)
-            return StatsSummary.build(
+            var summary = StatsSummary.build(
                 usage: usage, stats: stats, allDays: days, streakDays: modelDays, range: range, model: model, prices: prices)
+            if CommandLine.arguments.contains("--redact-projects") {
+                for i in summary.topProjects.indices {
+                    summary.topProjects[i].name = "Project \(i + 1)"
+                }
+            }
+            return summary
         } catch {
             return nil
         }
@@ -307,12 +372,13 @@ final class AppModel {
             enabledProviders.flatMap { id -> [(ProviderID, LimitWindow, Date?)] in
                 guard let state = providers[id], state.isStale == stale, let snapshot = state.snapshot else { return [] }
                 return snapshot.windows.filter { !$0.isModelSpecific }.map { w in
-                    let runOut = w.runOutTime(asOf: snapshot.fetchedAt).flatMap { w.runsOutBeforeReset($0) ? $0 : nil }
+                    let runOut = stale ? nil : w.runOutTime(asOf: snapshot.fetchedAt).flatMap { w.runsOutBeforeReset($0) ? $0 : nil }
                     return (id, w, runOut)
                 }
             }
         }
-        let all = candidates(stale: false).isEmpty ? candidates(stale: true) : candidates(stale: false)
+        let fresh = candidates(stale: false)
+        let all = fresh.isEmpty ? candidates(stale: true) : fresh
         if let first = all.filter({ $0.2 != nil }).min(by: { $0.2! < $1.2! }) { return (first.0, first.1) }
         return all.min {
             ($0.1.remainingPercent, $0.1.resetsAt ?? .distantFuture) < ($1.1.remainingPercent, $1.1.resetsAt ?? .distantFuture)
@@ -335,10 +401,11 @@ final class AppModel {
     func setEnabled(_ id: ProviderID, _ enabled: Bool) {
         settings.setEnabled(id, enabled)
         if enabled {
-            providers[id] = providers[id] ?? ProviderState()
-            Task { await refresh(force: true) }
-        } else {
-            providers[id] = nil
+            providers[id] = providers[id] ?? disabledProviders.removeValue(forKey: id) ?? ProviderState()
+            if isFetching { pendingRefreshThrottle = pendingRefreshThrottle ?? Self.openThrottle }
+            else { Task { await refresh(force: false, throttle: Self.openThrottle) } }
+        } else if let state = providers.removeValue(forKey: id) {
+            disabledProviders[id] = state
         }
     }
 }

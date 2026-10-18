@@ -81,8 +81,7 @@ struct LimitRings: View {
 
 extension ProviderSnapshot {
     private var generalWindows: [LimitWindow] {
-        let general = windows.filter { !$0.isModelSpecific }
-        return general.isEmpty ? windows : general
+        windows.filter { !$0.isModelSpecific }
     }
 
     /// What the rings show: the account-wide windows, longest (outermost) first.

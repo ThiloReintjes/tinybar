@@ -120,11 +120,23 @@ enum CodexUsageAPI {
         }
     }
 
-    static func fetchBankedResets(_ creds: CodexCredentials, session: URLSession) async throws -> [BankedReset] {
-        let data = try await get("wham/rate-limit-reset-credits", creds: creds, session: session, timeout: 8)
-        let decoded = try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
-        return decoded.credits.map {
-            BankedReset(id: $0.id, title: $0.title, status: $0.status, expiresAt: $0.expiresAt.flatMap(parseISODate))
+    private static let resetBackoff = HTTP.Backoff()
+
+    /// An optional extra's 429 must not hide fresh limits or make us retry that endpoint early.
+    static func fetchBankedResets(
+        _ creds: CodexCredentials, session: URLSession, backoff: HTTP.Backoff = resetBackoff,
+        now: @Sendable () -> Date = { Date() }) async throws -> [BankedReset]?
+    {
+        guard await backoff.permitsRequest(at: now()) else { return nil }
+        do {
+            let data = try await get("wham/rate-limit-reset-credits", creds: creds, session: session, timeout: 8)
+            let decoded = try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
+            return decoded.credits.map {
+                BankedReset(id: $0.id, title: $0.title, status: $0.status, expiresAt: $0.expiresAt.flatMap(parseISODate))
+            }
+        } catch ProviderError.rateLimited(let delay) {
+            await backoff.deferRequests(until: now().addingTimeInterval(delay ?? 300))
+            return nil
         }
     }
 
@@ -208,7 +220,7 @@ enum CodexUsageAPI {
         }
     }
 
-    private static func slugify(_ s: String) -> String {
+    static func slugify(_ s: String) -> String {
         let lowered = s.lowercased()
         let mapped = lowered.map { $0.isLetter || $0.isNumber ? $0 : "-" }
         return String(mapped).split(separator: "-").joined(separator: "-")
@@ -217,6 +229,10 @@ enum CodexUsageAPI {
 
 func parseISODate(_ raw: String) -> Date? {
     if let d = parseUTCTimestamp(raw) { return d }
+    // Foundation normalizes invalid dates and ignores suffix garbage; validate before falling back.
+    let syntax = #"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):?[0-5][0-9])\z"#
+    guard raw.range(of: syntax, options: .regularExpression) != nil,
+          parseUTCTimestamp(String(raw.prefix(19)) + "Z") != nil else { return nil }
     let withFraction = ISO8601DateFormatter()
     withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     if let d = withFraction.date(from: raw) { return d }
@@ -231,7 +247,10 @@ func parseUTCTimestamp(_ raw: String) -> Date? {
     var utf8 = raw.utf8.makeIterator()
     var bytes: [UInt8] = []
     bytes.reserveCapacity(24)
-    while let b = utf8.next(), bytes.count < 32 { bytes.append(b) }
+    while let b = utf8.next() {
+        guard bytes.count < 32 else { return nil }
+        bytes.append(b)
+    }
     guard bytes.count >= 20, bytes.last == UInt8(ascii: "Z"), bytes[4] == UInt8(ascii: "-"), bytes[7] == UInt8(ascii: "-"),
           bytes[10] == UInt8(ascii: "T"), bytes[13] == UInt8(ascii: ":"), bytes[16] == UInt8(ascii: ":")
     else { return nil }
@@ -247,6 +266,9 @@ func parseUTCTimestamp(_ raw: String) -> Date? {
     guard let y = num(0, 4), let mo = num(5, 2), let d = num(8, 2), let h = num(11, 2), let mi = num(14, 2),
           let s = num(17, 2), (1...12).contains(mo), (1...31).contains(d), h < 24, mi < 60, s < 61
     else { return nil }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
+    let monthDays = mo == 2 ? (leap ? 29 : 28) : ([4, 6, 9, 11].contains(mo) ? 30 : 31)
+    guard d <= monthDays else { return nil }
     var fraction = 0.0
     if bytes.count > 20 {
         guard bytes[19] == UInt8(ascii: "."), bytes.count > 21 else { return nil }

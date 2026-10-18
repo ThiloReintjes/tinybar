@@ -50,7 +50,7 @@ For each Provider, the source order is inspired by CodexBar and everything is st
 
 ### Claude
 1. **CLI OAuth**: read the token from `~/.claude/.credentials.json`, else Keychain item `Claude Code-credentials`.
-   → `GET https://api.anthropic.com/api/oauth/usage?cedar_ember=1` (plus `/api/oauth/profile` for the plan name), with the same headers the official CLI sends. `cedar_ember=1` adds the Banked Resets ("Reset for free" grants), as claude.ai asks for them. An account it isn't open to answers 400 or 403; then the plain request is sent once. Grant ids are redemption handles and are never read; only grants that are not paused, have resets left and are inside their start and end count, once per reset left.
+   → `GET https://api.anthropic.com/api/oauth/usage?cedar_ember=1`, with the same headers the official CLI sends. `cedar_ember=1` adds the Banked Resets ("Reset for free" grants), as claude.ai asks for them. The plan name comes from the subscription type the CLI stores with its token. An account it isn't open to answers 400 or 403; then the plain request is sent once. Grant ids are redemption handles and are never read; only grants that are not paused, have resets left and are inside their start and end count, once per reset left.
 2. **Browser cookie fallback** (opt-in in Settings, ADR 0005): `sessionKey` from Chromium browsers or Firefox → `claude.ai/api/organizations/{id}/usage`. Safari is out (needs Full Disk Access).
 
 Displayed: 5h session window, weekly window, model-specific weekly windows (e.g. Opus/Sonnet), extra usage spend if present, Banked Resets, and a Reset time for each.
@@ -98,7 +98,7 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 ## 6. Menu bar
 
 - A tiny ring glyph showing how much of the Pinned Limit is **left**, in that Provider's colour (Claude orange, Gemini its spark, Codex and Cursor monochrome): full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
-- **Pinned Limit**: chosen by clicking any Limit Window on a Provider page; clicking it again unpins it. Unpinned, the menu bar shows **Auto**: of every Provider's account-wide windows, the one whose Run-out Time comes first before its Reset, else the one with the least left (ties: the earlier Reset). Stale Providers count only when no other is known. A pinned window that disappears falls back to Auto. Settings has "Show whichever limit runs out first".
+- **Pinned Limit**: chosen by clicking any Limit Window on a Provider page; clicking it again unpins it. Unpinned, the menu bar shows **Auto**: of every Provider's account-wide windows, the one whose Run-out Time comes first before its Reset, else the one with the least left (ties: the earlier Reset). Stale Providers count only when no other is known. A pinned window that disappears falls back to Auto. Settings has "Show the limit closest to running out".
 - If the Pinned Limit's Provider is Stale, the glyph is dimmed.
 - **Incidents**: while any enabled Provider has an Incident that disrupts it (not maintenance), the ring wears a status light at its top right, cut out of the ring: orange when degraded, red for an outage. The tooltip names it. No animation.
 
@@ -342,3 +342,10 @@ Commands, Languages or parallel counts; schema 5 clears and recounts once more.
 Schema 6 (0.5.0) adds Context Bands. Claude's come at once from the message ids kept for
 de-duplication (90 days); Codex logs still on disk are re-read once, in the child process, up to
 their saved offsets, for long requests only. Older days stay at base prices.
+
+A backfill reads each file only up to the offset it had when the backfill was first armed, and
+records each finished file, so an interrupted one resumes without counting anything twice while
+normal ingestion carries on. Migrations run in one transaction. Before 0.5.1, GPT responses
+logged by Claude Code were counted from the largest value of each field across their streamed
+copies, which counted cached context twice; stored totals from those days are not rewritten, but
+a message seen again is replaced by its complete copy.

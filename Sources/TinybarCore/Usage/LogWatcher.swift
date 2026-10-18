@@ -1,33 +1,58 @@
 import CoreServices
 import Foundation
 
-/// Collects paths of changed `*.jsonl` files under the log roots via FSEvents, so a refresh only
-/// stats the files that actually changed instead of walking ~100k session files.
-///
-/// Events are just recorded; ingestion still happens on the refresh schedule. If FSEvents reports
-/// that it dropped events, the next drain asks for a full walk.
+/// Collects changed log paths via FSEvents. Ingestion still runs on the refresh schedule;
+/// dropped events and directory changes ask the next drain for a full walk.
 public final class LogWatcher: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "tinybar.logwatcher", qos: .utility)
-    private var pending = Set<String>()
-    private var needsFullScan = true
+    private let state: State
+
+    // Retained by the stream, not the watcher: callbacks remain valid during teardown without
+    // creating a watcher → stream → watcher cycle. All mutation runs on `queue`.
+    private final class State {
+        let roots: [String]
+        var pending = Set<String>()
+        var needsFullScan = true
+        init(roots: [URL]) { self.roots = roots.map { $0.standardizedFileURL.path } }
+    }
 
     public init(roots: [URL]) {
-        let paths = roots.map(\.path).filter { FileManager.default.fileExists(atPath: $0) } as CFArray
+        state = State(roots: roots)
+        let paths = Self.watchPaths(roots: roots) as CFArray
         var context = FSEventStreamContext(
-            version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: nil, release: nil, copyDescription: nil)
+            version: 0, info: Unmanaged.passUnretained(state).toOpaque(),
+            retain: { info in
+                guard let info else { return nil }
+                _ = Unmanaged<State>.fromOpaque(info).retain()
+                return info
+            }, release: { info in
+                if let info { Unmanaged<State>.fromOpaque(info).release() }
+            }, copyDescription: nil)
         let flags = FSEventStreamCreateFlags(
-            kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagIgnoreSelf)
-        stream = FSEventStreamCreate(
-            nil, Self.callback, &context, paths,
-            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            10,  // latency: coalesce Codex's frequent appends
-            flags)
+            kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagIgnoreSelf
+                | kFSEventStreamCreateFlagWatchRoot)
+        stream = FSEventStreamCreate(nil, Self.callback, &context, paths,
+                                     FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 10, flags)
         if let stream {
             FSEventStreamSetDispatchQueue(stream, queue)
-            FSEventStreamStart(stream)
+            if !FSEventStreamStart(stream) {
+                FSEventStreamInvalidate(stream)
+                FSEventStreamRelease(stream)
+                self.stream = nil
+            }
         }
+    }
+
+    /// Watch an existing parent too, so a CLI installed after Tinybar starts is discovered.
+    static func watchPaths(roots: [URL]) -> [String] {
+        Array(Set(roots.map { root in
+            var path = root.standardizedFileURL.deletingLastPathComponent().path
+            while path != "/", !FileManager.default.fileExists(atPath: path) {
+                path = (path as NSString).deletingLastPathComponent
+            }
+            return path
+        }))
     }
 
     deinit {
@@ -43,26 +68,32 @@ public final class LogWatcher: @unchecked Sendable {
         case paths(Set<String>)
     }
 
-    /// Returns what changed since the last drain and resets.
     public func drain() -> Changes {
         queue.sync {
-            defer { pending.removeAll(); needsFullScan = false }
-            return (needsFullScan || stream == nil) ? .all : .paths(pending)
+            defer { state.pending.removeAll(); state.needsFullScan = false }
+            return (state.needsFullScan || stream == nil) ? .all : .paths(state.pending)
         }
     }
 
     private static let callback: FSEventStreamCallback = { _, info, count, paths, flags, _ in
         guard let info else { return }
-        let watcher = Unmanaged<LogWatcher>.fromOpaque(info).takeUnretainedValue()
+        let state = Unmanaged<State>.fromOpaque(info).takeUnretainedValue()
         let list = unsafeBitCast(paths, to: NSArray.self)
         for i in 0..<count {
             let f = Int(flags[i])
-            if f & (kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped | kFSEventStreamEventFlagKernelDropped) != 0 {
-                watcher.needsFullScan = true
+            if f & (kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped
+                    | kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagRootChanged) != 0 {
+                state.needsFullScan = true
                 continue
             }
-            guard let path = list[i] as? String, path.hasSuffix(".jsonl") else { continue }
-            watcher.pending.insert(path)
+            guard let path = list[i] as? String,
+                  state.roots.contains(where: { path == $0 || path.hasPrefix($0 + "/") || $0.hasPrefix(path + "/") })
+            else { continue }
+            if f & kFSEventStreamEventFlagItemIsDir != 0 {
+                state.needsFullScan = true
+            } else if path.hasSuffix(".jsonl") {
+                state.pending.insert(path)
+            }
         }
     }
 }

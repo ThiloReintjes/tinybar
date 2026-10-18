@@ -55,6 +55,20 @@ public struct CodexLogParser: Sendable, Codable {
     private var forkInstant: Date?
     private var lastTotal: [Int64]?
     private var sawMeta = false
+    private var lastTimestamp: Date?
+    private var replayThrough: Date?
+    private var replayTotal: [Int64]?
+
+    /// Rebuild context from a rewritten file without counting its already-seen prefix again.
+    init(replaying previous: CodexLogParser) {
+        if let pending = previous.replayTotal {
+            replayTotal = pending
+        } else {
+            replayThrough = previous.lastTimestamp ?? previous.replayThrough
+            lastTimestamp = replayThrough
+            if replayThrough == nil { replayTotal = previous.lastTotal }
+        }
+    }
     // Activity state. Optional so cursors saved by earlier versions still decode.
     /// When the request for the next response was sent: a tool's output or the start of a turn.
     private var requestAt: Date?
@@ -62,8 +76,6 @@ public struct CodexLogParser: Sendable, Codable {
     private var subagent: Bool?
 
     public init() {}
-
-    static let forkReplaySlack: TimeInterval = 1
 
     public mutating func consume(line: Data, stats: (StatEvent) -> Void = { _ in }) -> UsageRecord? {
         line.withUnsafeBytes { consume(line: $0, stats: stats) }
@@ -73,16 +85,22 @@ public struct CodexLogParser: Sendable, Codable {
     /// reports activity (tool calls, edits, timing) to `stats`.
     /// Only the few interesting line types are copied out of the raw buffer.
     public mutating func consume(line: UnsafeRawBufferPointer, stats: (StatEvent) -> Void = { _ in }) -> UsageRecord? {
+        let timestamp = Self.stringField("timestamp", in: Data(line.prefix(200))).flatMap(parseISODate)
+        if let timestamp { lastTimestamp = max(lastTimestamp ?? timestamp, timestamp) }
+        let replay = timestamp.map { at in replayThrough.map { at <= $0 } ?? false } ?? false
+        let suppressActivity = replay || replayTotal != nil
+        let emit: (StatEvent) -> Void = { event in if !suppressActivity { stats(event) } }
         // Cheap type sniffing on the line head; the envelope's type lives in the first ~100 bytes.
         let head = UnsafeRawBufferPointer(rebasing: line.prefix(160))
         if Self.contains(head, Self.tokenCountMarker) {
-            return consumeTokenCount(Data(line))
+            let record = consumeTokenCount(Data(line))
+            return replay ? nil : record
         }
         if Self.activityMarkers.contains(where: { Self.contains(head, $0) }) {
             if let light = Self.light(line) {
-                consumeLight(light, line, stats: stats)
+                consumeLight(light, line, stats: emit)
             } else {
-                consumeActivity(Data(line), stats: stats)
+                consumeActivity(Data(line), stats: emit)
             }
             return nil
         }
@@ -122,8 +140,14 @@ public struct CodexLogParser: Sendable, Codable {
             let key = [int(total["input_tokens"]), int(total["cached_input_tokens"]), int(total["output_tokens"])]
             if key == lastTotal { return nil }
             lastTotal = key
+            if let replayTotal {
+                // Pre-upgrade cursors have only this cumulative watermark, not a timestamp.
+                if key == replayTotal { self.replayTotal = nil; return nil }
+                if zip(key, replayTotal).allSatisfy({ $0 <= $1 }) { return nil }
+                self.replayTotal = nil
+            }
         }
-        if let forkInstant, ts.timeIntervalSince(forkInstant) <= Self.forkReplaySlack {
+        if let forkInstant, ts <= forkInstant {
             return nil
         }
 
@@ -172,7 +196,7 @@ public struct CodexLogParser: Sendable, Codable {
             return .request
         }
         if has(#""type":"user_message""#) { return .prompt }
-        if has(#""type":"local_shell_call""#) { return .stat(StatKey.tool("Shell")) }
+        if has(#""type":"local_shell_call""#) { return .values(commandValues(argv: stringArray("command", in: line), exitCode: nil)) }
         if has(#""type":"web_search_call""#) { return .stat(StatKey.tool("Web")) }
         if has(#""type":"custom_tool_call""#) || has(#""type":"function_call""#) {
             // Newer versions' wrappers; the actions inside them arrive as items. Codex makes one call
@@ -290,7 +314,7 @@ public struct CodexLogParser: Sendable, Codable {
     private mutating func consumeLight(_ light: Light, _ line: UnsafeRawBufferPointer, stats: (StatEvent) -> Void) {
         if case .ignore = light { return }
         guard let at = Self.stringField("timestamp", in: Data(line.prefix(200))).flatMap(parseISODate) else { return }
-        if let forkInstant, at.timeIntervalSince(forkInstant) <= Self.forkReplaySlack { return }
+        if let forkInstant, at <= forkInstant { return }
         switch light {
         case .request:
             requestAt = at
@@ -316,7 +340,7 @@ public struct CodexLogParser: Sendable, Codable {
               let payload = obj["payload"] as? [String: Any],
               let at = (obj["timestamp"] as? String).flatMap(parseISODate)
         else { return }
-        if let forkInstant, at.timeIntervalSince(forkInstant) <= Self.forkReplaySlack { return }
+        if let forkInstant, at <= forkInstant { return }
         let envelope = obj["type"] as? String
         let type = payload["type"] as? String
         func emit(_ values: [String: Int64]) { stats(StatEvent(timestamp: at, values: values)) }
@@ -370,7 +394,8 @@ public struct CodexLogParser: Sendable, Codable {
             default: break
             }
         case ("response_item", "local_shell_call"):
-            tool("Shell")
+            let action = payload["action"] as? [String: Any]
+            emit(Self.commandValues(argv: action?["command"] as? [String], exitCode: nil))
         case ("response_item", "web_search_call"):
             tool("Web")
         case ("response_item", "function_call"), ("response_item", "custom_tool_call"):
