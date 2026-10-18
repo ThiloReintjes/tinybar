@@ -16,6 +16,8 @@ struct ProviderState {
 @Observable
 final class AppModel {
     private(set) var providers: [ProviderID: ProviderState] = [:]
+    /// Keep Retry-After and the last attempt when a Provider is toggled off and on.
+    private var disabledProviders: [ProviderID: ProviderState] = [:]
     /// All Providers together, for the overview.
     private(set) var usage: [UsageRange: UsageSummary] = [:]
     /// One Provider each, for its detail view.
@@ -206,13 +208,14 @@ final class AppModel {
     }
 
     private func apply(_ outcome: Result<ProviderSnapshot, ProviderError>, to id: ProviderID) {
-        guard var state = providers[id] else { return }
+        let enabled = providers[id] != nil
+        guard var state = providers[id] ?? disabledProviders[id] else { return }
         switch outcome {
         case let .success(snapshot):
             state.snapshot = snapshot
             state.error = nil
             state.backoffUntil = nil
-            if settings.notificationsEnabled {
+            if enabled, settings.notificationsEnabled {
                 for alert in alertPlanner.evaluate(snapshot) { notifier.send(alert) }
                 settings.saveAlertState(alertPlanner)
             }
@@ -222,7 +225,8 @@ final class AppModel {
                 state.backoffUntil = Date().addingTimeInterval(retryAfter ?? Self.pollInterval)
             }
         }
-        providers[id] = state
+        if enabled { providers[id] = state }
+        else { disabledProviders[id] = state }
     }
 
     private func refreshUsage() async {
@@ -374,11 +378,11 @@ final class AppModel {
     func setEnabled(_ id: ProviderID, _ enabled: Bool) {
         settings.setEnabled(id, enabled)
         if enabled {
-            providers[id] = providers[id] ?? ProviderState()
+            providers[id] = providers[id] ?? disabledProviders.removeValue(forKey: id) ?? ProviderState()
             if isRefreshing { pendingRefreshThrottle = pendingRefreshThrottle ?? Self.openThrottle }
             else { Task { await refresh(force: false, throttle: Self.openThrottle) } }
-        } else {
-            providers[id] = nil
+        } else if let state = providers.removeValue(forKey: id) {
+            disabledProviders[id] = state
         }
     }
 }
