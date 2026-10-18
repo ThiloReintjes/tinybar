@@ -140,7 +140,10 @@ public enum StatusFeed {
             }
             if status == "resolved" || (planned && status != "in_progress") { continue }
             guard let listed = (entry["components"] ?? []) as? [[String: Any]],
-                  listed.allSatisfy({ $0["name"] is String }) else {
+                  listed.allSatisfy({ component in
+                      guard component["name"] is String, let status = component["status"] as? String else { return false }
+                      return status == "operational" || severity(componentStatus: status) != nil
+                  }) else {
                 throw ProviderError.unexpected("Unexpected status page components")
             }
             let affected = listed.filter { ($0["name"] as? String).map(counts) ?? false }
@@ -190,7 +193,11 @@ public enum StatusFeed {
             guard let id = c["component_id"] as? String, !id.isEmpty, let status = c["status"] as? String else {
                 throw ProviderError.unexpected("Unexpected affected status page component")
             }
-            guard let name = names[id], let level = severity(componentStatus: status) else { continue }
+            guard let name = names[id] else { continue }
+            if status == "operational" { continue }
+            guard let level = severity(componentStatus: status) else {
+                throw ProviderError.unexpected("Unexpected component status")
+            }
             worst[name] = max(worst[name] ?? level, level)
         }
         return worst.map { ($0.key, $0.value) }.sorted { $0.name < $1.name }
