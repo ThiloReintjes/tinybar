@@ -133,6 +133,7 @@ public actor PricingService {
     private let cacheURL: URL
     private let session: URLSession
     private var table: PriceTable?
+    private var lastAttempt: Date?
 
     public init(cacheURL: URL = Paths.appSupport.appendingPathComponent("prices.json"), session: URLSession = .tinybar) {
         self.cacheURL = cacheURL
@@ -150,7 +151,11 @@ public actor PricingService {
     @discardableResult
     public func refreshIfNeeded(maxAge: TimeInterval = 24 * 3600) async -> PriceTable {
         let cached = current()
-        if let at = cached.fetchedAt, Date().timeIntervalSince(at) < maxAge { return cached }
+        let now = Date()
+        if let at = cached.fetchedAt, now.timeIntervalSince(at) < maxAge { return cached }
+        if let at = lastAttempt, now.timeIntervalSince(at) < maxAge { return cached }
+        lastAttempt = now
+        saveCache(cached)
         do {
             var request = URLRequest(url: Self.sourceURL, timeoutInterval: 30)
             request.setValue("Tinybar", forHTTPHeaderField: "User-Agent")
@@ -166,7 +171,8 @@ public actor PricingService {
     }
 
     private struct CacheFile: Codable {
-        var fetchedAt: Date
+        var fetchedAt: Date?
+        var lastAttempt: Date?
         var prices: [String: [String: ModelPrice]]
         /// 2 since Long-context Prices. An older cache is used but fetched again right away.
         var format: Int?
@@ -178,12 +184,13 @@ public actor PricingService {
         else { return nil }
         var prices: [ProviderID: [String: ModelPrice]] = [:]
         for (k, v) in file.prices { if let p = ProviderID(rawValue: k) { prices[p] = v } }
+        lastAttempt = file.format == 2 ? file.lastAttempt : nil
         return PriceTable(prices: prices, fetchedAt: file.format == 2 ? file.fetchedAt : nil)
     }
 
     private func saveCache(_ t: PriceTable) {
         let file = CacheFile(
-            fetchedAt: t.fetchedAt ?? Date(),
+            fetchedAt: t.fetchedAt, lastAttempt: lastAttempt,
             prices: Dictionary(uniqueKeysWithValues: t.prices.map { ($0.key.rawValue, $0.value) }),
             format: 2)
         if let data = try? JSONEncoder().encode(file) {

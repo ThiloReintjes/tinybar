@@ -212,7 +212,7 @@ public struct StatsSummary: Sendable {
         while cursor <= end {
             dayList.append(DayKey.string(for: cursor, calendar: calendar))
             guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = next
+            cursor = calendar.startOfDay(for: next)
         }
         let bucket = range == .all ? StatsBucket.fitting(days: dayList.count) : .day
         var barIndex: [String: Int] = [:]

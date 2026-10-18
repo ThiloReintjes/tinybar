@@ -134,9 +134,12 @@ public enum StatusFeed {
         var out: [Incident] = []
         for (entry, planned) in incidents.map({ ($0, false) }) + maintenance.map({ ($0, true) }) {
             guard let title = entry["name"] as? String, entry["status"] as? String != "resolved" else { continue }
-            let affected = (entry["components"] as? [[String: Any]] ?? []).filter { ($0["name"] as? String).map(counts) ?? false }
-            let named = !(entry["components"] as? [Any] ?? []).isEmpty
-            if named && affected.isEmpty { continue }
+            guard let listed = (entry["components"] ?? []) as? [[String: Any]],
+                  listed.allSatisfy({ $0["name"] is String }) else {
+                throw ProviderError.unexpected("Unexpected status page components")
+            }
+            let affected = listed.filter { ($0["name"] as? String).map(counts) ?? false }
+            if !listed.isEmpty && affected.isEmpty { continue }
             let fromComponents = affected.compactMap { ($0["status"] as? String).flatMap(severity(componentStatus:)) }.max()
             guard let level = planned ? .maintenance : fromComponents ?? severity(impact: entry["impact"] as? String)
             else { continue }
