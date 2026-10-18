@@ -65,10 +65,11 @@ final class Updater {
         if let last = defaults.object(forKey: "lastUpdateCheck") as? Date, now.timeIntervalSince(last) < Self.checkInterval {
             return nil
         }
-        guard let latest = try? await ReleaseCheck.latest() else { return nil }
         defaults.set(now, forKey: "lastUpdateCheck")
+        guard let latest = try? await ReleaseCheck.latest() else { return nil }
         let isFirstSighting = known?.version != latest.version
         known = latest
+        if case .preparing = state { return isNewer(latest) && isFirstSighting ? latest : nil }
         guard isNewer(latest) else {
             state = .none
             return nil
@@ -84,11 +85,20 @@ final class Updater {
 
     /// Homebrew, if Tinybar was installed with it.
     private var brew: String? {
+        let runningApp = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
         for prefix in ["/opt/homebrew", "/usr/local"]
-        where FileManager.default.fileExists(atPath: "\(prefix)/Caskroom/tinybar")
-            && FileManager.default.isExecutableFile(atPath: "\(prefix)/bin/brew")
-        {
-            return "\(prefix)/bin/brew"
+        where FileManager.default.isExecutableFile(atPath: "\(prefix)/bin/brew") {
+            let caskroom = URL(fileURLWithPath: "\(prefix)/Caskroom/tinybar", isDirectory: true)
+            guard let versions = try? FileManager.default.contentsOfDirectory(at: caskroom, includingPropertiesForKeys: nil)
+            else { continue }
+            // Homebrew leaves a symlink to the installed app in its versioned staging directory.
+            if versions.contains(where: {
+                let staged = $0.appendingPathComponent("Tinybar.app")
+                return FileManager.default.fileExists(atPath: staged.path)
+                    && staged.resolvingSymlinksInPath().standardizedFileURL == runningApp
+            }) {
+                return "\(prefix)/bin/brew"
+            }
         }
         return nil
     }
@@ -108,7 +118,7 @@ final class Updater {
                 state = .failed(release, outcome!)
                 return
             }
-            swap(brew: brew)
+            swap(brew: brew, release: release)
         }
     }
 
@@ -129,7 +139,7 @@ final class Updater {
     }
 
     /// Hands over to a script that outlives Tinybar, then quits.
-    private func swap(brew: String) {
+    private func swap(brew: String, release: Release) {
         let app = Bundle.main.bundleURL.path
         let script = """
         while /bin/kill -0 "$PID" 2>/dev/null; do /bin/sleep 0.2; done
@@ -153,7 +163,7 @@ final class Updater {
         do {
             try process.run()
         } catch {
-            state = .failed(release!, "Couldn't start Homebrew.")
+            state = .failed(release, "Couldn't start Homebrew.")
             return
         }
         NSApp.terminate(nil)
