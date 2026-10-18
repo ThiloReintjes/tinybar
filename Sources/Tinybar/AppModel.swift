@@ -283,8 +283,8 @@ final class AppModel {
             do {
                 switch pendingIngest {
                 case .all: _ = try await store.ingestAll()
-                case let .paths(paths) where !paths.isEmpty: _ = try await store.ingestAll(only: paths)
-                case .paths: break
+                // Empty batches still perform daily ID pruning without scanning any logs.
+                case let .paths(paths): _ = try await store.ingestAll(only: paths)
                 }
                 pendingIngest = .paths([])
             } catch {
@@ -331,8 +331,14 @@ final class AppModel {
             // All time starts at the first day of any model, so the model list stays complete.
             let days = try await store.activeDays()
             let modelDays = model == nil ? nil : try await store.activeDays(model: model)
-            return StatsSummary.build(
+            var summary = StatsSummary.build(
                 usage: usage, stats: stats, allDays: days, streakDays: modelDays, range: range, model: model, prices: prices)
+            if CommandLine.arguments.contains("--redact-projects") {
+                for i in summary.topProjects.indices {
+                    summary.topProjects[i].name = "Project \(i + 1)"
+                }
+            }
+            return summary
         } catch {
             return nil
         }
