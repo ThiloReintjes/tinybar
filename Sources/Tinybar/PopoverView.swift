@@ -851,9 +851,11 @@ private struct AboutPage: View {
             .padding(14)
             .platter()
             .padding(.top, 4)
-            .task(id: visible) {
-                guard visible else { return }
-                coverage = await model.statsSummary(.month)?.activityCoverage ?? [:]
+            .task(id: "\(visible)|\(model.lastUpdated?.timeIntervalSince1970 ?? 0)|\(model.isRefreshing)") {
+                guard visible, !model.isRefreshing else { return }
+                let next = await model.statsSummary(.month)
+                guard !Task.isCancelled, let next else { return }
+                coverage = next.activityCoverage
             }
     }
 }
