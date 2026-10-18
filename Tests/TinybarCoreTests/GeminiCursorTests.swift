@@ -65,6 +65,17 @@ private func cursorSummary(_ json: String) throws -> ProviderSnapshot {
     #expect(unlimited.windows.isEmpty)
 }
 
+@Test func cursorFallsBackToTeamOnDemandSpend() throws {
+    let team = try cursorSummary(#"{"teamUsage":{"onDemand":{"enabled":true,"used":450,"limit":1000}}}"#)
+    #expect(team.extraUsage == ExtraUsageSpend(used: 4.5, limit: 10, currency: "USD"))
+    let individual = try cursorSummary(#"{"individualUsage":{"onDemand":{"enabled":true,"used":100}},"teamUsage":{"onDemand":{"enabled":true,"used":450}}}"#)
+    #expect(individual.extraUsage?.used == 1)
+    let disabled = try cursorSummary(#"{"teamUsage":{"onDemand":{"enabled":false,"used":0}}}"#)
+    #expect(disabled.extraUsage == nil)
+    let priorSpend = try cursorSummary(#"{"teamUsage":{"onDemand":{"enabled":false,"used":450}}}"#)
+    #expect(priorSpend.extraUsage?.used == 4.5)
+}
+
 @Test func cursorAppTokenBecomesSessionCookie() {
     func b64(_ s: String) -> String {
         Data(s.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "")
