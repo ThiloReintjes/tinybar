@@ -57,11 +57,17 @@ public struct CodexLogParser: Sendable, Codable {
     private var sawMeta = false
     private var lastTimestamp: Date?
     private var replayThrough: Date?
+    private var replayTotal: [Int64]?
 
     /// Rebuild context from a rewritten file without counting its already-seen prefix again.
     init(replaying previous: CodexLogParser) {
-        replayThrough = previous.lastTimestamp ?? previous.replayThrough
-        lastTimestamp = replayThrough
+        if let pending = previous.replayTotal {
+            replayTotal = pending
+        } else {
+            replayThrough = previous.lastTimestamp ?? previous.replayThrough
+            lastTimestamp = replayThrough
+            if replayThrough == nil { replayTotal = previous.lastTotal }
+        }
     }
     // Activity state. Optional so cursors saved by earlier versions still decode.
     /// When the request for the next response was sent: a tool's output or the start of a turn.
@@ -82,7 +88,8 @@ public struct CodexLogParser: Sendable, Codable {
         let timestamp = Self.stringField("timestamp", in: Data(line.prefix(200))).flatMap(parseISODate)
         if let timestamp { lastTimestamp = max(lastTimestamp ?? timestamp, timestamp) }
         let replay = timestamp.map { at in replayThrough.map { at <= $0 } ?? false } ?? false
-        let emit: (StatEvent) -> Void = { event in if !replay { stats(event) } }
+        let suppressActivity = replay || replayTotal != nil
+        let emit: (StatEvent) -> Void = { event in if !suppressActivity { stats(event) } }
         // Cheap type sniffing on the line head; the envelope's type lives in the first ~100 bytes.
         let head = UnsafeRawBufferPointer(rebasing: line.prefix(160))
         if Self.contains(head, Self.tokenCountMarker) {
@@ -133,6 +140,12 @@ public struct CodexLogParser: Sendable, Codable {
             let key = [int(total["input_tokens"]), int(total["cached_input_tokens"]), int(total["output_tokens"])]
             if key == lastTotal { return nil }
             lastTotal = key
+            if let replayTotal {
+                // Pre-upgrade cursors have only this cumulative watermark, not a timestamp.
+                if key == replayTotal { self.replayTotal = nil; return nil }
+                if zip(key, replayTotal).allSatisfy({ $0 <= $1 }) { return nil }
+                self.replayTotal = nil
+            }
         }
         if let forkInstant, ts <= forkInstant {
             return nil

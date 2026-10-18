@@ -3,6 +3,12 @@ import Foundation
 extension TokenCounts {
     /// The context a response read: everything sent in, cached or not.
     public var context: Int64 { input + cacheWrite + cacheRead }
+
+    /// Keep a whole usage snapshot: GPT streams can reclassify preliminary input as cached.
+    /// More output means a more complete copy; on a tie, the later copy wins.
+    func mergingCopy(_ later: TokenCounts) -> TokenCounts {
+        later.output >= output ? later : self
+    }
 }
 
 /// One Claude message as seen across its streamed lines in a single read of a file.
@@ -24,11 +30,7 @@ struct ClaudeMessage {
     }
 
     mutating func merge(_ m: ClaudeLogParser.Message) {
-        record.tokens = TokenCounts(
-            input: max(record.tokens.input, m.entry.record.tokens.input),
-            output: max(record.tokens.output, m.entry.record.tokens.output),
-            cacheWrite: max(record.tokens.cacheWrite, m.entry.record.tokens.cacheWrite),
-            cacheRead: max(record.tokens.cacheRead, m.entry.record.tokens.cacheRead))
+        record.tokens = record.tokens.mergingCopy(m.entry.record.tokens)
         if record.cwd == nil { record.cwd = m.entry.record.cwd }
         for t in m.tools where tools[t.id] == nil { tools[t.id] = t.name }
         start = min(start, m.at)
