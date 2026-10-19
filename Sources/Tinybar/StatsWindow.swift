@@ -837,7 +837,7 @@ private struct ToolBars: View {
         let top = tools.filter { $0.category != .other }.prefix(Self.rows)
         let largest = max(top.first?.calls ?? 1, 1)
         let hovering = lit?.hasPrefix("tool:") == true
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             SectionTitle(text: "Tool calls", palette: palette)
             ForEach(Array(top)) { tool in
                 HStack(spacing: 8) {
@@ -882,7 +882,7 @@ private struct ToolBars: View {
         }
     }
 
-    static let rows = 5
+    static let rows = 7
 }
 
 /// The top models, each a filter: clicking one shows only its stats. Every other model is one
