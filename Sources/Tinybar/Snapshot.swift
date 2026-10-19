@@ -8,14 +8,18 @@ enum PopoverSnapshot {
     @MainActor
     static func runIfRequested() {
         let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count else { return }
+        guard let i = args.firstIndex(of: "--snapshot") else { return }
+        guard i + 1 < args.count, !args[i + 1].isEmpty, !args[i + 1].hasPrefix("--") else {
+            FileHandle.standardError.write(Data("--snapshot requires an output path\n".utf8))
+            exit(2)
+        }
         let out = URL(fileURLWithPath: args[i + 1])
         let model = AppModel(settings: Settings())
         Task { @MainActor in
             // `--incident claude:partialOutage` stands in for a status page reporting one.
             if let i = args.firstIndex(of: "--incident"), i + 1 < args.count {
                 let parts = args[i + 1].split(separator: ":").map(String.init)
-                if let id = ProviderID(rawValue: parts[0]) {
+                if let name = parts.first, let id = ProviderID(rawValue: name) {
                     let severity: Incident.Severity = switch parts.count > 1 ? parts[1] : "" {
                     case "degraded": .degraded
                     case "majorOutage": .majorOutage
@@ -27,13 +31,6 @@ enum PopoverSnapshot {
                         components: ["claude.ai", "Claude API (api.anthropic.com)", "Claude Code"],
                         url: URL(string: "https://stspg.io/bzc81gbv1b99")!, updatedAt: Date().addingTimeInterval(-1800)))
                 }
-            }
-            // `--update 0.5.0[:preparing|:failed]` shows the update pill.
-            if let u = args.firstIndex(of: "--update"), u + 1 < args.count {
-                let parts = args[u + 1].split(separator: ":").map(String.init)
-                let r = Release(version: parts[0], url: URL(string: "https://github.com/ThiloReintjes/tinybar/releases")!)
-                model.updater.showForSnapshot(parts.count < 2 ? .available(r)
-                    : parts[1] == "preparing" ? .preparing(r) : .failed(r, "Homebrew doesn't list \(parts[0]) yet."))
             }
             // `--menubar` renders the status item's icon at 4x, with and without an incident light.
             if args.contains("--menubar") {
@@ -62,6 +59,14 @@ enum PopoverSnapshot {
                 exit(0)
             }
             await model.refresh(force: true)
+            // `--update 0.5.0[:preparing|:failed]` shows the update pill.
+            if let u = args.firstIndex(of: "--update"), u + 1 < args.count {
+                let parts = args[u + 1].split(separator: ":").map(String.init)
+                guard let version = parts.first else { exit(2) }
+                let r = Release(version: version, url: URL(string: "https://github.com/ThiloReintjes/tinybar/releases")!)
+                model.updater.showForSnapshot(parts.count < 2 ? .available(r)
+                    : parts[1] == "preparing" ? .preparing(r) : .failed(r, "Homebrew doesn't list \(version) yet."))
+            }
             // `--stats [--range week|month|all] [--model <id>] [--page commands|models|languages]`
             // renders a Stats card instead, as Copy image does.
             if args.contains("--stats") {

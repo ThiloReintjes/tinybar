@@ -9,7 +9,7 @@ import TinybarCore
 
 let args = CommandLine.arguments.dropFirst()
 let command = args.first ?? "limits"
-let dbURL = args.dropFirst().first.map { URL(fileURLWithPath: $0) }
+let dbURL = args.dropFirst().first(where: { !$0.hasPrefix("--") }).map { URL(fileURLWithPath: $0) }
     ?? Paths.appSupport.appendingPathComponent("usage.sqlite")
 
 func printLimits(browser: Bool) async {
@@ -42,7 +42,7 @@ func printCookies() {
     for (domain, name) in [("claude.ai", "sessionKey"), ("chatgpt.com", "__Secure-next-auth.session-token"), ("cursor.com", "WorkosCursorSessionToken")] {
         if let found = BrowserCookies.find(domain: domain, required: [name]) {
             let value = BrowserCookies.joined(name, in: found.cookies) ?? ""
-            print("\(domain): found \(name) in \(found.browser) (\(value.count) chars, prefix \(value.prefix(7))…)")
+            print("\(domain): found \(name) in \(found.browser) (\(value.count) chars)")
         } else {
             print("\(domain): no \(name) cookie found")
         }

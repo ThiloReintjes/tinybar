@@ -1,10 +1,7 @@
 import Foundation
 import TinybarCore
 
-/// Runs heavy one-off reads of the whole history in a child copy of this executable, reporting
-/// progress parsed from its stdout: the first-launch import (`--import-history`) and the one-time
-/// activity backfill after upgrading from a version without Stats (`--backfill-stats`), and the
-/// one-time filing of long Codex requests after upgrading to schema 6 (`--backfill-long-context`).
+/// Runs heavy one-off reads of the whole history in a child copy of this executable.
 enum HistoryImport {
     enum Job: String {
         case importHistory = "--import-history"
@@ -16,30 +13,38 @@ enum HistoryImport {
     static func runChildIfRequested() {
         guard let job = [Job.importHistory, .backfillStats, .backfillLongContext].first(where: { CommandLine.arguments.contains($0.rawValue) })
         else { return }
-        let semaphore = DispatchSemaphore(value: 0)
         Task.detached(priority: .utility) {
-            let path = ProcessInfo.processInfo.environment["TINYBAR_DB"].map { URL(fileURLWithPath: $0) }
-            if let store = try? path.map({ try UsageStore(path: $0) }) ?? UsageStore() {
+            do {
+                let path = ProcessInfo.processInfo.environment["TINYBAR_DB"].map { URL(fileURLWithPath: $0) }
+                let store = try path.map { try UsageStore(path: $0) } ?? UsageStore()
                 let report: @Sendable (UsageStore.IngestProgress) -> Void = { p in
                     print("\(p.filesDone)/\(p.filesTotal)")
                     fflush(stdout)
                 }
                 switch job {
-                case .importHistory: _ = try? await store.ingestAll(progress: report)
-                case .backfillStats: _ = try? await store.backfillStats(progress: report)
-                case .backfillLongContext: _ = try? await store.backfillLongContext(progress: report)
+                case .importHistory:
+                    if try await store.hasCompletedInitialImport() { exit(0) }
+                    _ = try await store.ingestAll(progress: report)
+                    try await store.markStatsBackfillDone()
+                    try await store.markLongContextBackfillDone()
+                    try await store.markInitialImportDone()
+                case .backfillStats:
+                    if !(try await store.hasCompletedStatsBackfill()) { _ = try await store.backfillStats(progress: report) }
+                case .backfillLongContext:
+                    if !(try await store.hasCompletedLongContextBackfill()) { _ = try await store.backfillLongContext(progress: report) }
                 }
+                exit(0)
+            } catch {
+                exit(1)
             }
-            semaphore.signal()
         }
-        semaphore.wait()
-        exit(0)
+        dispatchMain()
     }
 
-    /// Parent side. Falls back to running in-process if the child can't be launched.
+    /// Parent side. Failed jobs stay incomplete and can be retried on the next launch.
     @MainActor
-    static func run(_ job: Job, progress: @escaping @MainActor (Double) -> Void) async {
-        guard let executable = Bundle.main.executableURL else { return }
+    static func run(_ job: Job, progress: @escaping @MainActor (Double) -> Void) async -> Bool {
+        guard let executable = Bundle.main.executableURL else { return false }
         let process = Process()
         process.executableURL = executable
         process.arguments = [job.rawValue]
@@ -48,13 +53,15 @@ enum HistoryImport {
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
 
-        let done: Void? = await withCheckedContinuation { continuation in
-            process.terminationHandler = { _ in continuation.resume(returning: ()) }
+        let succeeded: Bool = await withCheckedContinuation { continuation in
+            process.terminationHandler = { p in
+                continuation.resume(returning: p.terminationReason == .exit && p.terminationStatus == 0)
+            }
             do {
                 try process.run()
             } catch {
                 process.terminationHandler = nil
-                continuation.resume(returning: nil)
+                continuation.resume(returning: false)
                 return
             }
             out.fileHandleForReading.readabilityHandler = { handle in
@@ -64,16 +71,10 @@ enum HistoryImport {
                 else { return }
                 let parts = last.split(separator: "/").compactMap { Double($0) }
                 guard parts.count == 2, parts[1] > 0 else { return }
-                Task { @MainActor in progress(parts[0] / parts[1]) }
+                Task { @MainActor in progress(min(max(parts[0] / parts[1], 0), 1)) }
             }
         }
         out.fileHandleForReading.readabilityHandler = nil
-        if done == nil, let store = try? UsageStore() {
-            switch job {
-            case .importHistory: _ = try? await store.ingestAll()
-            case .backfillStats: _ = try? await store.backfillStats()
-            case .backfillLongContext: _ = try? await store.backfillLongContext()
-            }
-        }
+        return succeeded
     }
 }

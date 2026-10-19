@@ -25,13 +25,13 @@ cat <<MSG
 
 MSG
 wait_enter "Press Enter to open Tinybar… "
-open -a Tinybar
+open -a Tinybar || true
 if running; then done_msg; exit 0; fi
 
 wait_enter "Clicked Done? Press Enter to open Settings… "
 open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"
 wait_enter "Clicked Open Anyway? Press Enter to start Tinybar… "
-open -a Tinybar
+open -a Tinybar || true
 if running; then
     done_msg
 else
