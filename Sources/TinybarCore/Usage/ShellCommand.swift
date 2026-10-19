@@ -21,7 +21,11 @@ public enum ShellCommand {
         if argv.count >= 3, ["bash", "zsh", "sh"].contains(basename(argv[0])), ["-lc", "-c"].contains(argv[1]) {
             return argv[2]
         }
-        return argv.joined(separator: " ")
+        if argv.count == 1 { return argv[0] }  // a logged script, rather than an argv
+        return argv.map { word in
+            if !word.isEmpty, word.allSatisfy({ $0.isLetter || $0.isNumber || "_./:-=".contains($0) }) { return word }
+            return "'" + word.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+        }.joined(separator: " ")
     }
 
     struct Parsed: Equatable {
@@ -44,7 +48,7 @@ public enum ShellCommand {
             result.programs.insert(name)
             if name == "git", let sub = gitSubcommand(segment.words[(at + 1)...]) { result.git.insert(sub) }
             if segment.afterPipe, name == "head" || name == "tail" { result.headTail = true }
-            switch inline(segment.words) {
+            switch inline(segment.words, at: at) {
             case .python?: result.inlinePython = true
             case .js?: result.inlineJS = true
             case nil: break
@@ -192,7 +196,15 @@ public enum ShellCommand {
         "cd", "export", "set", "unset", "local", "source", ".", "alias", "return", "exit", "shift", "read",
         "eval", "trap", "wait", "declare", "typeset", "true", "false", ":", "pushd", "popd", "[", "[[",
         "test", "break", "continue", "let", "ulimit", "umask", "setopt", "unsetopt", "readonly", "type",
-        "hash", "jobs", "fg", "bg", "disown", "kill", "shopt", "<<", "<<<",
+        "hash", "jobs", "fg", "bg", "disown", "kill", "shopt", "echo", "printf", "pwd", "<<", "<<<",
+    ]
+
+    private static let wrapperArguments: [String: Set<String>] = [
+        "sudo": ["-u", "-g", "-h", "-p", "-C", "-T", "-R", "-D", "--user", "--group", "--host"],
+        "env": ["-u", "-C", "-S", "--unset", "--chdir", "--split-string"],
+        "timeout": ["-s", "-k", "--signal", "--kill-after"],
+        "gtimeout": ["-s", "-k", "--signal", "--kill-after"],
+        "nice": ["-n", "--adjustment"], "time": ["-o", "-f", "--output", "--format"],
     ]
 
     /// The program a simple command runs, and the index of its word.
@@ -213,7 +225,7 @@ public enum ShellCommand {
                 i += 1
                 // `timeout 30 cmd`, `env -i cmd`, `sudo -u x cmd`: skip the wrapper's own arguments.
                 while i < words.count, words[i].hasPrefix("-") || (w.hasSuffix("timeout") && words[i].first?.isNumber == true) {
-                    i += ["-u", "-g", "-n", "-s", "-k", "-C"].contains(words[i]) ? 2 : 1
+                    i += (wrapperArguments[w] ?? []).contains(words[i]) ? 2 : 1
                 }
                 continue
             }
@@ -277,23 +289,21 @@ public enum ShellCommand {
 
     /// Code passed to an interpreter in the command itself (`python3 -c`, `python3 - <<'PY'`,
     /// `node -e`), rather than a saved script.
-    private static func inline(_ words: [String]) -> Language? {
-        for (i, w) in words.enumerated() {
-            let n = name(w)
-            let language: Language
-            let flags: Set<String>
-            switch n {
-            case "python": language = .python; flags = ["-c", "-"]
-            case "node", "bun", "deno", "tsx": language = .js; flags = ["-e", "--eval", "-p", "--print", "-", "eval"]
-            default: continue
-            }
-            for a in words[(i + 1)...] {
-                if flags.contains(a) || a == "<<" { return language }
-                if a.hasPrefix("-"), !["-m", "--input-type"].contains(a) { continue }
-                break
-            }
-            // `python3 <<'PY'` with no flag: the heredoc marker is the next word.
-            return nil
+    private static func inline(_ words: [String], at programIndex: Int) -> Language? {
+        var i = programIndex
+        // `uv run python -c ...` is a runner; an argument like `rg python -c ...` isn't.
+        if name(words[i]) == "uv", i + 2 < words.count, words[i + 1] == "run" { i += 2 }
+        let language: Language
+        let flags: Set<String>
+        switch name(words[i]) {
+        case "python": language = .python; flags = ["-c", "-"]
+        case "node", "bun", "deno", "tsx": language = .js; flags = ["-e", "--eval", "-p", "--print", "-", "eval"]
+        default: return nil
+        }
+        for a in words[(i + 1)...] {
+            if flags.contains(a) || a == "<<" { return language }
+            if a.hasPrefix("-"), !["-m", "--input-type"].contains(a) { continue }
+            break
         }
         return nil
     }
