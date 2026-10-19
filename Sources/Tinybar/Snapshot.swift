@@ -12,6 +12,55 @@ enum PopoverSnapshot {
         let out = URL(fileURLWithPath: args[i + 1])
         let model = AppModel(settings: Settings())
         Task { @MainActor in
+            // `--incident claude:partialOutage` stands in for a status page reporting one.
+            if let i = args.firstIndex(of: "--incident"), i + 1 < args.count {
+                let parts = args[i + 1].split(separator: ":").map(String.init)
+                if let id = ProviderID(rawValue: parts[0]) {
+                    let severity: Incident.Severity = switch parts.count > 1 ? parts[1] : "" {
+                    case "degraded": .degraded
+                    case "majorOutage": .majorOutage
+                    case "maintenance": .maintenance
+                    default: .partialOutage
+                    }
+                    model.showForSnapshot(Incident(
+                        provider: id, title: "Elevated errors for Claude Opus 5.5", severity: severity,
+                        components: ["claude.ai", "Claude API (api.anthropic.com)", "Claude Code"],
+                        url: URL(string: "https://stspg.io/bzc81gbv1b99")!, updatedAt: Date().addingTimeInterval(-1800)))
+                }
+            }
+            // `--update 0.5.0[:preparing|:failed]` shows the update pill.
+            if let u = args.firstIndex(of: "--update"), u + 1 < args.count {
+                let parts = args[u + 1].split(separator: ":").map(String.init)
+                let r = Release(version: parts[0], url: URL(string: "https://github.com/ThiloReintjes/tinybar/releases")!)
+                model.updater.showForSnapshot(parts.count < 2 ? .available(r)
+                    : parts[1] == "preparing" ? .preparing(r) : .failed(r, "Homebrew doesn't list \(parts[0]) yet."))
+            }
+            // `--menubar` renders the status item's icon at 4x, with and without an incident light.
+            if args.contains("--menubar") {
+                for dark in [false, true] {
+                    var row: [NSImage] = []
+                    for alert in [nil, NSColor.systemOrange, .systemRed] {
+                        row.append(RingIcon.image(fraction: 0.62, label: "62%", tint: RingIcon.tint(.claude), dark: dark, alert: alert))
+                        row.append(RingIcon.image(fraction: 0.62, label: nil, tint: nil, dark: dark, alert: alert))
+                    }
+                    let scale: CGFloat = 4, pad: CGFloat = 8
+                    let w = row.reduce(pad) { $0 + $1.size.width + pad }, h = (row.map(\.size.height).max() ?? 16) + 2 * pad
+                    let canvas = NSImage(size: NSSize(width: w * scale, height: h * scale), flipped: false) { r in
+                        (dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.93, alpha: 1)).setFill()
+                        r.fill()
+                        var x = pad
+                        for img in row {
+                            img.draw(in: NSRect(x: x * scale, y: pad * scale, width: img.size.width * scale, height: img.size.height * scale))
+                            x += img.size.width + pad
+                        }
+                        return true
+                    }
+                    if let tiff = canvas.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                        try? png.write(to: URL(fileURLWithPath: out.deletingPathExtension().path + (dark ? ".menubar.dark.png" : ".menubar.png")))
+                    }
+                }
+                exit(0)
+            }
             await model.refresh(force: true)
             // `--stats [--range week|month|all] [--model <id>] [--page commands|models|languages]`
             // renders a Stats card instead, as Copy image does.

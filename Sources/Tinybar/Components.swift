@@ -379,3 +379,52 @@ enum PopoverSnapshotOptions {
         }
     }
 }
+
+// MARK: Incidents
+
+extension Incident.Severity {
+    /// Orange while a service limps along, red when it's down. Planned work stays grey.
+    var color: Color {
+        switch self {
+        case .maintenance: .secondary
+        case .degraded: .orange
+        case .partialOutage, .majorOutage: .red
+        }
+    }
+
+    var nsColor: NSColor {
+        switch self {
+        case .maintenance: .secondaryLabelColor
+        case .degraded: .systemOrange
+        case .partialOutage, .majorOutage: .systemRed
+        }
+    }
+}
+
+/// A status page's light: the mark for an Incident wherever it shows, the same dot the menu bar
+/// ring wears.
+struct StatusLight: View {
+    let severity: Incident.Severity
+    var size: CGFloat = 6
+
+    var body: some View {
+        Circle()
+            .fill(severity.color)
+            .frame(width: size, height: size)
+            .background(Circle().fill(severity.color.opacity(0.22)).frame(width: size * 2, height: size * 2))
+            .frame(width: size * 2, height: size * 2)
+            .accessibilityLabel(severity.label)
+    }
+}
+
+extension Incident {
+    /// "Partial outage in Claude Code and claude.ai".
+    var summary: String {
+        let names = components.map { $0.replacingOccurrences(of: #" \(.*\)$"#, with: "", options: .regularExpression) }
+        guard !names.isEmpty else { return severity.label }
+        let list = names.count <= 2
+            ? names.joined(separator: " and ")
+            : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        return "\(severity.label) in \(list)"
+    }
+}

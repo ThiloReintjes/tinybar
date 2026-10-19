@@ -32,7 +32,9 @@ enum ClaudeWebAPI {
             ?? orgs.first
         else { throw ProviderError.unexpected("No claude.ai organization") }
 
-        let usageData = try await get("organizations/\(org.uuid)/usage", sessionKey, session)
+        let usageData = try await ClaudeUsageAPI.withResetGrants(baseURL.appendingPathComponent("organizations/\(org.uuid)/usage")) {
+            try await get($0, sessionKey, session, passing: $1)
+        }
         let usage = try JSONDecoder().decode(ClaudeUsageAPI.UsageResponse.self, from: usageData)
         var snapshot = ClaudeUsageAPI.snapshot(from: usage, plan: nil)
         snapshot.source = .browser
@@ -49,9 +51,13 @@ enum ClaudeWebAPI {
     }
 
     private static func get(_ path: String, _ sessionKey: String, _ session: URLSession) async throws -> Data {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        try await get(baseURL.appendingPathComponent(path), sessionKey, session)
+    }
+
+    private static func get(_ url: URL, _ sessionKey: String, _ session: URLSession, passing: Set<Int> = []) async throws -> Data {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         request.setValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return try await HTTP.send(request, session: session, providerName: "claude.ai")
+        return try await HTTP.send(request, session: session, providerName: "claude.ai", passing: passing)
     }
 }

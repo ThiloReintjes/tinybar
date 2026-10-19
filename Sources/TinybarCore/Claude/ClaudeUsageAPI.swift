@@ -14,6 +14,8 @@ enum ClaudeUsageAPI {
         var sevenDaySonnet: Window?
         var extraUsage: ExtraUsage?
         var limits: [LimitEntry]?
+        /// Saved "Reset for free" grants, present when asked for with `cedar_ember=1`.
+        var resetGrants: ResetGrants?
 
         enum CodingKeys: String, CodingKey {
             case fiveHour = "five_hour"
@@ -22,6 +24,7 @@ enum ClaudeUsageAPI {
             case sevenDaySonnet = "seven_day_sonnet"
             case extraUsage = "extra_usage"
             case limits
+            case resetGrants = "cedar_ember"
         }
 
         init(from decoder: Decoder) throws {
@@ -32,6 +35,45 @@ enum ClaudeUsageAPI {
             sevenDaySonnet = try? c.decodeIfPresent(Window.self, forKey: .sevenDaySonnet)
             extraUsage = try? c.decodeIfPresent(ExtraUsage.self, forKey: .extraUsage)
             limits = (try? c.decodeIfPresent([CodexUsageAPI.Lossy<LimitEntry>].self, forKey: .limits))?.compactMap(\.value)
+            resetGrants = try? c.decodeIfPresent(ResetGrants.self, forKey: .resetGrants)
+        }
+    }
+
+    /// Claude's Banked Resets. Grant ids are redemption handles, so they are never decoded.
+    struct ResetGrants: Decodable {
+        var eligible: Bool
+        var grants: [CodexUsageAPI.Lossy<Grant>]
+
+        struct Grant: Decodable {
+            var resetsLeft: Int
+            var startsAt: String?
+            var endsAt: String?
+            /// Required: a grant whose pause state is unknown isn't counted.
+            var paused: Bool
+
+            enum CodingKeys: String, CodingKey {
+                case resetsLeft = "resets_left"
+                case startsAt = "starts_at"
+                case endsAt = "ends_at"
+                case paused
+            }
+        }
+
+        /// One entry per reset still usable at `now`: a grant with two left counts twice.
+        func available(at now: Date) -> [BankedReset] {
+            guard eligible else { return [] }
+            var out: [BankedReset] = []
+            for case let grant? in grants.map(\.value) where !grant.paused && grant.resetsLeft > 0 {
+                if let s = grant.startsAt.flatMap(parseISODate), s > now { continue }
+                let ends = grant.endsAt.flatMap(parseISODate)
+                if let ends, ends <= now { continue }
+                // An implausible count is malformed rather than a reason to draw 10,000 rows.
+                guard out.count + grant.resetsLeft <= 50 else { return [] }
+                for _ in 0..<grant.resetsLeft {
+                    out.append(BankedReset(id: "claude-\(out.count)", title: nil, status: "available", expiresAt: ends))
+                }
+            }
+            return out
         }
     }
 
@@ -92,21 +134,34 @@ enum ClaudeUsageAPI {
     // MARK: Requests
 
     static func fetchUsage(accessToken: String, session: URLSession) async throws -> UsageResponse {
-        var request = URLRequest(
-            url: baseURL.appendingPathComponent("api/oauth/usage"),
-            cachePolicy: .reloadIgnoringLocalCacheData,
-            timeoutInterval: 20)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-
-        let data = try await HTTP.send(request, session: session, providerName: "Claude")
+        let data = try await withResetGrants(baseURL.appendingPathComponent("api/oauth/usage")) { url, passing in
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            return try await HTTP.send(request, session: session, providerName: "Claude", passing: passing)
+        }
         do {
             return try JSONDecoder().decode(UsageResponse.self, from: data)
         } catch {
             throw ProviderError.unexpected("Unexpected Claude usage response")
+        }
+    }
+
+    /// Asks a usage endpoint to include Banked Resets (`cedar_ember=1`, as claude.ai does). An
+    /// account the query isn't open to gets 400 or 403; then the plain request is sent once, so
+    /// the limits still show. `send` throws `HTTP.Status` for the codes it's given.
+    static func withResetGrants(
+        _ url: URL, send: (URL, Set<Int>) async throws -> Data) async throws -> Data
+    {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "cedar_ember", value: "1")]
+        do {
+            return try await send(components.url!, [400, 403])
+        } catch is HTTP.Status {
+            return try await send(url, [])
         }
     }
 
@@ -159,7 +214,10 @@ enum ClaudeUsageAPI {
             // The API reports credits in cents.
             extra = ExtraUsageSpend(used: used / 100, limit: e.monthlyLimit.map { $0 / 100 }, currency: e.currency ?? "USD")
         }
-        return ProviderSnapshot(provider: .claude, plan: plan, windows: windows, extraUsage: extra, fetchedAt: now)
+        let banked = usage.resetGrants?.available(at: now) ?? []
+        return ProviderSnapshot(
+            provider: .claude, plan: plan, windows: windows,
+            bankedResets: banked.isEmpty ? nil : banked, extraUsage: extra, fetchedAt: now)
     }
 }
 

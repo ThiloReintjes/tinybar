@@ -36,17 +36,21 @@ around one idea: a status item should cost nothing while you're not looking at i
 
 - **What's left of every limit.** The 5-hour and weekly windows for Claude, Codex and Gemini (via
   Antigravity), and Cursor's billing cycle, counting down from 100% to 0% with reset countdowns.
-  Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and banked resets
-  are included.
+  Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and Claude and
+  Codex banked resets are included.
 - **Run-out forecast.** At your pace so far, when each window hits 0%. It turns orange if that comes
   before the reset; otherwise the gap to the reset shows how much harder you can push.
-- **Menu bar at a glance.** A ring and a percentage for the one window you pin. Click any limit on a
-  subscription's page to pin it.
+- **Menu bar at a glance.** A ring and a percentage for whichever limit runs out first, or for the
+  one you pin: click any limit on a subscription's page.
+- **Outages.** When Anthropic, OpenAI or Cursor report trouble with Claude Code, Codex or Cursor on
+  their status pages, the ring gets an orange or red light and the subscription's page says what's
+  wrong, with a link to the incident.
 - **Overview plus one page per subscription.** The overview shows each subscription as rings with
   the limit closest to running out. Click a row, or press 1–4, for its limits, extras and usage.
 - **Token history and theoretical cost.** Today, 7 days and 30 days from the local Claude Code and
   Codex logs, with a daily chart, the top models and projects (git worktrees count as their main
-  repo), and what those tokens would have cost at [models.dev](https://models.dev) API prices.
+  repo), and what those tokens would have cost at [models.dev](https://models.dev) API prices,
+  long-context rates included.
   Gemini and Cursor show limits only.
 - **History that outlives the logs.** Daily totals live in a small local database, so they survive
   Claude Code deleting transcripts after 30 days.
@@ -84,7 +88,9 @@ from [Releases](https://github.com/ThiloReintjes/tinybar/releases), and make the
 Tinybar starts at login. On first launch it finds the CLIs you're signed in to and turns those
 providers on, so there's nothing to configure.
 
-**Update.** Homebrew quits Tinybar while it upgrades, so open it again afterwards:
+**Update.** When a new version is out, the popover's footer shows **Update to x.y.z**. Click it:
+Tinybar updates itself through Homebrew and restarts. By hand, Homebrew quits Tinybar while it
+upgrades, so open it again afterwards:
 
 ```sh
 brew upgrade --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
@@ -100,7 +106,7 @@ read-only endpoints they call for `/usage` and `/status`:
 
 | Provider | Limits | Token history |
 | -------- | ------ | ------------- |
-| Claude   | Claude Code's OAuth login (`~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item) → `api.anthropic.com/api/oauth/usage` | `~/.claude/projects/**/*.jsonl` |
+| Claude   | Claude Code's OAuth login (`~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item) → `api.anthropic.com/api/oauth/usage` (with banked resets, as claude.ai asks) | `~/.claude/projects/**/*.jsonl` |
 | Codex    | `~/.codex/auth.json` → `chatgpt.com/backend-api/wham/usage`, falling back to a short-lived `codex app-server` in read-only mode | `~/.codex/sessions`, `~/.codex/archived_sessions` |
 | Gemini   | a short-lived `agy -p /usage` (Antigravity CLI's built-in usage report: no prompt, no tokens spent) | none |
 | Cursor   | Cursor.app's login (`state.vscdb`), else the `cursor.com` session cookie in your browser → `cursor.com/api/usage-summary` | none |
@@ -110,7 +116,9 @@ When a login expires the card turns **stale** and tells you to run `claude`, `co
 (or open Cursor), and the client renews its own login. [ADR 0001](docs/adr/0001-read-only-credentials.md)
 explains why and what it costs.
 
-The only other network call is one unauthenticated GET to `models.dev/api.json`, at most once a day.
+The other network calls carry no login: `models.dev/api.json` for prices and GitHub's latest-release
+API for updates, each at most once a day, and the public status pages of Claude, OpenAI and Cursor
+on each check (about 20 KB).
 
 ## Permissions
 

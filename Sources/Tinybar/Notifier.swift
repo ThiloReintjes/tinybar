@@ -2,7 +2,7 @@ import Foundation
 import TinybarCore
 import UserNotifications
 
-/// Delivers Limit Alerts as macOS notifications.
+/// Delivers Limit Alerts, and news of a Tinybar release, as macOS notifications.
 @MainActor
 final class Notifier {
     /// UNUserNotificationCenter requires a real app bundle; unbundled dev builds skip notifications.
@@ -31,5 +31,14 @@ final class Notifier {
         }
         content.sound = .default
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+
+    /// Once per new release.
+    func send(update release: Release) {
+        guard let center else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Tinybar \(release.version) is available"
+        content.body = "Open Tinybar and click Update at the bottom."
+        center.add(UNNotificationRequest(identifier: "update-\(release.version)", content: content, trigger: nil))
     }
 }

@@ -41,7 +41,7 @@ Known CodexBar pitfalls to avoid: full-corpus rescans (#2538), competing caches 
 - Swift, macOS 14+, universal binary (Apple Silicon is the priority for testing).
 - AppKit `NSStatusItem` plus a SwiftUI popover (`NSPopover`). Charts use Swift Charts.
 - Persistence uses the system SQLite (`libsqlite3`).
-- Plain SwiftPM, no dependencies except Sparkle for updates (ADR 0002).
+- Plain SwiftPM, no dependencies (ADR 0002). Updates go through Homebrew (ADR 0007).
 - Launch at login via `SMAppService`, on by default.
 
 ## 4. Providers (v1)
@@ -50,10 +50,10 @@ For each Provider, the source order is inspired by CodexBar and everything is st
 
 ### Claude
 1. **CLI OAuth**: read the token from `~/.claude/.credentials.json`, else Keychain item `Claude Code-credentials`.
-   → `GET https://api.anthropic.com/api/oauth/usage` (plus `/api/oauth/profile` for the plan name), with the same headers the official CLI sends.
+   → `GET https://api.anthropic.com/api/oauth/usage?cedar_ember=1` (plus `/api/oauth/profile` for the plan name), with the same headers the official CLI sends. `cedar_ember=1` adds the Banked Resets ("Reset for free" grants), as claude.ai asks for them. An account it isn't open to answers 400 or 403; then the plain request is sent once. Grant ids are redemption handles and are never read; only grants that are not paused, have resets left and are inside their start and end count, once per reset left.
 2. **Browser cookie fallback** (opt-in in Settings, ADR 0005): `sessionKey` from Chromium browsers or Firefox → `claude.ai/api/organizations/{id}/usage`. Safari is out (needs Full Disk Access).
 
-Displayed: 5h session window, weekly window, model-specific weekly windows (e.g. Opus/Sonnet), extra usage spend if present, and a Reset time for each.
+Displayed: 5h session window, weekly window, model-specific weekly windows (e.g. Opus/Sonnet), extra usage spend if present, Banked Resets, and a Reset time for each.
 Honor `Retry-After`; on HTTP 429 with no header, back off 5 minutes.
 
 ### Codex
@@ -98,8 +98,17 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 ## 6. Menu bar
 
 - A tiny ring glyph showing how much of the Pinned Limit is **left**, in that Provider's colour (Claude orange, Gemini its spark, Codex and Cursor monochrome): full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
-- **Pinned Limit**: chosen by clicking any Limit Window on a Provider page. The default is the 5h window of the first enabled Provider (order: Claude, Codex, Gemini, Cursor), or its weekly window if no 5h window exists.
+- **Pinned Limit**: chosen by clicking any Limit Window on a Provider page; clicking it again unpins it. Unpinned, the menu bar shows **Auto**: of every Provider's account-wide windows, the one whose Run-out Time comes first before its Reset, else the one with the least left (ties: the earlier Reset). Stale Providers count only when no other is known. A pinned window that disappears falls back to Auto. Settings has "Show whichever limit runs out first".
 - If the Pinned Limit's Provider is Stale, the glyph is dimmed.
+- **Incidents**: while any enabled Provider has an Incident that disrupts it (not maintenance), the ring wears a status light at its top right, cut out of the ring: orange when degraded, red for an outage. The tooltip names it. No animation.
+
+### Status pages
+Read on every poll and popover refresh (same throttle), without credentials, only for enabled Providers:
+- **Claude**: `status.claude.com/api/v2/summary.json` (statuspage.io). Counts the components `claude.ai`, `Claude API` and `Claude Code`; Console, Cowork and Government don't count.
+- **Codex**: `status.openai.com/proxy/status.openai.com` (incident.io), counting the components of the "Codex" group; when any is affected, `status.openai.com/api/v2/summary.json` supplies the incident's title (the open incident naming Codex, else the first open one with an impact).
+- **Cursor**: `status.cursor.com/api/v2/summary.json`, all components.
+- **Gemini**: none. Antigravity has no status page, and Google's Workspace feed (about 350 KB) covers the Gemini app instead.
+An unresolved incident counts when it names a counted component, or names none and has an impact. Its severity is the worst status among counted components (degraded, partial outage, major outage), else its impact. Maintenance in progress counts as maintenance. A page that can't be read keeps its last answer.
 
 ## 7. Popover (344 × 540 pt, fixed; long pages scroll inside)
 
@@ -112,24 +121,27 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
      name, plan, the window closest to running out with its reset countdown (or, in orange, the
      earliest Run-out Time), and its % left.
      Model-specific windows are left out. A Stale Provider shows "Login expired" (or the reason) in
-     orange. Clicking a row opens its page.
+     orange; otherwise an Incident shows its status light and title in its colour, ahead of the
+     Run-out Time. Clicking a row opens its page.
    - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
      by Provider, and top models and Projects, each bar split by Provider.
    - Colours come from each logo: Claude orange, Codex monochrome (black or white), Gemini its
      four-colour spark, Cursor grey.
 2. **Provider page**:
    - Large rings with the tightest % left, name and plan.
+   - A banner per Incident: status light, title, severity and affected components, when it was
+     last updated and on which status page. Clicking it opens the incident.
    - A banner when Stale: what went wrong and what the user runs to fix it.
    - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time: in orange if
      it comes before the Reset, faint if after (the headroom). Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
    - That Provider's usage only: tokens, cost, chart, top models and Projects. Today is provisional.
-3. **Footer**: last check time, check now (⌘R), Stats (⌘S, §13), how Tinybar counts (⌘I), settings
+3. **Footer**: last check time (or the update pill, §11), check now (⌘R), Stats (⌘S, §13), how Tinybar counts (⌘I), settings
    (⌘,), quit (⌘Q). "How Tinybar counts" is a page like Settings: where limits, tokens, API
    prices and Stats come from, what stays on the Mac, and how much of the last 30 days' tokens
    Activity was counted from when that is short of all.
 
-**Settings** (replaces the page, back with Esc): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), and hide percentage.
+**Settings** (replaces the page, back with Esc): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), hide percentage, and Auto for the menu bar.
 
 ### Run-out Time
 - Pace = % used ÷ time since the window started (Reset minus duration). Run-out Time = now + % left ÷ pace.
@@ -167,6 +179,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - `claude_message(id, …, stats)`: the tokens and Activity counted per Claude message id, for de-duplication. Ids older than 90 days are pruned once a day; daily totals are kept.
 - `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`. Every counter is kept per model, including `hour.HH` (responses started in that hour) and `tokens.hour.HH` (their tokens), `cmd.*` (Shell Commands: `cmd.prog.<program>`, `cmd.git.<subcommand>` and habit counts) and `ext.added|removed|edits.<extension>`.
 - `claude_event(id, day)`: Claude Prompts, edit results and Compactions already counted, pruned with message ids.
+- `daily_long_context(day, provider, model, project, band, …tokens)`: the part of `daily_usage` from long requests, for Long-context Prices (§10).
 - The schema allows a future `account` column (multi-account later).
 
 ### Day boundary
@@ -186,6 +199,8 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - Prices (input, output, cache write, cache read per model) come from **models.dev**, fetched at most once per 24 h with a single unauthenticated GET. The last successful response is cached on disk.
 - No bundled price table. If no prices have ever been fetched, or a model is not listed, show "—". Never guess from a similar model.
 - Always use **current** prices, computed from stored token counts at display time.
+- **Long-context Prices**: models.dev lists context tiers (`cost.tiers`, `type: "context"`; older entries `context_over_200k`). A request whose context (input + cache write + cache read) is over a tier's size is priced at that tier entirely. When read, each request over 100K is filed in one **Context Band**, the largest of 100K, 200K, 272K, 400K and 1M its context exceeds. At display time a band takes the highest tier at or below its size, so a tier at a band size is exact and one between bands applies from the next band up.
+- The prices cache records its format; a cache from before tiers is used but fetched again at once.
 - Theoretical Cost is not what the user paid; the UI labels it "API-equivalent".
 
 ## 11. Distribution
@@ -196,7 +211,14 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - Until an Apple Developer account is available, releases are ad-hoc signed, so macOS asks the user
   to approve the first launch. With an account: Developer ID signing and notarization
   (`build-app.sh` supports both), then the official cask (`brew install --cask tinybar`; Homebrew
-  rejects casks that fail Gatekeeper) and Sparkle with an EdDSA-signed appcast.
+  rejects casks that fail Gatekeeper).
+- **Updates** (ADR 0007): once a day, `GET api.github.com/repos/ThiloReintjes/tinybar/releases/latest`.
+  A newer version replaces the footer's check time with "Update to x.y.z" and is notified once
+  (with Limit Alerts' setting). Clicking it, for a Homebrew install: pull the tap, check the cask
+  lists that version, `brew fetch` it ("Updating…"), then hand over to a script that waits for
+  Tinybar to quit, runs `brew upgrade --cask thiloreintjes/tinybar/tinybar`, clears the quarantine
+  flag and opens the app. On failure the old version reopens with "Update failed"; clicking that
+  copies the command. Other installs open the release page.
 - First run needs no configuration: auto-detect Providers, launch at login, request notification permission.
 
 ## 12. Later (explicitly deferred)
@@ -316,3 +338,7 @@ which Tinybar doesn't read.
 0.2.0 kept Prompts, Tool Calls, lines, Agent Time and Compactions without their model. Its
 counters are cleared once (schema 4) and recounted the same way, per model. 0.3.0 had no Shell
 Commands, Languages or parallel counts; schema 5 clears and recounts once more.
+
+Schema 6 (0.5.0) adds Context Bands. Claude's come at once from the message ids kept for
+de-duplication (90 days); Codex logs still on disk are re-read once, in the child process, up to
+their saved offsets, for long requests only. Older days stay at base prices.

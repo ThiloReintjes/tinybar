@@ -7,4 +7,5 @@ A bundled table goes stale silently and ships wrong numbers with every release. 
 ## Consequences
 
 - Past days are re-priced when prices change. Theoretical Cost answers "what would this usage cost today", not "what did it cost then". Historical pricing is deferred (SPEC §12).
-- models.dev is the only extra network destination, and it is unauthenticated.
+- A Long-context Price applies to a whole request whose context is over a tier's size. Tokens are filed by Context Band when they're read, not by tier, so a tier models.dev adds or moves later applies to the history still on file (SPEC §10).
+- models.dev is contacted without credentials, like the status pages and GitHub (SPEC §6, §11).
