@@ -15,13 +15,14 @@ public struct CursorProvider: UsageProvider {
 
     /// Auto-enabled only when Cursor.app holds a login; the browser path is opt-in via Settings.
     public func isConfigured() -> Bool {
-        CursorAppAuth.accessToken() != nil
+        CursorAppAuth.storedAccessToken() != nil
     }
 
     public func fetch() async throws -> ProviderSnapshot {
         var lastError = ProviderError.notConfigured
-        if let token = CursorAppAuth.accessToken() {
-            if let cookie = CursorAppAuth.cookieHeader(accessToken: token) {
+        if let stored = CursorAppAuth.storedAccessToken() {
+            if let token = CursorAppAuth.accessToken(stored),
+               let cookie = CursorAppAuth.cookieHeader(accessToken: token) {
                 do {
                     return try await CursorUsageAPI.fetch(cookieHeader: cookie, source: .cli, session: session)
                 } catch let error as ProviderError {
@@ -50,11 +51,15 @@ enum CursorAppAuth {
             .appendingPathComponent("Cursor/User/globalStorage/state.vscdb")
     }
 
-    /// The token if present and not about to expire.
-    static func accessToken(now: Date = Date()) -> String? {
-        guard let token = readItem("cursorAuth/accessToken"), !token.isEmpty,
-              let payload = jwtPayload(token)
-        else { return nil }
+    /// Presence keeps an expired login visible; usability is checked only when fetching.
+    static func storedAccessToken(db: URL = stateDB) -> String? {
+        guard let token = readItem("cursorAuth/accessToken", db: db), !token.isEmpty else { return nil }
+        return token
+    }
+
+    /// The token if valid and not about to expire.
+    static func accessToken(_ token: String, now: Date = Date()) -> String? {
+        guard let payload = jwtPayload(token) else { return nil }
         if let exp = (payload["exp"] as? NSNumber)?.doubleValue, Date(timeIntervalSince1970: exp) < now.addingTimeInterval(60) {
             return nil
         }
@@ -79,30 +84,19 @@ enum CursorAppAuth {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    /// Read-only. With WAL sidecars present the database is opened normally (read-only) so
-    /// recent writes are seen; otherwise as immutable, so SQLite creates nothing in Cursor's folder.
+    /// Never lets SQLite write beside Cursor's database, including its WAL sidecars.
     static func readItem(_ key: String, db: URL = stateDB) -> String? {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: db.path) else { return nil }
-        let hasWAL = fm.fileExists(atPath: db.path + "-wal")
-        let path = db.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? db.path
-        let uri = "file:\(path)?" + (hasWAL ? "mode=ro" : "immutable=1")
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(uri, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
-            sqlite3_close_v2(handle)
-            return nil
+        CredentialDatabase.read(db) { handle in
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, "SELECT value FROM ItemTable WHERE key = ? LIMIT 1", -1, &stmt, nil) == SQLITE_OK else {
+                return nil
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            guard sqlite3_step(stmt) == SQLITE_ROW, let bytes = sqlite3_column_blob(stmt, 0) else { return nil }
+            let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, 0)))
+            return decode(data)
         }
-        defer { sqlite3_close_v2(handle) }
-        sqlite3_busy_timeout(handle, 500)
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, "SELECT value FROM ItemTable WHERE key = ? LIMIT 1", -1, &stmt, nil) == SQLITE_OK else {
-            return nil
-        }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        guard sqlite3_step(stmt) == SQLITE_ROW, let bytes = sqlite3_column_blob(stmt, 0) else { return nil }
-        let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, 0)))
-        return decode(data)
     }
 
     /// Values are usually UTF-8; some builds store UTF-16LE.

@@ -98,7 +98,7 @@ enum CursorUsageAPI {
 
         // On-demand spend beyond the plan, like Claude's extra usage.
         var extra: ExtraUsageSpend?
-        if let od = s.individualUsage?.onDemand, od.enabled == true || (od.used ?? 0) > 0 {
+        if let od = s.individualUsage?.onDemand ?? s.teamUsage?.onDemand, od.enabled == true || (od.used ?? 0) > 0 {
             extra = ExtraUsageSpend(
                 used: Double(od.used ?? 0) / 100, limit: od.limit.map { Double($0) / 100 }, currency: "USD")
         }
