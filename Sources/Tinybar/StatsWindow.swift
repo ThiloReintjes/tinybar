@@ -67,6 +67,7 @@ struct StatsView: View {
     /// The one model the card is filtered to, if any. Not remembered: the window opens on all models.
     @State private var picked: String?
     @State private var summary: StatsSummary?
+    @State private var loadFailed = false
     @State private var copied = false
     /// Which way the last page change went, so the new card comes in from that side.
     @State private var forward = true
@@ -106,16 +107,20 @@ struct StatsView: View {
             .padding(.trailing, 20)
             .frame(height: 52)
 
-            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page, forward: forward) { name in
+            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page, forward: forward, loadFailed: loadFailed) { name in
                 picked = picked == name ? nil : name
             }
         }
         .background(palette.canvas)
         .onExitCommand { picked = nil }
-        .task(id: "\(rangeRaw)|\(picked ?? "")|\(model.lastUpdated?.timeIntervalSince1970 ?? 0)|\(model.importProgress == nil)") {
+        .task(id: "\(rangeRaw)|\(picked ?? "")|\(model.isRefreshing)") {
+            guard !model.isRefreshing else { return }
             let next = await model.statsSummary(range, model: picked)
+            guard !Task.isCancelled else { return }
+            guard let next else { loadFailed = true; return }
+            loadFailed = false
             // A model not used in the new range has nothing to show: fall back to all models.
-            if let p = picked, let next, !next.models.contains(where: { $0.name == p }) {
+            if let p = picked, !next.models.contains(where: { $0.name == p }) {
                 picked = nil
                 return
             }
@@ -194,6 +199,7 @@ struct StatsCard: View {
     var page: StatsPage = .overview
     /// The page came after the previous one: it enters from the right.
     var forward = true
+    var loadFailed = false
     /// Filters to a model, or back to all. Nil for the copied image, which is not interactive.
     var pick: ((String) -> Void)?
     @State private var tip: StatsTip?
@@ -215,6 +221,14 @@ struct StatsCard: View {
                     ProgressView(value: importing).frame(width: 220)
                 }
                 .foregroundStyle(palette.ink2)
+            } else if loadFailed {
+                VStack(spacing: 6) {
+                    Text("Couldn't load stats").font(.system(size: 17, weight: .semibold))
+                    Text("Try again after the next refresh.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.ink2)
+                }
+                .foregroundStyle(palette.ink)
             } else if summary != nil {
                 VStack(spacing: 6) {
                     Text("Nothing to count yet").font(.system(size: 17, weight: .semibold))
@@ -228,6 +242,14 @@ struct StatsCard: View {
         .frame(width: Self.size.width, height: Self.size.height)
         .background(palette.canvas)
         .coordinateSpace(.named(Self.space))
+        .overlay(alignment: .top) {
+            if loadFailed, summary?.isEmpty == false {
+                Text("Couldn't update stats. Showing the last loaded numbers.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.ink2)
+                    .padding(.top, 5)
+            }
+        }
         .overlay {
             if let tip {
                 TipLayout(anchor: tip.anchor, beside: tip.beside) { TipView(tip: tip, palette: palette) }

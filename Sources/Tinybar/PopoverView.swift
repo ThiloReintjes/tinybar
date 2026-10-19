@@ -291,7 +291,7 @@ private struct OverviewRow: View {
             if let binding {
                 PercentText(percent: binding.remainingPercent, size: 20)
                     .opacity(stale ? 0.5 : 1)
-            } else if state?.error == nil {
+            } else if snapshot == nil, state?.error == nil {
                 ProgressView().controlSize(.small)
             }
             Image(systemName: "chevron.right")
@@ -322,7 +322,8 @@ private struct OverviewRow: View {
         } else if let binding {
             Text(ResetText.short(binding)).foregroundStyle(.secondary)
         } else if state?.snapshot != nil {
-            Text("No limits reported").foregroundStyle(.secondary)
+            Text(snapshot?.windows.isEmpty == false ? "Model-specific limits only" : "No limits reported")
+                .foregroundStyle(.secondary)
         } else {
             Text("Checking…").foregroundStyle(.secondary)
         }
@@ -604,7 +605,7 @@ private struct Extras: View {
             if let credits = snapshot.credits, credits.hasCredits {
                 line("Credits", icon: "circle.hexagongrid", value: credits.unlimited
                     ? "Unlimited"
-                    : credits.balance.map { $0.formatted(.number.precision(.fractionLength(0))) } ?? "—")
+                    : credits.balance.map { $0.formatted(.number.precision(.significantDigits(1...6))) } ?? "—")
             }
             if let banked = snapshot.bankedResets?.filter(\.isAvailable), !banked.isEmpty {
                 let next = banked.compactMap(\.expiresAt).min()
@@ -682,10 +683,13 @@ private struct UsagePanel: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 1) {
-                            Text(Format.cost(summary.cost))
+                            Text(Format.cost(summary.cost) + (summary.cost != nil && summary.hasUnpriced ? "+" : ""))
                                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                                 .tracking(-0.5)
                                 .monospacedDigit()
+                                .help(summary.hasUnpriced
+                                    ? "Some models have no known price. Their tokens are not included in this cost."
+                                    : "What these tokens would cost at current API prices.")
                             Text(range == .today ? "at API prices, so far today" : "at API prices")
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                         }

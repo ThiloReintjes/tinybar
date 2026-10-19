@@ -179,17 +179,17 @@ struct RankedChart: View {
 
     var body: some View {
         let ranked = metric.ranked(summary.models)
-        var shown = Array(ranked.prefix(rows))
         let picked = summary.model
         let pickedHere = picked.map { p in ranked.contains { $0.model.name == p } } ?? false
+        let missing = pickedHere ? nil : summary.pickedModel
+        var shown = Array(ranked.prefix(max(rows - (missing == nil ? 0 : 1), 0)))
         // A picked model below the top rows takes the last one.
         if let picked, pickedHere, !shown.contains(where: { $0.model.name == picked }),
-           let entry = ranked.first(where: { $0.model.name == picked })
+           let entry = ranked.first(where: { $0.model.name == picked }), !shown.isEmpty
         {
             shown[shown.count - 1] = entry
         }
         let top = ranked.first?.value ?? 1
-        let missing = picked.flatMap { p in pickedHere ? nil : summary.models.first { $0.name == p } }
         return VStack(alignment: .leading, spacing: 4) {
             SectionTitle(text: title, palette: palette)
                 .statsTip(StatsTip(id: "chart:\(metric.rawValue)", title: title, note: note))
@@ -198,14 +198,9 @@ struct RankedChart: View {
                 row(entry.model, entry.value, top: top, dimmed: pickedHere && entry.model.name != picked)
             }
             ForEach(shown.count..<rows, id: \.self) { i in
-                if i == shown.count, let missing {
-                    // The picked model, with too little data here to rank.
-                    HStack(spacing: 6) {
-                        Circle().fill(palette.color(missing.provider)).frame(width: 6, height: 6)
-                        Text(ModelName.display(missing.name)).font(.system(size: 11.5, weight: .semibold))
-                        Text("too little data").font(.system(size: 11)).foregroundStyle(palette.ink3)
-                    }
-                    .frame(height: Self.rowHeight)
+                if i == rows - 1, let missing {
+                    UnrankedModelRow(model: missing, palette: palette)
+                        .frame(height: Self.rowHeight)
                 } else if i == 0, ranked.isEmpty {
                     Text("Not enough data in this range")
                         .font(.system(size: 11))
@@ -267,6 +262,28 @@ struct RankedChart: View {
                     id: id, title: ModelName.display(m.name),
                     rows: [.init(label: title, value: format(value))] + detail(m),
                     note: isPicked ? "Click again to clear." : "Click to light this model up in every chart."))
+        } else {
+            label
+        }
+    }
+}
+
+/// A picked model still gets a row when it has too little data to rank.
+private struct UnrankedModelRow: View {
+    let model: StatsSummary.Model
+    let palette: StatsPalette
+    @Environment(\.statsPick) private var pick
+
+    var body: some View {
+        let label = HStack(spacing: 6) {
+            Circle().fill(palette.color(model.provider)).frame(width: 6, height: 6)
+            Text(ModelName.display(model.name)).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+            Text("too little data").font(.system(size: 11)).foregroundStyle(palette.ink3)
+        }
+        if let pick {
+            Button { pick(model.name) } label: { label.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help("Click to show all models again.")
         } else {
             label
         }
@@ -619,7 +636,8 @@ private struct LanguageMix: View {
         let keyLanguages = totals.filter { LanguageColor.color($0.key, palette) != palette.ink.opacity(0.32) }
             .sorted { $0.value > $1.value }.prefix(Self.coloured).map(\.key)
         mixes.sort { $0.total > $1.total }
-        var shown = Array(mixes.prefix(Self.rows))
+        let missing = summary.pickedModel.flatMap { m in mixes.contains { $0.model.name == m.name } ? nil : m }
+        var shown = Array(mixes.prefix(Self.rows - (missing == nil ? 0 : 1)))
         if let picked = summary.model, !shown.contains(where: { $0.model.name == picked }),
            let entry = mixes.first(where: { $0.model.name == picked }), !shown.isEmpty
         {
@@ -636,7 +654,10 @@ private struct LanguageMix: View {
                 row(entry.model, entry.parts, entry.total, keyLanguages, dimmed: pickedHere && entry.model.name != summary.model)
             }
             ForEach(shown.count..<Self.rows, id: \.self) { i in
-                if i == 0 {
+                if i == Self.rows - 1, let missing {
+                    UnrankedModelRow(model: missing, palette: palette)
+                        .frame(height: Self.rowHeight)
+                } else if i == 0 {
                     Text("Not enough edits in this range").font(.system(size: 11)).foregroundStyle(palette.ink3)
                         .frame(height: Self.rowHeight)
                 } else {
