@@ -806,6 +806,9 @@ private struct HeatMap: View {
                                             }
                                         }
                                         .frame(width: Self.cell, height: Self.cell)
+                                        .accessibilityElement(children: .ignore)
+                                        .accessibilityLabel(StatsText.hourTip(summary, day: day, hour: hour).title)
+                                        .accessibilityValue("\(heat[day][hour].tokens.formatted(.number)) tokens, \(heat[day][hour].responses.formatted(.number)) responses")
                                 }
                             }
                         }
