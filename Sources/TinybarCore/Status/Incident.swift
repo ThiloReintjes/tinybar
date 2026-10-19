@@ -129,11 +129,16 @@ public enum StatusFeed {
         func counts(_ name: String) -> Bool {
             components?.contains { name.hasPrefix($0) } ?? true
         }
-        let maintenance = (root["scheduled_maintenances"] as? [[String: Any]] ?? [])
-            .filter { $0["status"] as? String == "in_progress" }
+        guard let maintenance = (root["scheduled_maintenances"] ?? []) as? [[String: Any]] else {
+            throw ProviderError.unexpected("Unexpected status page maintenance")
+        }
         var out: [Incident] = []
         for (entry, planned) in incidents.map({ ($0, false) }) + maintenance.map({ ($0, true) }) {
-            guard let title = entry["name"] as? String, entry["status"] as? String != "resolved" else { continue }
+            guard let title = entry["name"] as? String, !title.isEmpty,
+                  let status = entry["status"] as? String, !status.isEmpty else {
+                throw ProviderError.unexpected("Unexpected status page incident")
+            }
+            if status == "resolved" || (planned && status != "in_progress") { continue }
             guard let listed = (entry["components"] ?? []) as? [[String: Any]],
                   listed.allSatisfy({ $0["name"] is String }) else {
                 throw ProviderError.unexpected("Unexpected status page components")
@@ -163,18 +168,29 @@ public enum StatusFeed {
         else { throw ProviderError.unexpected("Unexpected status page response") }
         var names: [String: String] = [:]
         for item in items {
-            guard let g = item["group"] as? [String: Any], g["name"] as? String == group else { continue }
-            for c in g["components"] as? [[String: Any]] ?? [] {
+            guard let raw = item["group"] else { continue }
+            guard let g = raw as? [String: Any], let name = g["name"] as? String else {
+                throw ProviderError.unexpected("Unexpected status page group")
+            }
+            guard name == group else { continue }
+            guard let components = g["components"] as? [[String: Any]] else {
+                throw ProviderError.unexpected("Unexpected status page components")
+            }
+            for c in components {
+                guard let id = c["component_id"] as? String, !id.isEmpty else {
+                    throw ProviderError.unexpected("Unexpected status page component")
+                }
                 // "CLI" alone reads as anything; the page means Codex's.
                 let name = c["name"] as? String ?? group
-                if let id = c["component_id"] as? String { names[id] = name.contains(group) ? name : "\(group) \(name)" }
+                names[id] = name.contains(group) ? name : "\(group) \(name)"
             }
         }
         var worst: [String: Incident.Severity] = [:]
         for c in affected {
-            guard let id = c["component_id"] as? String, let name = names[id],
-                  let level = (c["status"] as? String).flatMap(severity(componentStatus:))
-            else { continue }
+            guard let id = c["component_id"] as? String, !id.isEmpty, let status = c["status"] as? String else {
+                throw ProviderError.unexpected("Unexpected affected status page component")
+            }
+            guard let name = names[id], let level = severity(componentStatus: status) else { continue }
             worst[name] = max(worst[name] ?? level, level)
         }
         return worst.map { ($0.key, $0.value) }.sorted { $0.name < $1.name }

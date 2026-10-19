@@ -63,11 +63,9 @@ public struct PriceTable: Sendable {
         guard let table = prices[provider] else { return nil }
         let key = ModelName.normalize(model)
         if let exact = table[key] { return exact }
-        // Dated snapshots ("claude-x-20250101") price like their base id.
-        if let dash = key.lastIndex(of: "-") {
-            let suffix = key[key.index(after: dash)...]
-            guard suffix.count == 8, suffix.allSatisfy(\.isNumber) else { return nil }
-            return table[String(key[..<dash])]
+        // Dated snapshots use their base id; providers spell dates as YYYYMMDD or YYYY-MM-DD.
+        if let date = key.range(of: #"-(?:[0-9]{8}|[0-9]{4}-[0-9]{2}-[0-9]{2})$"#, options: .regularExpression) {
+            return table[String(key[..<date.lowerBound])]
         }
         return nil
     }
@@ -83,14 +81,17 @@ public struct PriceTable: Sendable {
     /// models.dev provider ids for each Provider.
     static let sourceProviders: [ProviderID: String] = [.codex: "openai", .claude: "anthropic"]
 
-    private static func rates(_ cost: [String: Any]) -> ModelPrice? {
-        guard let input = (cost["input"] as? NSNumber)?.doubleValue,
-              let output = (cost["output"] as? NSNumber)?.doubleValue
-        else { return nil }
-        return ModelPrice(
-            input: input, output: output,
-            cacheRead: (cost["cache_read"] as? NSNumber)?.doubleValue,
-            cacheWrite: (cost["cache_write"] as? NSNumber)?.doubleValue)
+    private static func rates(_ cost: [String: Any]) throws -> ModelPrice? {
+        func number(_ key: String) throws -> Double? {
+            guard let raw = cost[key], !(raw is NSNull) else { return nil }
+            guard let n = raw as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+                  n.doubleValue.isFinite, n.doubleValue >= 0 else {
+                throw ProviderError.unexpected("models.dev: invalid price")
+            }
+            return n.doubleValue
+        }
+        guard let input = try number("input"), let output = try number("output") else { return nil }
+        return try ModelPrice(input: input, output: output, cacheRead: number("cache_read"), cacheWrite: number("cache_write"))
     }
 
     static func parse(_ data: Data, fetchedAt: Date?) throws -> PriceTable {
@@ -102,17 +103,17 @@ public struct PriceTable: Sendable {
             guard let models = (root[key] as? [String: Any])?["models"] as? [String: Any] else { continue }
             var table: [String: ModelPrice] = [:]
             for (id, value) in models {
-                guard let cost = (value as? [String: Any])?["cost"] as? [String: Any], var price = rates(cost)
+                guard let cost = (value as? [String: Any])?["cost"] as? [String: Any], var price = try rates(cost)
                 else { continue }
                 // `tiers` lists context tiers; older entries only carry `context_over_200k`.
                 var tiers: [ModelPrice.Tier] = []
                 for tier in cost["tiers"] as? [[String: Any]] ?? [] {
                     guard let spec = tier["tier"] as? [String: Any], spec["type"] as? String == "context",
-                          let size = (spec["size"] as? NSNumber)?.int64Value, let p = rates(tier)
+                          let size = (spec["size"] as? NSNumber)?.int64Value, let p = try rates(tier)
                     else { continue }
                     tiers.append(.init(size: size, price: p))
                 }
-                if tiers.isEmpty, let over = cost["context_over_200k"] as? [String: Any], let p = rates(over) {
+                if tiers.isEmpty, let over = cost["context_over_200k"] as? [String: Any], let p = try rates(over) {
                     tiers.append(.init(size: 200_000, price: p))
                 }
                 price.tiers = tiers.isEmpty ? nil : tiers.sorted { $0.size < $1.size }
