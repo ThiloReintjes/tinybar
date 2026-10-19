@@ -688,6 +688,9 @@ private struct Bars: View {
                         .clipShape(RoundedRectangle(cornerRadius: dense ? 1 : 2, style: .continuous))
                         .frame(width: slot, height: g.size.height, alignment: .bottom)
                         .opacity(!hovering || lit == "bar:\(bar.start)" ? 1 : 0.35)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(StatsText.barTip(bar, summary.bucket).title)
+                        .accessibilityValue("\(bar.totalTokens.formatted(.number)) tokens. " + StatsText.byProvider(bar.tokens).map { "\($0.label): \($0.value)" }.joined(separator: ", "))
                     }
                 }
             }
@@ -704,7 +707,7 @@ private struct Bars: View {
                 tip.anchor = CGRect(x: CGFloat(i) * slot, y: size.height - h, width: slot, height: h)
                 return tip
             }
-            .accessibilityElement()
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("Tokens \(StatsText.per(summary.bucket))")
             Text("Tokens \(StatsText.per(summary.bucket))")
                 .font(.system(size: 10.5))
