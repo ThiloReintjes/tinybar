@@ -27,8 +27,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" "build/Tinybar-${VERSION}.zip" \
-            --title "Tinybar ${VERSION}" --generate-notes
+          asset="Tinybar-${VERSION}.zip"
+          if assets=$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' 2>/dev/null); then
+            if printf '%s\n' "$assets" | grep -Fxq "$asset"; then
+              # Keep the published bytes stable; the cask below hashes this exact download.
+              gh release download "${GITHUB_REF_NAME}" --pattern "$asset" --dir build --clobber
+            else
+              gh release upload "${GITHUB_REF_NAME}" "build/$asset"
+            fi
+          else
+            gh release create "${GITHUB_REF_NAME}" "build/$asset" \
+              --title "Tinybar ${VERSION}" --generate-notes
+          fi
       - name: Bump the Homebrew cask
         env:
           TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
@@ -40,6 +50,8 @@ jobs:
           git clone -q git@github.com:ThiloReintjes/homebrew-tinybar.git "$RUNNER_TEMP/tap"
           cd "$RUNNER_TEMP/tap"
           sed -i '' -E "s/^  version \".*\"/  version \"${VERSION}\"/; s/^  sha256 \".*\"/  sha256 \"${sha}\"/" Casks/tinybar.rb
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -qam "Update Tinybar to ${VERSION}"
+          if ! git diff --quiet -- Casks/tinybar.rb; then
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -qam "Update Tinybar to ${VERSION}"
+          fi
           git push -q

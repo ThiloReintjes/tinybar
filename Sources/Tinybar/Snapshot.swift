@@ -14,6 +14,9 @@ enum PopoverSnapshot {
             exit(2)
         }
         let out = URL(fileURLWithPath: args[i + 1])
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: out.deletingLastPathComponent().path, isDirectory: &directory), directory.boolValue
+        else { fail("Output directory does not exist.") }
         let model = AppModel(settings: Settings())
         Task { @MainActor in
             // `--incident claude:partialOutage` stands in for a status page reporting one.
@@ -52,9 +55,9 @@ enum PopoverSnapshot {
                         }
                         return true
                     }
-                    if let tiff = canvas.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-                        try? png.write(to: URL(fileURLWithPath: out.deletingPathExtension().path + (dark ? ".menubar.dark.png" : ".menubar.png")))
-                    }
+                    guard let tiff = canvas.tiffRepresentation else { fail("Couldn't render the menu bar.") }
+                    write(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]),
+                          to: URL(fileURLWithPath: out.deletingPathExtension().path + (dark ? ".menubar.dark.png" : ".menubar.png")))
                 }
                 exit(0)
             }
@@ -93,19 +96,17 @@ enum PopoverSnapshot {
                     try? await Task.sleep(for: .milliseconds(300))
                 }
                 host.layoutSubtreeIfNeeded()
-                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
-                    host.cacheDisplay(in: host.bounds, to: rep)
-                    try? rep.representation(using: .png, properties: [:])?
-                        .write(to: URL(fileURLWithPath: out.deletingPathExtension().path + ".window.png"))
-                }
+                guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { fail("Couldn't render the Stats window.") }
+                host.cacheDisplay(in: host.bounds, to: rep)
+                write(rep.representation(using: .png, properties: [:]),
+                      to: URL(fileURLWithPath: out.deletingPathExtension().path + ".window.png"))
                 window.orderOut(nil)
-                if let summary = await model.statsSummary(range, model: picked) {
-                    for (scheme, suffix) in [(ColorScheme.dark, ".dark"), (.light, "")] {
-                        guard let image = StatsCard.image(summary, page: page, scheme: scheme), let tiff = image.tiffRepresentation,
-                              let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
-                        else { continue }
-                        try? png.write(to: URL(fileURLWithPath: out.deletingPathExtension().path + suffix + ".png"))
-                    }
+                guard let summary = await model.statsSummary(range, model: picked) else { fail("Couldn't load Stats.") }
+                for (scheme, suffix) in [(ColorScheme.dark, ".dark"), (.light, "")] {
+                    guard let image = StatsCard.image(summary, page: page, scheme: scheme), let tiff = image.tiffRepresentation
+                    else { fail("Couldn't render the Stats card.") }
+                    write(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]),
+                          to: URL(fileURLWithPath: out.deletingPathExtension().path + suffix + ".png"))
                 }
                 exit(0)
             }
@@ -132,16 +133,26 @@ enum PopoverSnapshot {
                 window.orderFrontRegardless()
                 try? await Task.sleep(for: .milliseconds(600))
                 host.layoutSubtreeIfNeeded()
-                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
-                    host.cacheDisplay(in: host.bounds, to: rep)
-                    let url = URL(fileURLWithPath: out.deletingPathExtension().path + suffix + ".png")
-                    try? rep.representation(using: .png, properties: [:])?.write(to: url)
-                }
+                guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { fail("Couldn't render the popover.") }
+                host.cacheDisplay(in: host.bounds, to: rep)
+                let url = URL(fileURLWithPath: out.deletingPathExtension().path + suffix + ".png")
+                write(rep.representation(using: .png, properties: [:]), to: url)
                 window.orderOut(nil)
             }
             exit(0)
         }
         NSApplication.shared.setActivationPolicy(.prohibited)
         NSApplication.shared.run()
+    }
+
+    private static func write(_ data: Data?, to url: URL) {
+        guard let data else { fail("Couldn't encode the image.") }
+        do { try data.write(to: url, options: .atomic) }
+        catch { fail(error.localizedDescription) }
+    }
+
+    private static func fail(_ message: String) -> Never {
+        FileHandle.standardError.write(Data("Snapshot failed: \(message)\n".utf8))
+        exit(1)
     }
 }
