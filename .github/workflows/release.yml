@@ -10,6 +10,11 @@ on:
 permissions:
   contents: write
 
+# Different tags share one tap; never race its read/compare/write sequence.
+concurrency:
+  group: release-homebrew-tap
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-15
@@ -49,6 +54,11 @@ jobs:
           export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes"
           git clone -q git@github.com:ThiloReintjes/homebrew-tinybar.git "$RUNNER_TEMP/tap"
           cd "$RUNNER_TEMP/tap"
+          ruby -r rubygems -e '
+            current = File.read("Casks/tinybar.rb")[/^  version "([^"]+)"/, 1]
+            abort "Missing cask version" unless current
+            abort "Refusing to downgrade the cask" if Gem::Version.new(current) > Gem::Version.new(ENV.fetch("VERSION"))
+          '
           sed -i '' -E "s/^  version \".*\"/  version \"${VERSION}\"/; s/^  sha256 \".*\"/  sha256 \"${sha}\"/" Casks/tinybar.rb
           if ! git diff --quiet -- Casks/tinybar.rb; then
             git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
