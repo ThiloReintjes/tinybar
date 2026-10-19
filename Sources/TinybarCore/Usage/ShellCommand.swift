@@ -142,6 +142,7 @@ public enum ShellCommand {
                     if b[i] != UInt8(ascii: "'"), b[i] != UInt8(ascii: "\""), b[i] != UInt8(ascii: "\\") { delimiter.append(b[i]) }
                     i += 1
                 }
+                seg.words.append(String(decoding: delimiter, as: UTF8.self))
                 if !delimiter.isEmpty { heredocs.append((delimiter, tabs)) }
             case UInt8(ascii: "|"):
                 if i + 1 < b.count, b[i + 1] == UInt8(ascii: "|") {
@@ -240,7 +241,7 @@ public enum ShellCommand {
     /// attached (`>out.txt`) rather than the next word.
     private static func redirection(_ w: String) -> Bool? {
         let op = w.drop { $0.isNumber || $0 == "&" }
-        guard op.hasPrefix(">") || op.hasPrefix("<"), !w.hasPrefix("<<") else { return nil }
+        guard op.hasPrefix(">") || op.hasPrefix("<") else { return nil }
         let rest = op.drop { $0 == ">" || $0 == "<" || $0 == "&" || $0 == "|" }
         return !rest.isEmpty || op.contains("&")
     }

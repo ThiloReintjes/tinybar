@@ -922,16 +922,23 @@ enum JSONLReader {
         url: URL, from start: Int64, until: Int64? = nil, _ body: (UnsafeRawBufferPointer) -> Void) throws -> Int64
     {
         let fd = open(url.path, O_RDONLY)
-        guard fd >= 0 else { return start }
+        guard fd >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
         defer { close(fd) }
         // An offset inside a line only occurs while skipping an oversized line. Recover that
         // state from the preceding byte, without rereading its already discarded prefix.
         var skipping = false
-        if start > 0, lseek(fd, off_t(start - 1), SEEK_SET) == off_t(start - 1) {
+        if start > 0 {
+            guard lseek(fd, off_t(start - 1), SEEK_SET) == off_t(start - 1) else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
             var previous: UInt8 = 0
-            if read(fd, &previous, 1) == 1 { skipping = previous != 0x0A }
+            let n = read(fd, &previous, 1)
+            guard n >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+            if n == 1 { skipping = previous != 0x0A }
         }
-        guard lseek(fd, off_t(start), SEEK_SET) == off_t(start) else { return start }
+        guard lseek(fd, off_t(start), SEEK_SET) == off_t(start) else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
 
         let capacity = chunkSize + maxLineBytes
         let buf = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: 1)
@@ -942,7 +949,11 @@ enum JSONLReader {
         var reachedLimit = false
         while !reachedLimit {
             let n = read(fd, buf + filled, capacity - filled)
-            if n <= 0 { break }
+            if n < 0 {
+                if errno == EINTR { continue }
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            if n == 0 { break }
             filled += n
             var lineStart = 0
             while lineStart < filled,

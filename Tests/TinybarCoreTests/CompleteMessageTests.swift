@@ -27,6 +27,9 @@ private func streamedUsage(input: Int, output: Int, cached: Int) -> String {
         try await store.ingestClaude(roots: [dir])
         let row = try #require(try await store.daily(since: "0000").first)
         #expect(row.tokens == TokenCounts(input: 6_167, output: 61, cacheRead: 54_400))
+        if !split {
+            #expect(try await store.stats(since: "0000").first { $0.key == StatKey.contextMax }?.value == 60_567)
+        }
         // Equally complete copies may refine input/cache classification too.
         try streamedUsage(input: 6_000, output: 61, cached: 54_567)
             .write(to: dir.appendingPathComponent("c.jsonl"), atomically: true, encoding: .utf8)
