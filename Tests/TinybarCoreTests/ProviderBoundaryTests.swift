@@ -68,9 +68,9 @@ private final class RedirectFixture: URLProtocol, @unchecked Sendable {
     func execute(_ sql: String) throws {
         #expect(sqlite3_exec(writer, sql, nil, nil, nil) == SQLITE_OK)
     }
-    try execute("PRAGMA journal_mode=WAL; CREATE TABLE moz_cookies(host TEXT, name TEXT, value TEXT); CREATE TABLE ItemTable(key TEXT, value TEXT); CREATE TABLE meta(key TEXT, value TEXT)")
+    try execute("PRAGMA journal_mode=WAL; CREATE TABLE moz_cookies(host TEXT, name TEXT, value TEXT, expiry INTEGER DEFAULT 4102444800); CREATE TABLE ItemTable(key TEXT, value TEXT); CREATE TABLE meta(key TEXT, value TEXT)")
     try execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    try execute("INSERT INTO moz_cookies VALUES ('claude.ai', 'sessionKey', 'synthetic'); INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', 'synthetic'); INSERT INTO meta VALUES ('version', '24')")
+    try execute("INSERT INTO moz_cookies(host, name, value) VALUES ('claude.ai', 'sessionKey', 'synthetic'); INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', 'synthetic'); INSERT INTO meta VALUES ('version', '24')")
 
     let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
     let contents = try files.map { try Data(contentsOf: $0) }
