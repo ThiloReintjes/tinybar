@@ -66,6 +66,11 @@ private final class FailedPricesProtocol: URLProtocol, @unchecked Sendable {
     let cache = dir.appendingPathComponent("prices.json")
     let now = Date().timeIntervalSinceReferenceDate
     let bad = [
+        #"{"input":true,"output":10}"#,
+        #"{"input":"2","output":10}"#,
+        #"{"output":10}"#,
+        "null",
+        "7",
         #"{"input":-2,"output":10}"#,
         #"{"input":2,"output":10,"cacheRead":-1}"#,
         #"{"input":2,"output":10,"tiers":[{"size":200000,"price":{"input":-4,"output":20}}]}"#,

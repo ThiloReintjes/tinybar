@@ -23,6 +23,11 @@ import Testing
         #"{"input":2,"output":10,"cache_write":false}"#,
         #"{"input":2,"output":10,"tiers":[{"input":-4,"output":20,"tier":{"type":"context","size":200000}}]}"#,
         #"{"input":2,"output":10,"context_over_200k":{"input":4,"output":false}}"#,
+        #"{"input":2,"output":10,"tiers":[{"input":4,"tier":{"type":"context","size":200000}}]}"#,
+        #"{"input":2,"output":10,"tiers":[{"output":20,"tier":{"type":"context","size":200000}}]}"#,
+        #"{"input":2,"output":10,"context_over_200k":{"input":4}}"#,
+        #"{"input":2,"output":10,"tiers":{}}"#,
+        #"{"input":2,"output":10,"tiers":[{}]}"#,
     ]
     for cost in costs {
         let data = Data("{\"openai\":{\"models\":{\"m\":{\"cost\":\(cost)}}}}".utf8)
@@ -45,6 +50,26 @@ import Testing
         let data = Data("{\"openai\":{\"models\":{\"m\":{\"cost\":{\"input\":2,\"output\":10,\"tiers\":[{\"input\":4,\"output\":20,\"tier\":{\"type\":\"context\",\"size\":\(size)}}]}}}}}".utf8)
         #expect(try PriceTable.parse(data, fetchedAt: nil).price(provider: .codex, model: "m")?.tiers?.count == 1)
     }
+}
+
+@Test func malformedComponentStatusesCannotClearOutages() throws {
+    let base = URL(string: "https://status.example.com")!
+    for status in ["7", "null", #""unknown""#] {
+        let data = Data("{\"incidents\":[{\"name\":\"Outage\",\"status\":\"investigating\",\"components\":[{\"name\":\"Claude Code\",\"status\":\(status)}]}]}".utf8)
+        #expect(throws: (any Error).self) {
+            try StatusFeed.statuspage(data, provider: .claude, base: base, components: nil)
+        }
+        let native = Data("{\"summary\":{\"affected_components\":[{\"component_id\":\"cli\",\"status\":\(status)}],\"structure\":{\"items\":[{\"group\":{\"name\":\"Codex\",\"components\":[{\"component_id\":\"cli\",\"name\":\"CLI\"}]}}]}}}".utf8)
+        #expect(throws: (any Error).self) { try StatusFeed.incidentIOAffected(native, group: "Codex") }
+    }
+    let missing = Data(#"{"incidents":[{"name":"Outage","status":"investigating","components":[{"name":"Claude Code"}]}]}"#.utf8)
+    #expect(throws: (any Error).self) {
+        try StatusFeed.statuspage(missing, provider: .claude, base: base, components: nil)
+    }
+    let operational = Data(#"{"incidents":[{"name":"Recovering","status":"monitoring","components":[{"name":"Claude Code","status":"operational"}]}]}"#.utf8)
+    #expect(try StatusFeed.statuspage(operational, provider: .claude, base: base, components: nil).isEmpty)
+    let native = Data(#"{"summary":{"affected_components":[{"component_id":"cli","status":"operational"}],"structure":{"items":[{"group":{"name":"Codex","components":[{"component_id":"cli","name":"CLI"}]}}]}}}"#.utf8)
+    #expect(try StatusFeed.incidentIOAffected(native, group: "Codex").isEmpty)
 }
 
 @Test func malformedIncidentRecordsAndNativeComponentsThrow() {

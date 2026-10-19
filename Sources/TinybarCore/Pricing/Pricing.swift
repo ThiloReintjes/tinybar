@@ -114,17 +114,28 @@ public struct PriceTable: Sendable {
                     else { continue }
                     // `tiers` lists context tiers; older entries only carry `context_over_200k`.
                     var tiers: [ModelPrice.Tier] = []
-                    for tier in cost["tiers"] as? [[String: Any]] ?? [] {
-                        guard let spec = tier["tier"] as? [String: Any], spec["type"] as? String == "context" else { continue }
+                    guard let listed = (cost["tiers"] ?? []) as? [[String: Any]] else {
+                        throw ProviderError.unexpected("models.dev: invalid tiers")
+                    }
+                    for tier in listed {
+                        guard let spec = tier["tier"] as? [String: Any], let type = spec["type"] as? String else {
+                            throw ProviderError.unexpected("models.dev: invalid tier")
+                        }
+                        guard type == "context" else { continue }
                         guard let n = spec["size"] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
                               n.doubleValue.isFinite,
                               let size = Int64(n.stringValue) ?? Int64(exactly: n.doubleValue), size > 0 else {
                             throw ProviderError.unexpected("models.dev: invalid context size")
                         }
-                        guard let p = try rates(tier) else { continue }
+                        guard let p = try rates(tier) else {
+                            throw ProviderError.unexpected("models.dev: incomplete context price")
+                        }
                         tiers.append(.init(size: size, price: p))
                     }
-                    if tiers.isEmpty, let over = cost["context_over_200k"] as? [String: Any], let p = try rates(over) {
+                    if tiers.isEmpty, let raw = cost["context_over_200k"] {
+                        guard let over = raw as? [String: Any], let p = try rates(over) else {
+                            throw ProviderError.unexpected("models.dev: incomplete context price")
+                        }
                         tiers.append(.init(size: 200_000, price: p))
                     }
                     price.tiers = tiers.isEmpty ? nil : tiers.sorted { $0.size < $1.size }
@@ -183,10 +194,18 @@ public actor PricingService {
         }
     }
 
+    /// One malformed model must not discard every other cached price.
+    private struct CachedModel: Codable {
+        var price: ModelPrice?
+        init(_ price: ModelPrice) { self.price = price }
+        init(from decoder: Decoder) throws { price = try? ModelPrice(from: decoder) }
+        func encode(to encoder: Encoder) throws { try price.encode(to: encoder) }
+    }
+
     private struct CacheFile: Codable {
         var fetchedAt: Date?
         var lastAttempt: Date?
-        var prices: [String: [String: ModelPrice]]
+        var prices: [String: [String: CachedModel]]
         /// 2 since Long-context Prices. An older cache is used but fetched again right away.
         var format: Int?
     }
@@ -199,7 +218,7 @@ public actor PricingService {
         var valid = true
         for (k, v) in file.prices {
             guard let provider = ProviderID(rawValue: k) else { continue }
-            let checked = v.filter { $0.value.isValid }
+            let checked = v.compactMapValues { $0.price }.filter { $0.value.isValid }
             if checked.count != v.count { valid = false }
             prices[provider] = checked
         }
@@ -211,7 +230,7 @@ public actor PricingService {
     private func saveCache(_ t: PriceTable) {
         let file = CacheFile(
             fetchedAt: t.fetchedAt, lastAttempt: lastAttempt,
-            prices: Dictionary(uniqueKeysWithValues: t.prices.map { ($0.key.rawValue, $0.value) }),
+            prices: Dictionary(uniqueKeysWithValues: t.prices.map { ($0.key.rawValue, $0.value.mapValues(CachedModel.init)) }),
             format: 2)
         if let data = try? JSONEncoder().encode(file) {
             try? data.write(to: cacheURL, options: .atomic)
