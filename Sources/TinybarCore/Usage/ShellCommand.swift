@@ -221,11 +221,12 @@ public enum ShellCommand {
                 i += target ? 1 : 2
                 continue
             }
-            if prefixes.contains(w) {
+            let wrapper = basename(w)
+            if prefixes.contains(w) || (["sudo", "env", "nohup", "nice", "timeout", "gtimeout", "time"].contains(wrapper) && w.contains("/")) {
                 i += 1
                 // `timeout 30 cmd`, `env -i cmd`, `sudo -u x cmd`: skip the wrapper's own arguments.
-                while i < words.count, words[i].hasPrefix("-") || (w.hasSuffix("timeout") && words[i].first?.isNumber == true) {
-                    i += (wrapperArguments[w] ?? []).contains(words[i]) ? 2 : 1
+                while i < words.count, words[i].hasPrefix("-") || (wrapper.hasSuffix("timeout") && words[i].first?.isNumber == true) {
+                    i += (wrapperArguments[wrapper] ?? []).contains(words[i]) ? 2 : 1
                 }
                 continue
             }

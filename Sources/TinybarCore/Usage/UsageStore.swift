@@ -317,7 +317,7 @@ public actor UsageStore {
         if mode != .incremental {
             guard let cursor else { return (0, 0) }
             until = limit ?? cursor.offset
-        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.stamp.size,
+        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size > cursor.stamp.size || stamp == cursor.stamp,
            let state = cursor.state, let decoded = try? JSONDecoder().decode(CodexLogParser.self, from: state)
         {
             parser = decoded
@@ -373,7 +373,7 @@ public actor UsageStore {
         if mode == .backfill {
             guard let cursor else { return (0, 0) }
             until = limit ?? cursor.offset
-        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.stamp.size {
+        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size > cursor.stamp.size || stamp == cursor.stamp {
             offset = cursor.offset
             if let state = cursor.state, let decoded = try? JSONDecoder().decode(ClaudeLogParser.Session.self, from: state) {
                 session = decoded
@@ -433,19 +433,6 @@ public actor UsageStore {
         return (endOffset - offset, added)
     }
 
-    /// Streaming copies only ever grow, so the field-wise max is the final usage regardless of
-    /// the order copies are seen in.
-    private static func merged(_ a: UsageRecord, _ b: UsageRecord) -> UsageRecord {
-        var r = a
-        r.tokens = TokenCounts(
-            input: max(a.tokens.input, b.tokens.input),
-            output: max(a.tokens.output, b.tokens.output),
-            cacheWrite: max(a.tokens.cacheWrite, b.tokens.cacheWrite),
-            cacheRead: max(a.tokens.cacheRead, b.tokens.cacheRead))
-        if r.cwd == nil { r.cwd = b.cwd }
-        return r
-    }
-
     /// Records a message's usage and activity, replacing any earlier count for the same id.
     /// With `countTokens` false (backfill) the daily token totals are left alone.
     /// Returns true for a message seen for the first time.
@@ -457,10 +444,10 @@ public actor UsageStore {
 
         if let e = existing {
             let old = TokenCounts(input: e[4].int, output: e[5].int, cacheWrite: e[6].int, cacheRead: e[7].int)
-            let final = Self.merged(UsageRecord(timestamp: record.timestamp, model: record.model, cwd: record.cwd, tokens: old), record)
+            let final = old.mergingCopy(record.tokens)
             let oldStats = e[8].text.flatMap { try? JSONDecoder().decode(MessageStats.self, from: Data($0.utf8)) }
             let newStats = MessageStats(message).merged(with: oldStats)
-            let tokensChanged = final.tokens != old
+            let tokensChanged = final != old
             guard tokensChanged || newStats != oldStats else { return false }
 
             let day = e[0].text ?? ""
@@ -470,24 +457,24 @@ public actor UsageStore {
                 // Undo the old contribution, keeping its original day/model/project.
                 let project = e[3].text ?? ""
                 try addDaily(day: day, provider: provider, model: model, project: project, -old)
-                try addDaily(day: day, provider: provider, model: model, project: project, final.tokens)
+                try addDaily(day: day, provider: provider, model: model, project: project, final)
                 if let band = ContextBand.of(old) {
                     try addLong(day: day, provider: provider, model: model, project: project, band: band, -old)
                 }
-                if let band = ContextBand.of(final.tokens) {
-                    try addLong(day: day, provider: provider, model: model, project: project, band: band, final.tokens)
+                if let band = ContextBand.of(final) {
+                    try addLong(day: day, provider: provider, model: model, project: project, band: band, final)
                 }
             }
             var stats = StatBatch()
             stats.replace(
                 day: day, provider: provider, model: model,
-                old: oldStats?.contributions(tokens: old) ?? [:], new: newStats.contributions(tokens: final.tokens))
-            stats.addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, final.tokens.context)
+                old: oldStats?.contributions(tokens: old) ?? [:], new: newStats.contributions(tokens: final))
+            stats.addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, final.context)
             try write(stats)
             try db.run("""
             UPDATE claude_message SET input = ?, output = ?, cache_write = ?, cache_read = ?, stats = ? WHERE id = ?
-            """, [.int(final.tokens.input), .int(final.tokens.output), .int(final.tokens.cacheWrite),
-                  .int(final.tokens.cacheRead), .text(newStats.encoded), .text(id)])
+            """, [.int(final.input), .int(final.output), .int(final.cacheWrite),
+                  .int(final.cacheRead), .text(newStats.encoded), .text(id)])
             return false
         }
 
@@ -537,7 +524,10 @@ public actor UsageStore {
     @discardableResult
     public func backfillStats(progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult {
         guard try !hasCompletedStatsBackfill() else { return IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0) }
-        try db.transaction { try Self.armBackfill(db, key: "stats_backfill") }
+        try db.transaction {
+            try Self.armBackfill(db, key: "stats_backfill")
+            try relocateArchivedCursors()
+        }
         let cursors = try db.run("""
         SELECT path, provider, CAST(meta.value AS INTEGER) FROM file_cursor
         JOIN meta ON meta.key = 'stats_backfill_limit:' || path ORDER BY path
@@ -586,7 +576,10 @@ public actor UsageStore {
     @discardableResult
     public func backfillLongContext(progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult {
         guard try !hasCompletedLongContextBackfill() else { return IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0) }
-        try db.transaction { try Self.armBackfill(db, key: "long_context_backfill", codexOnly: true) }
+        try db.transaction {
+            try Self.armBackfill(db, key: "long_context_backfill", codexOnly: true)
+            try relocateArchivedCursors()
+        }
         let paths = try db.run("""
         SELECT path, CAST(meta.value AS INTEGER) FROM file_cursor
         JOIN meta ON meta.key = 'long_context_backfill_limit:' || path ORDER BY path
@@ -819,6 +812,19 @@ public actor UsageStore {
         var band: Int64 = 0
 
         func band(_ b: Int64) -> AggKey { AggKey(day: day, model: model, project: project, band: b) }
+    }
+
+    /// Backfill runs before normal ingestion, so find rollouts archived since the last poll.
+    private func relocateArchivedCursors() throws {
+        let paths = try db.run("SELECT path FROM file_cursor WHERE provider = 'codex'").compactMap { $0[0].text }
+        for path in paths where Self.stamp(path) == nil {
+            var root = URL(fileURLWithPath: path).deletingLastPathComponent()
+            while root.path != "/", root.lastPathComponent != "sessions" { root.deleteLastPathComponent() }
+            guard root.lastPathComponent == "sessions" else { continue }
+            let archive = root.deletingLastPathComponent().appendingPathComponent("archived_sessions")
+            let file = archive.appendingPathComponent((path as NSString).lastPathComponent).path
+            if let stamp = Self.stamp(file) { _ = try codexCursor(path: file, stamp: stamp) }
+        }
     }
 
     /// Archiving renames a rollout without changing its inode. Move its cursor and any frozen
