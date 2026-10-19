@@ -47,6 +47,7 @@ public struct StatsSummary: Sendable {
         public var end: String
         public var tokens: [ProviderID: Int64]
         public var cost: Double?
+        public var hasUnpriced: Bool = false
         public var prompts: Int64
         public var toolCalls: Int64
         public var agentMillis: Int64
@@ -141,6 +142,8 @@ public struct StatsSummary: Sendable {
     public var tokenCounts: TokenCounts
     public var tokensByProvider: [ProviderID: Int64]
     public var cost: Double?
+    /// True when some contributing rows have no price; cost is the known part only.
+    public var hasUnpriced: Bool = false
     public var bucket: StatsBucket
     public var bars: [Bar]
 
@@ -195,10 +198,10 @@ public struct StatsSummary: Sendable {
         if let n = range.days {
             first = DayKey.daysAgo(n - 1, from: now, calendar: calendar)
         } else {
-            first = allDays.first ?? today
+            first = min(allDays.first ?? today, today)
         }
-        let allUsage = usage.filter { $0.day >= first }
-        let allStats = stats.filter { $0.day >= first }
+        let allUsage = usage.filter { $0.day >= first && $0.day <= today }
+        let allStats = stats.filter { $0.day >= first && $0.day <= today }
         let usage = model.map { m in allUsage.filter { $0.model == m } } ?? allUsage
         let stats = model.map { m in allStats.filter { $0.model == m } } ?? allStats
 
@@ -232,9 +235,11 @@ public struct StatsSummary: Sendable {
         var byProvider: [ProviderID: Int64] = [:]
         var cost = 0.0
         var priced = false
+        var unpriced = false
         var dayTotals: [String: Int64] = [:]
         var input: Int64 = 0, cacheRead: Int64 = 0
         var projects: [String: Int64] = [:]
+        let aliases = UsageSummary.projectAliases(usage.map(\.project))
         for r in usage {
             let t = r.tokens.total
             tokens += t
@@ -242,14 +247,14 @@ public struct StatsSummary: Sendable {
             byProvider[r.provider, default: 0] += t
             dayTotals[r.day, default: 0] += t
             let c = prices.cost(r)
-            if let c { cost += c; priced = true }
+            if let c { cost += c; priced = true } else { unpriced = true }
             if let i = barIndex[r.day] {
                 bars[i].tokens[r.provider, default: 0] += t
-                if let c { bars[i].cost = (bars[i].cost ?? 0) + c }
+                if let c { bars[i].cost = (bars[i].cost ?? 0) + c } else { bars[i].hasUnpriced = true }
             }
             input += r.tokens.input + r.tokens.cacheWrite + r.tokens.cacheRead
             cacheRead += r.tokens.cacheRead
-            if !r.project.isEmpty { projects[ProjectResolver.displayName(r.project), default: 0] += t }
+            if !r.project.isEmpty { projects[aliases[r.project] ?? r.project, default: 0] += t }
         }
 
         var sums: [String: Int64] = [:]
@@ -333,7 +338,7 @@ public struct StatsSummary: Sendable {
         }.sorted { $0.calls > $1.calls }
 
         // Days with activity, as a set over all history, for streaks.
-        let (current, longest) = streaks(Set(streakDays ?? allDays), today: today, calendar: calendar)
+        let (current, longest) = streaks(Set((streakDays ?? allDays).filter { $0 <= today }), today: today, calendar: calendar)
         let busiest = dayTotals.max { $0.value < $1.value }
 
         // Token totals outlive the logs; activity is counted from the logs on disk. Where they
@@ -346,7 +351,7 @@ public struct StatsSummary: Sendable {
 
         return StatsSummary(
             range: range, model: model, firstDay: first, lastDay: today,
-            tokens: tokens, allTokens: allUsage.reduce(0) { $0 + $1.tokens.total }, tokenCounts: counts, tokensByProvider: byProvider, cost: priced ? cost : nil, bucket: bucket, bars: bars,
+            tokens: tokens, allTokens: allUsage.reduce(0) { $0 + $1.tokens.total }, tokenCounts: counts, tokensByProvider: byProvider, cost: priced ? cost : nil, hasUnpriced: unpriced, bucket: bucket, bars: bars,
             prompts: sums[StatKey.prompts] ?? 0,
             responses: sums[StatKey.responses] ?? 0,
             toolCalls: toolLines.reduce(0) { $0 + $1.calls }, tools: toolLines,
@@ -357,10 +362,10 @@ public struct StatsSummary: Sendable {
             cacheShare: input > 0 ? Double(cacheRead) / Double(input) : nil,
             models: models(allUsage, allStats, prices),
             commands: commands,
-            languages: languages.values.filter { $0.totalAdded + $0.removed > 0 }
+            languages: languages.values.filter { $0.totalAdded + $0.removed > 0 || $0.edits > 0 }
                 .sorted { $0.totalAdded != $1.totalAdded ? $0.totalAdded > $1.totalAdded : $0.name < $1.name },
             projects: projects.count,
-            topProjects: projects.map { Count(name: $0.key, value: $0.value) }.sorted { $0.value > $1.value },
+            topProjects: projects.map { Count(name: ProjectResolver.displayName($0.key), value: $0.value) }.sorted { $0.value > $1.value },
             heat: heat, weekdays: weekdays, activeDays: dayTotals.count, currentStreak: current, longestStreak: longest,
             busiestDay: busiest.map { (day: $0.key, tokens: $0.value) },
             activityCoverage: coverage)

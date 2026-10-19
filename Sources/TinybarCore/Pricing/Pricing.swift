@@ -35,7 +35,15 @@ public struct ModelPrice: Sendable, Hashable, Codable {
     /// tokens by Context Band, and each band takes the highest tier its requests all exceed.
     public func cost(_ total: TokenCounts, long: [Int64: TokenCounts]) -> Double {
         var c = cost(total)
-        for (band, t) in long {
+        var remaining = total
+        for (band, raw) in long.sorted(by: { $0.key < $1.key }) {
+            // Old or corrupt band rows must not price more tokens than the daily total holds.
+            let t = TokenCounts(
+                input: min(max(raw.input, 0), max(remaining.input, 0)),
+                output: min(max(raw.output, 0), max(remaining.output, 0)),
+                cacheWrite: min(max(raw.cacheWrite, 0), max(remaining.cacheWrite, 0)),
+                cacheRead: min(max(raw.cacheRead, 0), max(remaining.cacheRead, 0)))
+            remaining += -t
             guard let tier = tiers?.last(where: { $0.size <= band }) else { continue }
             c += tier.price.cost(t) - cost(t)
         }
@@ -56,7 +64,9 @@ public struct PriceTable: Sendable {
         let key = ModelName.normalize(model)
         if let exact = table[key] { return exact }
         // Dated snapshots ("claude-x-20250101") price like their base id.
-        if let dash = key.lastIndex(of: "-"), key[key.index(after: dash)...].allSatisfy(\.isNumber) {
+        if let dash = key.lastIndex(of: "-") {
+            let suffix = key[key.index(after: dash)...]
+            guard suffix.count == 8, suffix.allSatisfy(\.isNumber) else { return nil }
             return table[String(key[..<dash])]
         }
         return nil
@@ -109,6 +119,9 @@ public struct PriceTable: Sendable {
                 table[ModelName.normalize(id)] = price
             }
             prices[provider] = table
+        }
+        guard prices.values.contains(where: { !$0.isEmpty }) else {
+            throw ProviderError.unexpected("models.dev: no model prices")
         }
         return PriceTable(prices: prices, fetchedAt: fetchedAt)
     }
