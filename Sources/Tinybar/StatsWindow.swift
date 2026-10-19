@@ -113,7 +113,7 @@ struct StatsView: View {
         }
         .background(palette.canvas)
         .onExitCommand { picked = nil }
-        .task(id: "\(rangeRaw)|\(picked ?? "")|\(model.isRefreshing)") {
+        .task(id: "\(rangeRaw)|\(picked ?? "")|\(model.lastUpdated?.timeIntervalSince1970 ?? 0)|\(model.isRefreshing)") {
             guard !model.isRefreshing else { return }
             let next = await model.statsSummary(range, model: picked)
             guard !Task.isCancelled else { return }
