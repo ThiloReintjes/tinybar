@@ -32,7 +32,7 @@ public final class ProjectResolver: @unchecked Sendable {
         let standardized = (cwd as NSString).standardizingPath
         var dir = standardized
         while dir != "/" && !dir.isEmpty {
-            if let cached = cache[dir] { return cached }
+            if let cached = cache[dir], cached.hasPrefix("/") { return cached }
             let git = (dir as NSString).appendingPathComponent(".git")
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: git, isDirectory: &isDir) {
@@ -57,6 +57,7 @@ public final class ProjectResolver: @unchecked Sendable {
         if !gitdir.hasPrefix("/") {
             gitdir = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(gitdir)
         }
+        gitdir = (gitdir as NSString).standardizingPath
         guard let range = gitdir.range(of: "/.git/worktrees/") else { return nil }
         return String(gitdir[..<range.lowerBound])
     }

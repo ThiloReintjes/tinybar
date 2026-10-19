@@ -3,6 +3,12 @@ import Foundation
 extension TokenCounts {
     /// The context a response read: everything sent in, cached or not.
     public var context: Int64 { input + cacheWrite + cacheRead }
+
+    /// Keep a whole usage snapshot: GPT streams can reclassify preliminary input as cached.
+    /// More output means a more complete copy; on a tie, the later copy wins.
+    func mergingCopy(_ later: TokenCounts) -> TokenCounts {
+        later.output >= output ? later : self
+    }
 }
 
 /// One Claude message as seen across its streamed lines in a single read of a file.
@@ -24,11 +30,7 @@ struct ClaudeMessage {
     }
 
     mutating func merge(_ m: ClaudeLogParser.Message) {
-        record.tokens = TokenCounts(
-            input: max(record.tokens.input, m.entry.record.tokens.input),
-            output: max(record.tokens.output, m.entry.record.tokens.output),
-            cacheWrite: max(record.tokens.cacheWrite, m.entry.record.tokens.cacheWrite),
-            cacheRead: max(record.tokens.cacheRead, m.entry.record.tokens.cacheRead))
+        record.tokens = record.tokens.mergingCopy(m.entry.record.tokens)
         if record.cwd == nil { record.cwd = m.entry.record.cwd }
         for t in m.tools where tools[t.id] == nil { tools[t.id] = t.name }
         start = min(start, m.at)
@@ -56,6 +58,8 @@ struct MessageStats: Codable, Equatable {
     var e: Int64
     var r: Int64?
     var p: Int64?
+    /// The hour originally counted, unaffected by later timezone changes.
+    var h: Int?
 
     init(_ m: ClaudeMessage) {
         t = m.tools
@@ -63,6 +67,7 @@ struct MessageStats: Codable, Equatable {
         e = m.end.millis
         r = m.request?.millis
         p = m.stepStart?.millis
+        h = Calendar.current.component(.hour, from: m.start)
     }
 
     func merged(with old: MessageStats?) -> MessageStats {
@@ -73,6 +78,7 @@ struct MessageStats: Codable, Equatable {
         m.e = max(old.e, e)
         m.r = [old.r, r].compactMap { $0 }.min()
         m.p = [old.p, p].compactMap { $0 }.min()
+        m.h = old.h ?? h
         return m
     }
 
@@ -81,7 +87,7 @@ struct MessageStats: Codable, Equatable {
     /// The counters this message adds, keyed by stat key.
     func contributions(tokens: TokenCounts) -> [String: Int64] {
         var c: [String: Int64] = [StatKey.responses: 1]
-        let hour = Calendar.current.component(.hour, from: Date(timeIntervalSince1970: Double(s) / 1000))
+        let hour = h ?? Calendar.current.component(.hour, from: Date(timeIntervalSince1970: Double(s) / 1000))
         c[StatKey.hour(hour)] = 1
         c[StatKey.hourTokens(hour)] = tokens.total
         for name in t.values { c[StatKey.tool(name), default: 0] += 1 }

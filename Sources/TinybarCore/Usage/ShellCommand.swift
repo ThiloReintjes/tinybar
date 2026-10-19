@@ -21,7 +21,11 @@ public enum ShellCommand {
         if argv.count >= 3, ["bash", "zsh", "sh"].contains(basename(argv[0])), ["-lc", "-c"].contains(argv[1]) {
             return argv[2]
         }
-        return argv.joined(separator: " ")
+        if argv.count == 1 { return argv[0] }  // a logged script, rather than an argv
+        return argv.map { word in
+            if !word.isEmpty, word.allSatisfy({ $0.isLetter || $0.isNumber || "_./:-=".contains($0) }) { return word }
+            return "'" + word.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+        }.joined(separator: " ")
     }
 
     struct Parsed: Equatable {
@@ -44,7 +48,7 @@ public enum ShellCommand {
             result.programs.insert(name)
             if name == "git", let sub = gitSubcommand(segment.words[(at + 1)...]) { result.git.insert(sub) }
             if segment.afterPipe, name == "head" || name == "tail" { result.headTail = true }
-            switch inline(segment.words) {
+            switch inline(segment.words, at: at) {
             case .python?: result.inlinePython = true
             case .js?: result.inlineJS = true
             case nil: break
@@ -120,6 +124,11 @@ public enum ShellCommand {
             case UInt8(ascii: "#") where !inWord:
                 while i < b.count, b[i] != 0x0A { i += 1 }
             case UInt8(ascii: "<") where i + 1 < b.count && b[i + 1] == UInt8(ascii: "<"):
+                // An adjacent descriptor belongs to this redirection, not the executable.
+                if !word.isEmpty, word.allSatisfy({ (48...57).contains($0) }) {
+                    word.removeAll(keepingCapacity: true)
+                    inWord = false
+                }
                 if i + 2 < b.count, b[i + 2] == UInt8(ascii: "<") {
                     // A here-string: its text is an argument.
                     endWord()
@@ -134,11 +143,28 @@ public enum ShellCommand {
                 if i < b.count, b[i] == UInt8(ascii: "-") { tabs = true; i += 1 }
                 while i < b.count, b[i] == UInt8(ascii: " ") { i += 1 }
                 var delimiter: [UInt8] = []
-                while i < b.count, !isDelimiterEnd(b[i]) {
-                    if b[i] != UInt8(ascii: "'"), b[i] != UInt8(ascii: "\""), b[i] != UInt8(ascii: "\\") { delimiter.append(b[i]) }
+                var quote: UInt8?
+                while i < b.count {
+                    let c = b[i]
+                    if quote == nil, isDelimiterEnd(c) { break }
+                    if c == quote { quote = nil }
+                    else if quote == nil, c == UInt8(ascii: "'") { quote = c }
+                    else if quote == nil, c == UInt8(ascii: "\"") { quote = c }
+                    else if c == UInt8(ascii: "\\"), quote != UInt8(ascii: "'"), i + 1 < b.count {
+                        i += 1; delimiter.append(b[i])
+                    } else { delimiter.append(c) }
                     i += 1
                 }
+                seg.words.append(String(decoding: delimiter, as: UTF8.self))
                 if !delimiter.isEmpty { heredocs.append((delimiter, tabs)) }
+            case UInt8(ascii: "<"), UInt8(ascii: ">"):
+                // A descriptor may touch its operator; an executable or argument may not.
+                if !word.allSatisfy({ (48...57).contains($0) || $0 == UInt8(ascii: "&") }) { endWord() }
+                while i < b.count, [UInt8(ascii: "<"), UInt8(ascii: ">"), UInt8(ascii: "&"), UInt8(ascii: "|")].contains(b[i]) {
+                    word.append(b[i]); i += 1
+                }
+                inWord = true
+                endWord()
             case UInt8(ascii: "|"):
                 if i + 1 < b.count, b[i + 1] == UInt8(ascii: "|") {
                     endSegment()
@@ -152,6 +178,7 @@ public enum ShellCommand {
                 if (i > 0 && (b[i - 1] == UInt8(ascii: ">") || b[i - 1] == UInt8(ascii: "<")))
                     || (i + 1 < b.count && b[i + 1] == UInt8(ascii: ">"))
                 {
+                    if i + 1 < b.count, b[i + 1] == UInt8(ascii: ">") { endWord() }
                     word.append(c)
                     inWord = true
                     i += 1
@@ -192,7 +219,15 @@ public enum ShellCommand {
         "cd", "export", "set", "unset", "local", "source", ".", "alias", "return", "exit", "shift", "read",
         "eval", "trap", "wait", "declare", "typeset", "true", "false", ":", "pushd", "popd", "[", "[[",
         "test", "break", "continue", "let", "ulimit", "umask", "setopt", "unsetopt", "readonly", "type",
-        "hash", "jobs", "fg", "bg", "disown", "kill", "shopt", "<<", "<<<",
+        "hash", "jobs", "fg", "bg", "disown", "kill", "shopt", "echo", "printf", "pwd", "<<", "<<<",
+    ]
+
+    private static let wrapperArguments: [String: Set<String>] = [
+        "sudo": ["-u", "-g", "-h", "-p", "-C", "-T", "-R", "-D", "--user", "--group", "--host"],
+        "env": ["-u", "-C", "-S", "--unset", "--chdir", "--split-string"],
+        "timeout": ["-s", "-k", "--signal", "--kill-after"],
+        "gtimeout": ["-s", "-k", "--signal", "--kill-after"],
+        "nice": ["-n", "--adjustment"], "time": ["-o", "-f", "--output", "--format"],
     ]
 
     /// The program a simple command runs, and the index of its word.
@@ -209,11 +244,12 @@ public enum ShellCommand {
                 i += target ? 1 : 2
                 continue
             }
-            if prefixes.contains(w) {
+            let wrapper = basename(w)
+            if prefixes.contains(w) || (["sudo", "env", "nohup", "nice", "timeout", "gtimeout", "time"].contains(wrapper) && w.contains("/")) {
                 i += 1
                 // `timeout 30 cmd`, `env -i cmd`, `sudo -u x cmd`: skip the wrapper's own arguments.
-                while i < words.count, words[i].hasPrefix("-") || (w.hasSuffix("timeout") && words[i].first?.isNumber == true) {
-                    i += ["-u", "-g", "-n", "-s", "-k", "-C"].contains(words[i]) ? 2 : 1
+                while i < words.count, words[i].hasPrefix("-") || (wrapper.hasSuffix("timeout") && words[i].first?.isNumber == true) {
+                    i += (wrapperArguments[wrapper] ?? []).contains(words[i]) ? 2 : 1
                 }
                 continue
             }
@@ -227,9 +263,9 @@ public enum ShellCommand {
     /// attached (`>out.txt`) rather than the next word.
     private static func redirection(_ w: String) -> Bool? {
         let op = w.drop { $0.isNumber || $0 == "&" }
-        guard op.hasPrefix(">") || op.hasPrefix("<"), !w.hasPrefix("<<") else { return nil }
+        guard op.hasPrefix(">") || op.hasPrefix("<") else { return nil }
         let rest = op.drop { $0 == ">" || $0 == "<" || $0 == "&" || $0 == "|" }
-        return !rest.isEmpty || op.contains("&")
+        return !rest.isEmpty
     }
 
     private static func isAssignment(_ w: String) -> Bool {
@@ -277,25 +313,23 @@ public enum ShellCommand {
 
     /// Code passed to an interpreter in the command itself (`python3 -c`, `python3 - <<'PY'`,
     /// `node -e`), rather than a saved script.
-    private static func inline(_ words: [String]) -> Language? {
-        for (i, w) in words.enumerated() {
-            let n = name(w)
-            let language: Language
-            let flags: Set<String>
-            switch n {
-            case "python": language = .python; flags = ["-c", "-"]
-            case "node", "bun", "deno", "tsx": language = .js; flags = ["-e", "--eval", "-p", "--print", "-", "eval"]
-            default: continue
-            }
-            for a in words[(i + 1)...] {
-                if flags.contains(a) || a == "<<" { return language }
-                if a.hasPrefix("-"), !["-m", "--input-type"].contains(a) { continue }
-                break
-            }
-            // `python3 <<'PY'` with no flag: the heredoc marker is the next word.
+    private static func inline(_ words: [String], at programIndex: Int) -> Language? {
+        var i = programIndex
+        // `uv run python -c ...` is a runner; an argument like `rg python -c ...` isn't.
+        if name(words[i]) == "uv", i + 2 < words.count, words[i + 1] == "run" { i += 2 }
+        let language: Language
+        let flags: Set<String>
+        switch name(words[i]) {
+        case "python": language = .python; flags = ["-c", "-"]
+        case "node", "bun", "deno", "tsx": language = .js; flags = ["-e", "--eval", "-p", "--print", "-", "eval"]
+        default: return nil
+        }
+        for a in words[(i + 1)...] {
+            if flags.contains(a) || a == "<<" { return language }
+            if a.hasPrefix("-"), !["-m", "--input-type"].contains(a) { continue }
             return nil
         }
-        return nil
+        return words[..<programIndex].contains("<<") ? language : nil
     }
 }
 
