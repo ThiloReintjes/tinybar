@@ -27,9 +27,24 @@ import Testing
     for cost in costs {
         let data = Data("{\"openai\":{\"models\":{\"m\":{\"cost\":\(cost)}}}}".utf8)
         #expect(throws: (any Error).self) { try PriceTable.parse(data, fetchedAt: nil) }
+        let mixed = Data("{\"openai\":{\"models\":{\"bad\":{\"cost\":\(cost)},\"good\":{\"cost\":{\"input\":2,\"output\":10}}}}}".utf8)
+        let table = try PriceTable.parse(mixed, fetchedAt: nil)
+        #expect(table.price(provider: .codex, model: "bad") == nil)
+        #expect(table.price(provider: .codex, model: "good")?.input == 2)
     }
     let free = try PriceTable.parse(Data(#"{"openai":{"models":{"m":{"cost":{"input":0,"output":0,"cache_read":0,"cache_write":0}}}}}"#.utf8), fetchedAt: nil)
     #expect(free.price(provider: .codex, model: "m")?.input == 0)
+}
+
+@Test func contextTierSizesMustBePositiveIntegers() throws {
+    for size in ["true", "false", "-1", "0", "272000.5", "9223372036854775808", "1e100"] {
+        let data = Data("{\"openai\":{\"models\":{\"m\":{\"cost\":{\"input\":2,\"output\":10,\"tiers\":[{\"input\":4,\"output\":20,\"tier\":{\"type\":\"context\",\"size\":\(size)}}]}}}}}".utf8)
+        #expect(throws: (any Error).self) { try PriceTable.parse(data, fetchedAt: nil) }
+    }
+    for size in ["272000", "272000.0", "9223372036854775807"] {
+        let data = Data("{\"openai\":{\"models\":{\"m\":{\"cost\":{\"input\":2,\"output\":10,\"tiers\":[{\"input\":4,\"output\":20,\"tier\":{\"type\":\"context\",\"size\":\(size)}}]}}}}}".utf8)
+        #expect(try PriceTable.parse(data, fetchedAt: nil).price(provider: .codex, model: "m")?.tiers?.count == 1)
+    }
 }
 
 @Test func malformedIncidentRecordsAndNativeComponentsThrow() {

@@ -129,6 +129,12 @@ import Testing
     #expect(unknown.evaluate(snapshot(0, next), now: reset) == [.reset(provider: .claude, window: "Weekly")])
     #expect(unknown.evaluate(snapshot(0, next), now: reset).isEmpty)
     #expect(unknown.evaluate(snapshot(96, next), now: reset).count == 1)
+
+    var banked = LimitAlertPlanner()
+    #expect(banked.evaluate(snapshot(96, reset), now: now).count == 1)
+    let early = reset.addingTimeInterval(240)
+    #expect(banked.evaluate(snapshot(0, early), now: now) == [.reset(provider: .claude, window: "Weekly")])
+    #expect(banked.evaluate(snapshot(96, early), now: now).count == 1)
 }
 
 @Test func projectsKeepRootIdentityAndLanguagesKeepEmptyEdits() {

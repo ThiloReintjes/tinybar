@@ -29,8 +29,8 @@ public struct LimitAlertPlanner: Codable, Sendable, Equatable {
             let key = "\(snapshot.provider.rawValue)/\(w.id)"
             var state = cycles[key] ?? CycleState(resetsAt: w.resetsAt, notified: [])
 
-            let resetWithoutAnchor = state.resetsAt == nil && !state.notified.isEmpty && w.usedPercent == 0
-            if resetWithoutAnchor || Self.isNewCycle(previous: state.resetsAt, current: w.resetsAt, now: now) {
+            let observedReset = !state.notified.isEmpty && w.usedPercent == 0
+            if observedReset || Self.isNewCycle(previous: state.resetsAt, current: w.resetsAt, now: now) {
                 if state.notified.contains(90) {
                     alerts.append(.reset(provider: snapshot.provider, window: w.title))
                 }

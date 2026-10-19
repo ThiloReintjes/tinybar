@@ -23,6 +23,12 @@ public struct ModelPrice: Sendable, Hashable, Codable {
         self.tiers = tiers
     }
 
+    var isValid: Bool {
+        [input, output, cacheRead, cacheWrite].compactMap { $0 }.allSatisfy { $0.isFinite && $0 >= 0 }
+            && (tiers?.allSatisfy { $0.size > 0 && $0.price.isValid } ?? true)
+            && (tiers?.map(\.size) == tiers?.map(\.size).sorted())
+    }
+
     public func cost(_ t: TokenCounts) -> Double {
         let m = 1_000_000.0
         return Double(t.input) * input / m
@@ -103,21 +109,27 @@ public struct PriceTable: Sendable {
             guard let models = (root[key] as? [String: Any])?["models"] as? [String: Any] else { continue }
             var table: [String: ModelPrice] = [:]
             for (id, value) in models {
-                guard let cost = (value as? [String: Any])?["cost"] as? [String: Any], var price = try rates(cost)
-                else { continue }
-                // `tiers` lists context tiers; older entries only carry `context_over_200k`.
-                var tiers: [ModelPrice.Tier] = []
-                for tier in cost["tiers"] as? [[String: Any]] ?? [] {
-                    guard let spec = tier["tier"] as? [String: Any], spec["type"] as? String == "context",
-                          let size = (spec["size"] as? NSNumber)?.int64Value, let p = try rates(tier)
+                do {
+                    guard let cost = (value as? [String: Any])?["cost"] as? [String: Any], var price = try rates(cost)
                     else { continue }
-                    tiers.append(.init(size: size, price: p))
-                }
-                if tiers.isEmpty, let over = cost["context_over_200k"] as? [String: Any], let p = try rates(over) {
-                    tiers.append(.init(size: 200_000, price: p))
-                }
-                price.tiers = tiers.isEmpty ? nil : tiers.sorted { $0.size < $1.size }
-                table[ModelName.normalize(id)] = price
+                    // `tiers` lists context tiers; older entries only carry `context_over_200k`.
+                    var tiers: [ModelPrice.Tier] = []
+                    for tier in cost["tiers"] as? [[String: Any]] ?? [] {
+                        guard let spec = tier["tier"] as? [String: Any], spec["type"] as? String == "context" else { continue }
+                        guard let n = spec["size"] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+                              n.doubleValue.isFinite,
+                              let size = Int64(n.stringValue) ?? Int64(exactly: n.doubleValue), size > 0 else {
+                            throw ProviderError.unexpected("models.dev: invalid context size")
+                        }
+                        guard let p = try rates(tier) else { continue }
+                        tiers.append(.init(size: size, price: p))
+                    }
+                    if tiers.isEmpty, let over = cost["context_over_200k"] as? [String: Any], let p = try rates(over) {
+                        tiers.append(.init(size: 200_000, price: p))
+                    }
+                    price.tiers = tiers.isEmpty ? nil : tiers.sorted { $0.size < $1.size }
+                    table[ModelName.normalize(id)] = price
+                } catch { continue }
             }
             prices[provider] = table
         }
@@ -184,9 +196,16 @@ public actor PricingService {
               let file = try? JSONDecoder().decode(CacheFile.self, from: data)
         else { return nil }
         var prices: [ProviderID: [String: ModelPrice]] = [:]
-        for (k, v) in file.prices { if let p = ProviderID(rawValue: k) { prices[p] = v } }
-        lastAttempt = file.format == 2 ? file.lastAttempt : nil
-        return PriceTable(prices: prices, fetchedAt: file.format == 2 ? file.fetchedAt : nil)
+        var valid = true
+        for (k, v) in file.prices {
+            guard let provider = ProviderID(rawValue: k) else { continue }
+            let checked = v.filter { $0.value.isValid }
+            if checked.count != v.count { valid = false }
+            prices[provider] = checked
+        }
+        if file.fetchedAt != nil, !prices.values.contains(where: { !$0.isEmpty }) { valid = false }
+        lastAttempt = valid && file.format == 2 ? file.lastAttempt : nil
+        return PriceTable(prices: prices, fetchedAt: valid && file.format == 2 ? file.fetchedAt : nil)
     }
 
     private func saveCache(_ t: PriceTable) {

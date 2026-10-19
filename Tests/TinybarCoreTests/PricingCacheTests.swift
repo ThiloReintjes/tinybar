@@ -58,3 +58,28 @@ private final class FailedPricesProtocol: URLProtocol, @unchecked Sendable {
     _ = await coldRestart.refreshIfNeeded()
     #expect(FailedPricesProtocol.count == 3)
 }
+
+@Test func invalidCachedPricesAreDroppedAndMadeStale() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = dir.appendingPathComponent("prices.json")
+    let now = Date().timeIntervalSinceReferenceDate
+    let bad = [
+        #"{"input":-2,"output":10}"#,
+        #"{"input":2,"output":10,"cacheRead":-1}"#,
+        #"{"input":2,"output":10,"tiers":[{"size":200000,"price":{"input":-4,"output":20}}]}"#,
+        #"{"input":2,"output":10,"tiers":[{"size":-1,"price":{"input":4,"output":20}}]}"#,
+    ]
+    for price in bad {
+        let data = Data("{\"format\":2,\"fetchedAt\":\(now),\"lastAttempt\":\(now),\"prices\":{\"codex\":{\"bad\":\(price),\"good\":{\"input\":2,\"output\":10}}}}".utf8)
+        try data.write(to: cache)
+        let table = await PricingService(cacheURL: cache).current()
+        #expect(table.price(provider: .codex, model: "bad") == nil)
+        #expect(table.price(provider: .codex, model: "good")?.input == 2)
+        #expect(table.fetchedAt == nil)
+    }
+    try Data("{\"format\":2,\"fetchedAt\":\(now),\"prices\":{}}".utf8).write(to: cache)
+    let empty = await PricingService(cacheURL: cache).current()
+    #expect(empty.fetchedAt == nil)
+}
