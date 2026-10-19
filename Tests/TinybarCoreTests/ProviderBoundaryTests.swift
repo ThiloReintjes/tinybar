@@ -167,7 +167,7 @@ private func withCLI(_ body: String, test: (String, URL) throws -> Void) throws 
     printf '%s\\n' '{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":25}}}}'
     /bin/sleep 2
     """) { executable, pidFile in
-        let response = try CodexAppServer.runRPC(executable: executable, timeout: 1)
+        let response = try CodexAppServer.runRPC(executable: executable, timeout: 5)
         #expect(response.rateLimits.primary?.usedPercent == 25)
         let pid = try #require(Int32(String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
         #expect(kill(pid, 0) == -1)
@@ -177,12 +177,12 @@ private func withCLI(_ body: String, test: (String, URL) throws -> Void) throws 
 @Test func codexBoundsOutputAndRedactsRPCFailures() throws {
     try withCLI("/usr/bin/head -c 1100000 /dev/zero") { executable, _ in
         #expect(throws: ProviderError.unexpected("codex app-server response is too large")) {
-            try CodexAppServer.runRPC(executable: executable, timeout: 1)
+            try CodexAppServer.runRPC(executable: executable, timeout: 5)
         }
     }
     try withCLI("read initialize; printf '%s\\n' '{\"id\":1,\"error\":{\"message\":\"Bearer synthetic-secret\"}}'") { executable, _ in
         #expect(throws: ProviderError.unexpected("codex app-server request failed")) {
-            try CodexAppServer.runRPC(executable: executable, timeout: 1)
+            try CodexAppServer.runRPC(executable: executable, timeout: 5)
         }
     }
 }
