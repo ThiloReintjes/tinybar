@@ -69,6 +69,7 @@ final class Updater {
         guard let latest = try? await ReleaseCheck.latest() else { return nil }
         let isFirstSighting = known?.version != latest.version
         known = latest
+        if case .preparing = state { return isNewer(latest) && isFirstSighting ? latest : nil }
         guard isNewer(latest) else {
             state = .none
             return nil
@@ -117,7 +118,7 @@ final class Updater {
                 state = .failed(release, outcome!)
                 return
             }
-            swap(brew: brew)
+            swap(brew: brew, release: release)
         }
     }
 
@@ -138,7 +139,7 @@ final class Updater {
     }
 
     /// Hands over to a script that outlives Tinybar, then quits.
-    private func swap(brew: String) {
+    private func swap(brew: String, release: Release) {
         let app = Bundle.main.bundleURL.path
         let script = """
         while /bin/kill -0 "$PID" 2>/dev/null; do /bin/sleep 0.2; done
@@ -162,7 +163,7 @@ final class Updater {
         do {
             try process.run()
         } catch {
-            state = .failed(release!, "Couldn't start Homebrew.")
+            state = .failed(release, "Couldn't start Homebrew.")
             return
         }
         NSApp.terminate(nil)

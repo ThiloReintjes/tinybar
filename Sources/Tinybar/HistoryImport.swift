@@ -24,9 +24,11 @@ enum HistoryImport {
                 switch job {
                 case .importHistory:
                     if try await store.hasCompletedInitialImport() { exit(0) }
+                    // An older import may have stopped before setting its marker. Complete the
+                    // store's pending migrations before reading new bytes; each marks itself done.
+                    if !(try await store.hasCompletedStatsBackfill()) { _ = try await store.backfillStats(progress: report) }
+                    if !(try await store.hasCompletedLongContextBackfill()) { _ = try await store.backfillLongContext(progress: report) }
                     _ = try await store.ingestAll(progress: report)
-                    try await store.markStatsBackfillDone()
-                    try await store.markLongContextBackfillDone()
                     try await store.markInitialImportDone()
                 case .backfillStats:
                     if !(try await store.hasCompletedStatsBackfill()) { _ = try await store.backfillStats(progress: report) }
