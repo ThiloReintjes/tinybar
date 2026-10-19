@@ -243,6 +243,10 @@ struct StatsCard: View {
                         .foregroundStyle(palette.ink2)
                 }
                 .foregroundStyle(palette.ink)
+            } else {
+                Text("Loading stats…")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(palette.ink2)
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
