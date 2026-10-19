@@ -15,13 +15,14 @@ public struct CursorProvider: UsageProvider {
 
     /// Auto-enabled only when Cursor.app holds a login; the browser path is opt-in via Settings.
     public func isConfigured() -> Bool {
-        CursorAppAuth.accessToken() != nil
+        CursorAppAuth.storedAccessToken() != nil
     }
 
     public func fetch() async throws -> ProviderSnapshot {
         var lastError = ProviderError.notConfigured
-        if let token = CursorAppAuth.accessToken() {
-            if let cookie = CursorAppAuth.cookieHeader(accessToken: token) {
+        if let stored = CursorAppAuth.storedAccessToken() {
+            if let token = CursorAppAuth.accessToken(stored),
+               let cookie = CursorAppAuth.cookieHeader(accessToken: token) {
                 do {
                     return try await CursorUsageAPI.fetch(cookieHeader: cookie, source: .cli, session: session)
                 } catch let error as ProviderError {
@@ -50,11 +51,15 @@ enum CursorAppAuth {
             .appendingPathComponent("Cursor/User/globalStorage/state.vscdb")
     }
 
-    /// The token if present and not about to expire.
-    static func accessToken(now: Date = Date()) -> String? {
-        guard let token = readItem("cursorAuth/accessToken"), !token.isEmpty,
-              let payload = jwtPayload(token)
-        else { return nil }
+    /// Presence keeps an expired login visible; usability is checked only when fetching.
+    static func storedAccessToken(db: URL = stateDB) -> String? {
+        guard let token = readItem("cursorAuth/accessToken", db: db), !token.isEmpty else { return nil }
+        return token
+    }
+
+    /// The token if valid and not about to expire.
+    static func accessToken(_ token: String, now: Date = Date()) -> String? {
+        guard let payload = jwtPayload(token) else { return nil }
         if let exp = (payload["exp"] as? NSNumber)?.doubleValue, Date(timeIntervalSince1970: exp) < now.addingTimeInterval(60) {
             return nil
         }
