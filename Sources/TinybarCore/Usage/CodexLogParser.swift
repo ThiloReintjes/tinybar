@@ -196,7 +196,7 @@ public struct CodexLogParser: Sendable, Codable {
             return .request
         }
         if has(#""type":"user_message""#) { return .prompt }
-        if has(#""type":"local_shell_call""#) { return .stat(StatKey.tool("Shell")) }
+        if has(#""type":"local_shell_call""#) { return .values(commandValues(argv: stringArray("command", in: line), exitCode: nil)) }
         if has(#""type":"web_search_call""#) { return .stat(StatKey.tool("Web")) }
         if has(#""type":"custom_tool_call""#) || has(#""type":"function_call""#) {
             // Newer versions' wrappers; the actions inside them arrive as items. Codex makes one call
@@ -394,7 +394,8 @@ public struct CodexLogParser: Sendable, Codable {
             default: break
             }
         case ("response_item", "local_shell_call"):
-            tool("Shell")
+            let action = payload["action"] as? [String: Any]
+            emit(Self.commandValues(argv: action?["command"] as? [String], exitCode: nil))
         case ("response_item", "web_search_call"):
             tool("Web")
         case ("response_item", "function_call"), ("response_item", "custom_tool_call"):

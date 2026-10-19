@@ -138,12 +138,28 @@ public enum ShellCommand {
                 if i < b.count, b[i] == UInt8(ascii: "-") { tabs = true; i += 1 }
                 while i < b.count, b[i] == UInt8(ascii: " ") { i += 1 }
                 var delimiter: [UInt8] = []
-                while i < b.count, !isDelimiterEnd(b[i]) {
-                    if b[i] != UInt8(ascii: "'"), b[i] != UInt8(ascii: "\""), b[i] != UInt8(ascii: "\\") { delimiter.append(b[i]) }
+                var quote: UInt8?
+                while i < b.count {
+                    let c = b[i]
+                    if quote == nil, isDelimiterEnd(c) { break }
+                    if c == quote { quote = nil }
+                    else if quote == nil, c == UInt8(ascii: "'") { quote = c }
+                    else if quote == nil, c == UInt8(ascii: "\"") { quote = c }
+                    else if c == UInt8(ascii: "\\"), quote != UInt8(ascii: "'"), i + 1 < b.count {
+                        i += 1; delimiter.append(b[i])
+                    } else { delimiter.append(c) }
                     i += 1
                 }
                 seg.words.append(String(decoding: delimiter, as: UTF8.self))
                 if !delimiter.isEmpty { heredocs.append((delimiter, tabs)) }
+            case UInt8(ascii: "<"), UInt8(ascii: ">"):
+                // A descriptor may touch its operator; an executable or argument may not.
+                if !word.allSatisfy({ (48...57).contains($0) || $0 == UInt8(ascii: "&") }) { endWord() }
+                while i < b.count, [UInt8(ascii: "<"), UInt8(ascii: ">"), UInt8(ascii: "&"), UInt8(ascii: "|")].contains(b[i]) {
+                    word.append(b[i]); i += 1
+                }
+                inWord = true
+                endWord()
             case UInt8(ascii: "|"):
                 if i + 1 < b.count, b[i + 1] == UInt8(ascii: "|") {
                     endSegment()
@@ -157,6 +173,7 @@ public enum ShellCommand {
                 if (i > 0 && (b[i - 1] == UInt8(ascii: ">") || b[i - 1] == UInt8(ascii: "<")))
                     || (i + 1 < b.count && b[i + 1] == UInt8(ascii: ">"))
                 {
+                    if i + 1 < b.count, b[i + 1] == UInt8(ascii: ">") { endWord() }
                     word.append(c)
                     inWord = true
                     i += 1
@@ -243,7 +260,7 @@ public enum ShellCommand {
         let op = w.drop { $0.isNumber || $0 == "&" }
         guard op.hasPrefix(">") || op.hasPrefix("<") else { return nil }
         let rest = op.drop { $0 == ">" || $0 == "<" || $0 == "&" || $0 == "|" }
-        return !rest.isEmpty || op.contains("&")
+        return !rest.isEmpty
     }
 
     private static func isAssignment(_ w: String) -> Bool {
@@ -305,9 +322,9 @@ public enum ShellCommand {
         for a in words[(i + 1)...] {
             if flags.contains(a) || a == "<<" { return language }
             if a.hasPrefix("-"), !["-m", "--input-type"].contains(a) { continue }
-            break
+            return nil
         }
-        return nil
+        return words[..<programIndex].contains("<<") ? language : nil
     }
 }
 
