@@ -688,7 +688,7 @@ private struct UsagePanel: View {
                                 .tracking(-0.5)
                                 .monospacedDigit()
                                 .help(summary.hasUnpriced
-                                    ? "Some models have no known price. Their tokens are not included in this cost."
+                                    ? "Some models have no known price, so their tokens aren't included."
                                     : "What these tokens would cost at current API prices.")
                             Text(range == .today ? "at API prices, so far today" : "at API prices")
                                 .font(.system(size: 11)).foregroundStyle(.secondary)

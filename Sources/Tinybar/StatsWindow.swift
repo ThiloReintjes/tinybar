@@ -600,15 +600,16 @@ struct TokensHero: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(palette.ink2)
                 Spacer()
-                if let cost = summary.cost {
+                if summary.tokens > 0 {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("$" + Int(cost.rounded()).formatted(.number)).font(.system(size: 16, weight: .semibold)).monospacedDigit()
+                        Text(StatsText.headlineCost(summary.cost, partial: summary.hasUnpriced))
+                            .font(.system(size: 16, weight: .semibold)).monospacedDigit()
                             .contentTransition(.numericText())
                         Text("at API prices").font(.system(size: 16, weight: .medium)).foregroundStyle(palette.ink2)
                     }
                     .statsTip(StatsTip(
                         id: "cost", title: "At API prices",
-                        note: "What these tokens would cost at the providers' pay-as-you-go API prices. Your subscription doesn't charge per token."))
+                        note: StatsText.costNote(summary.cost, partial: summary.hasUnpriced)))
                 }
             }
             HStack(spacing: 14) {
@@ -1150,6 +1151,23 @@ struct SectionTitle: View {
 // MARK: Text
 
 enum StatsText {
+    /// Whole dollars for the headline; "+" when some models have no known price, "—" when none do.
+    static func headlineCost(_ c: Double?, partial: Bool) -> String {
+        guard let c else { return "—" }
+        return "$" + Int(c.rounded()).formatted(.number) + (partial ? "+" : "")
+    }
+
+    /// Cents in hover details, so a small day doesn't read as $0.
+    static func cost(_ c: Double?, partial: Bool) -> String {
+        c == nil ? "—" : Format.cost(c) + (partial ? "+" : "")
+    }
+
+    static func costNote(_ c: Double?, partial: Bool) -> String {
+        if c == nil { return "None of these models has a known API price." }
+        let base = "What these tokens would cost at the providers' pay-as-you-go API prices. Your subscription doesn't charge per token."
+        return partial ? base + " Some models have no known price, so their tokens aren't included." : base
+    }
+
     static let weekdayInitials = ["M", "T", "W", "T", "F", "S", "S"]
     private static let weekdayNames = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
 
@@ -1251,7 +1269,7 @@ enum StatsText {
         }
         var rows: [StatsTip.Row] = [.init(label: "Tokens", value: bar.totalTokens.formatted(.number))]
         rows += byProvider(bar.tokens)
-        if let cost = bar.cost { rows.append(.init(label: "At API prices", value: "$" + Int(cost.rounded()).formatted(.number))) }
+        if bar.totalTokens > 0 { rows.append(.init(label: "At API prices", value: cost(bar.cost, partial: bar.hasUnpriced))) }
         if bar.prompts > 0 { rows.append(.init(label: "Prompts", value: bar.prompts.formatted(.number))) }
         if bar.toolCalls > 0 { rows.append(.init(label: "Tool calls", value: bar.toolCalls.formatted(.number))) }
         if bar.agentMillis > 0 { rows.append(.init(label: "Agent time", value: duration(bar.agentMillis))) }
@@ -1276,7 +1294,7 @@ enum StatsText {
             .init(label: "Tokens", value: m.tokens.formatted(.number)),
             .init(label: "Share", value: percent(Double(m.tokens) / Double(max(total, 1)))),
         ]
-        if let c = m.cost { rows.append(.init(label: "At API prices", value: "$" + Int(c.rounded()).formatted(.number))) }
+        rows.append(.init(label: "At API prices", value: cost(m.cost, partial: false)))
         rows.append(.init(label: "Responses", value: m.responses.formatted(.number)))
         if let speed = m.speed {
             rows.append(.init(label: "Avg speed", value: "\(one(speed)) tok/s"))
