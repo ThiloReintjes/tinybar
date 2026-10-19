@@ -44,6 +44,17 @@ import Testing
     #expect(future.longestStreak == 0)
 }
 
+@Test func statsIncludeTodayAfterAMidnightDSTTransition() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "America/Havana")!
+    let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 12))!
+    let usage = [DailyUsage(day: "2026-03-14", provider: .codex, model: "m", project: "", tokens: TokenCounts(input: 10))]
+    let summary = StatsSummary.build(usage: usage, stats: [], allDays: ["2026-03-14"], range: .week, prices: .empty, now: now, calendar: calendar)
+    #expect(summary.bars.count == 7)
+    #expect(summary.bars.last?.start == "2026-03-14")
+    #expect(summary.bars.reduce(0) { $0 + $1.totalTokens } == summary.tokens)
+}
+
 @Test func statsMarkPartialCostsWithoutDiscardingKnownPrices() {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -88,6 +99,12 @@ import Testing
         try StatusFeed.incidentIOAffected(Data(#"{"summary":{}}"#.utf8), group: "Codex")
     }
     #expect(try StatusFeed.statuspage(Data(#"{"incidents":[]}"#.utf8), provider: .claude, base: base, components: nil).isEmpty)
+    for components in ["[null]", "[{}]", "null", "{}"] {
+        let malformed = Data("{\"incidents\":[{\"name\":\"Outage\",\"status\":\"investigating\",\"impact\":\"critical\",\"components\":\(components)}]}".utf8)
+        #expect(throws: (any Error).self) {
+            try StatusFeed.statuspage(malformed, provider: .claude, base: base, components: nil)
+        }
+    }
 }
 
 @Test func missingResetBeforeExpiryKeepsAlertCycle() throws {
@@ -106,6 +123,12 @@ import Testing
     #expect(planner.evaluate(snapshot(0, next), now: reset) == [.reset(provider: .claude, window: "Weekly")])
     #expect(planner.evaluate(snapshot(96, next), now: reset).count == 1)
     #expect(planner.evaluate(snapshot(96, next), now: reset).isEmpty)
+
+    var unknown = LimitAlertPlanner()
+    #expect(unknown.evaluate(snapshot(96, nil), now: now).count == 1)
+    #expect(unknown.evaluate(snapshot(0, next), now: reset) == [.reset(provider: .claude, window: "Weekly")])
+    #expect(unknown.evaluate(snapshot(0, next), now: reset).isEmpty)
+    #expect(unknown.evaluate(snapshot(96, next), now: reset).count == 1)
 }
 
 @Test func projectsKeepRootIdentityAndLanguagesKeepEmptyEdits() {
@@ -141,4 +164,10 @@ import Testing
     let content = "--- a/content.py\n+++ b/content.py\n@@ -1 +1 @@\n--- old\n+++ new"
     #expect(LineCount.diff(content).added == 1)
     #expect(LineCount.diff(content).removed == 1)
+    let codex = "*** Begin Patch\n*** Add File: a.py\n+++ comment\n*** End Patch"
+    #expect(LineCount.files(inPatch: codex).map(\.path) == ["a.py"])
+    #expect(LineCount.diff(codex).added == 1)
+    let huge = "@@ -1,9223372036854775807 +1,9223372036854775807 @@\n-a\n+b"
+    #expect(LineCount.diff(huge).added == 1)
+    #expect(LineCount.diff(huge).removed == 1)
 }

@@ -172,6 +172,7 @@ public enum LineCount {
             if line.hasPrefix("diff --git ") { inHunk = false; oldPath = nil; continue }
             if line.hasPrefix("*** "), let r = line.range(of: " File: ") {
                 start(line[r.upperBound...])
+                inHunk = true
                 continue
             }
             if line.hasPrefix("*** ") { continue }
@@ -184,7 +185,11 @@ public enum LineCount {
                     guard let first = parts.first, Int(first) != nil else { return nil }
                     return parts.count == 2 ? Int(parts[1]) : 1
                 }
-                remaining = counts.count == 2 ? counts.reduce(0, +) : nil
+                remaining = nil
+                if counts.count == 2 {
+                    let sum = counts[0].addingReportingOverflow(counts[1])
+                    if !sum.overflow, sum.partialValue >= 0 { remaining = sum.partialValue }
+                }
                 continue
             }
             if !inHunk, line.hasPrefix("--- ") {
