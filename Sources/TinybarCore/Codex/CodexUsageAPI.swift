@@ -234,8 +234,10 @@ enum CodexUsageAPI {
 
 func parseISODate(_ raw: String) -> Date? {
     if let d = parseUTCTimestamp(raw) { return d }
-    // Foundation normalizes impossible calendar dates (February 31 becomes March 3).
-    guard raw.count >= 20, parseUTCTimestamp(String(raw.prefix(19)) + "Z") != nil else { return nil }
+    // Foundation normalizes invalid dates and ignores suffix garbage; validate before falling back.
+    let syntax = #"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):?[0-5][0-9])\z"#
+    guard raw.range(of: syntax, options: .regularExpression) != nil,
+          parseUTCTimestamp(String(raw.prefix(19)) + "Z") != nil else { return nil }
     let withFraction = ISO8601DateFormatter()
     withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     if let d = withFraction.date(from: raw) { return d }
@@ -250,7 +252,10 @@ func parseUTCTimestamp(_ raw: String) -> Date? {
     var utf8 = raw.utf8.makeIterator()
     var bytes: [UInt8] = []
     bytes.reserveCapacity(24)
-    while let b = utf8.next(), bytes.count < 32 { bytes.append(b) }
+    while let b = utf8.next() {
+        guard bytes.count < 32 else { return nil }
+        bytes.append(b)
+    }
     guard bytes.count >= 20, bytes.last == UInt8(ascii: "Z"), bytes[4] == UInt8(ascii: "-"), bytes[7] == UInt8(ascii: "-"),
           bytes[10] == UInt8(ascii: "T"), bytes[13] == UInt8(ascii: ":"), bytes[16] == UInt8(ascii: ":")
     else { return nil }

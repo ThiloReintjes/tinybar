@@ -66,6 +66,10 @@ private final class ResetCreditsFixture: URLProtocol, @unchecked Sendable {
         #expect(parseUTCTimestamp(raw) == nil)
         #expect(parseISODate(raw) == nil)
     }
+    for raw in ["2099-01-01T00:00:00Zgarbage", "2099-01-01T00:00:00.12345678901Zgarbage", "2099-01-01T00:00:00+01:99", "2099-01-01T00:00:00Z\n"] {
+        #expect(parseUTCTimestamp(raw) == nil)
+        #expect(parseISODate(raw) == nil)
+    }
     #expect(parseISODate("2024-02-29T00:00:00Z") != nil)
     #expect(parseISODate("2000-02-29T00:00:00Z") != nil)
     #expect(parseISODate("2024-02-29T01:00:00+01:00") == parseISODate("2024-02-29T00:00:00Z"))
