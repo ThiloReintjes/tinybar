@@ -79,30 +79,19 @@ enum CursorAppAuth {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    /// Read-only. With WAL sidecars present the database is opened normally (read-only) so
-    /// recent writes are seen; otherwise as immutable, so SQLite creates nothing in Cursor's folder.
+    /// Never lets SQLite write beside Cursor's database, including its WAL sidecars.
     static func readItem(_ key: String, db: URL = stateDB) -> String? {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: db.path) else { return nil }
-        let hasWAL = fm.fileExists(atPath: db.path + "-wal")
-        let path = db.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? db.path
-        let uri = "file:\(path)?" + (hasWAL ? "mode=ro" : "immutable=1")
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(uri, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
-            sqlite3_close_v2(handle)
-            return nil
+        CredentialDatabase.read(db) { handle in
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, "SELECT value FROM ItemTable WHERE key = ? LIMIT 1", -1, &stmt, nil) == SQLITE_OK else {
+                return nil
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            guard sqlite3_step(stmt) == SQLITE_ROW, let bytes = sqlite3_column_blob(stmt, 0) else { return nil }
+            let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, 0)))
+            return decode(data)
         }
-        defer { sqlite3_close_v2(handle) }
-        sqlite3_busy_timeout(handle, 500)
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, "SELECT value FROM ItemTable WHERE key = ? LIMIT 1", -1, &stmt, nil) == SQLITE_OK else {
-            return nil
-        }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        guard sqlite3_step(stmt) == SQLITE_ROW, let bytes = sqlite3_column_blob(stmt, 0) else { return nil }
-        let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, 0)))
-        return decode(data)
     }
 
     /// Values are usually UTF-8; some builds store UTF-16LE.

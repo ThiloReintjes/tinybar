@@ -98,49 +98,40 @@ public enum BrowserCookies {
         var encrypted: Data
     }
 
-    /// Opens the live database read-only as immutable: no locks, no WAL writes, so the browser
-    /// is never disturbed (it may be running).
+    /// WAL contents are read from a private copy, never by opening the browser's live sidecars.
     static func readRows(db: URL, domain: String, firefox: Bool) -> [Row]? {
-        var handle: OpaquePointer?
-        let uri = "file:\(db.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? db.path)?immutable=1"
-        guard sqlite3_open_v2(uri, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
-            sqlite3_close_v2(handle)
-            return nil
-        }
-        defer { sqlite3_close_v2(handle) }
+        CredentialDatabase.read(db) { handle in
+            let sql = firefox
+                ? "SELECT host, name, value, NULL FROM moz_cookies WHERE host = ? OR host = ?"
+                : "SELECT host_key, name, value, encrypted_value FROM cookies WHERE host_key = ? OR host_key = ?"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+            sqlite3_bind_text(stmt, 1, domain, -1, transient)
+            sqlite3_bind_text(stmt, 2, "." + domain, -1, transient)
 
-        let sql = firefox
-            ? "SELECT host, name, value, NULL FROM moz_cookies WHERE host = ? OR host = ?"
-            : "SELECT host_key, name, value, encrypted_value FROM cookies WHERE host_key = ? OR host_key = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        sqlite3_bind_text(stmt, 1, domain, -1, transient)
-        sqlite3_bind_text(stmt, 2, "." + domain, -1, transient)
-
-        var rows: [Row] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let text: (Int32) -> String = { i in sqlite3_column_text(stmt, i).map { String(cString: $0) } ?? "" }
-            var encrypted = Data()
-            if let blob = sqlite3_column_blob(stmt, 3) {
-                encrypted = Data(bytes: blob, count: Int(sqlite3_column_bytes(stmt, 3)))
+            var rows: [Row] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let text: (Int32) -> String = { i in sqlite3_column_text(stmt, i).map { String(cString: $0) } ?? "" }
+                var encrypted = Data()
+                if let blob = sqlite3_column_blob(stmt, 3) {
+                    encrypted = Data(bytes: blob, count: Int(sqlite3_column_bytes(stmt, 3)))
+                }
+                rows.append(Row(host: text(0), name: text(1), value: text(2), encrypted: encrypted))
             }
-            rows.append(Row(host: text(0), name: text(1), value: text(2), encrypted: encrypted))
+            return rows
         }
-        return rows
     }
 
     static func metaVersion(db: URL) -> Int {
-        var handle: OpaquePointer?
-        let uri = "file:\(db.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? db.path)?immutable=1"
-        guard sqlite3_open_v2(uri, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else { return 0 }
-        defer { sqlite3_close_v2(handle) }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, "SELECT value FROM meta WHERE key = 'version'", -1, &stmt, nil) == SQLITE_OK else { return 0 }
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_step(stmt) == SQLITE_ROW, let v = sqlite3_column_text(stmt, 0) else { return 0 }
-        return Int(String(cString: v)) ?? 0
+        CredentialDatabase.read(db) { handle in
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, "SELECT value FROM meta WHERE key = 'version'", -1, &stmt, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_step(stmt) == SQLITE_ROW, let v = sqlite3_column_text(stmt, 0) else { return nil }
+            return Int(String(cString: v))
+        } ?? 0
     }
 
     // MARK: Decryption
@@ -170,22 +161,13 @@ public enum BrowserCookies {
         return out
     }
 
-    static func key(for browser: Browser) -> Data? {
+    static func key(for browser: Browser, readPassword: (String, String) -> Data? = keychainPassword) -> Data? {
         guard let service = browser.keychainService, let account = browser.keychainAccount else { return nil }
         keyLock.lock(); defer { keyLock.unlock() }
-        if let cached = keyCache[service] { return cached }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let password = item as? Data
-        else { return nil }
+        if let cached = keyCache[service] { return cached.isEmpty ? nil : cached }
+        // Remember denial/cancellation too: a poll must never immediately ask again.
+        keyCache[service] = Data()
+        guard let password = readPassword(service, account) else { return nil }
 
         var derived = Data(count: kCCKeySizeAES128)
         let salt = Data("saltysalt".utf8)
@@ -204,6 +186,19 @@ public enum BrowserCookies {
         guard status == kCCSuccess else { return nil }
         keyCache[service] = derived
         return derived
+    }
+
+    private static func keychainPassword(service: String, account: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
     }
 
     static func aes128CBCDecrypt(_ data: Data, key: Data) -> Data? {
@@ -227,6 +222,38 @@ public enum BrowserCookies {
         guard status == kCCSuccess else { return nil }
         out.count = outLength
         return out
+    }
+}
+
+/// Opening a live WAL database even read-only can write its shared-memory sidecar. Read immutable
+/// without a WAL; otherwise let SQLite recover a private copy and remove it immediately afterward.
+enum CredentialDatabase {
+    static func read<T>(_ db: URL, _ body: (OpaquePointer) -> T?) -> T? {
+        let fm = FileManager.default
+        var directory: URL?
+        defer { if let directory { try? fm.removeItem(at: directory) } }
+        var source = db
+        let hasWAL = fm.fileExists(atPath: db.path + "-wal")
+        if hasWAL {
+            let temp = fm.temporaryDirectory.appendingPathComponent("tinybar-credentials-\(UUID().uuidString)")
+            directory = temp
+            do {
+                try fm.createDirectory(at: temp, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+                source = temp.appendingPathComponent("snapshot.sqlite")
+                try fm.copyItem(at: db, to: source)
+                try fm.copyItem(at: URL(fileURLWithPath: db.path + "-wal"), to: URL(fileURLWithPath: source.path + "-wal"))
+            } catch { return nil }
+        }
+        let path = source.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? source.path
+        let uri = "file:\(path)?" + (hasWAL ? "mode=ro" : "immutable=1")
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(uri, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK, let handle else {
+            sqlite3_close_v2(handle)
+            return nil
+        }
+        defer { sqlite3_close_v2(handle) }
+        sqlite3_busy_timeout(handle, 500)
+        return body(handle)
     }
 }
 
