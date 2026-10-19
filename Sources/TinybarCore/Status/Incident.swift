@@ -122,20 +122,32 @@ public enum StatusFeed {
     /// `summary.json`: unresolved incidents and in-progress maintenance, each with the components
     /// it affects. An incident that names no component counts when it has an impact.
     static func statuspage(_ data: Data, provider: ProviderID, base: URL, components: [String]?) throws -> [Incident] {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let incidents = root["incidents"] as? [[String: Any]] else {
             throw ProviderError.unexpected("Unexpected status page response")
         }
         func counts(_ name: String) -> Bool {
             components?.contains { name.hasPrefix($0) } ?? true
         }
-        let maintenance = (root["scheduled_maintenances"] as? [[String: Any]] ?? [])
-            .filter { $0["status"] as? String == "in_progress" }
+        guard let maintenance = (root["scheduled_maintenances"] ?? []) as? [[String: Any]] else {
+            throw ProviderError.unexpected("Unexpected status page maintenance")
+        }
         var out: [Incident] = []
-        for (entry, planned) in (root["incidents"] as? [[String: Any]] ?? []).map({ ($0, false) }) + maintenance.map({ ($0, true) }) {
-            guard let title = entry["name"] as? String, entry["status"] as? String != "resolved" else { continue }
-            let affected = (entry["components"] as? [[String: Any]] ?? []).filter { ($0["name"] as? String).map(counts) ?? false }
-            let named = !(entry["components"] as? [Any] ?? []).isEmpty
-            if named && affected.isEmpty { continue }
+        for (entry, planned) in incidents.map({ ($0, false) }) + maintenance.map({ ($0, true) }) {
+            guard let title = entry["name"] as? String, !title.isEmpty,
+                  let status = entry["status"] as? String, !status.isEmpty else {
+                throw ProviderError.unexpected("Unexpected status page incident")
+            }
+            if status == "resolved" || (planned && status != "in_progress") { continue }
+            guard let listed = (entry["components"] ?? []) as? [[String: Any]],
+                  listed.allSatisfy({ component in
+                      guard component["name"] is String, let status = component["status"] as? String else { return false }
+                      return status == "operational" || severity(componentStatus: status) != nil
+                  }) else {
+                throw ProviderError.unexpected("Unexpected status page components")
+            }
+            let affected = listed.filter { ($0["name"] as? String).map(counts) ?? false }
+            if !listed.isEmpty && affected.isEmpty { continue }
             let fromComponents = affected.compactMap { ($0["status"] as? String).flatMap(severity(componentStatus:)) }.max()
             guard let level = planned ? .maintenance : fromComponents ?? severity(impact: entry["impact"] as? String)
             else { continue }
@@ -153,22 +165,39 @@ public enum StatusFeed {
 
     /// The group's components that the native feed lists as affected, with their worst status.
     static func incidentIOAffected(_ data: Data, group: String) throws -> [(name: String, severity: Incident.Severity)] {
-        guard let summary = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["summary"] as? [String: Any]
+        guard let summary = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["summary"] as? [String: Any],
+              let items = (summary["structure"] as? [String: Any])?["items"] as? [[String: Any]],
+              let affected = summary["affected_components"] as? [[String: Any]]
         else { throw ProviderError.unexpected("Unexpected status page response") }
         var names: [String: String] = [:]
-        for item in (summary["structure"] as? [String: Any])?["items"] as? [[String: Any]] ?? [] {
-            guard let g = item["group"] as? [String: Any], g["name"] as? String == group else { continue }
-            for c in g["components"] as? [[String: Any]] ?? [] {
+        for item in items {
+            guard let raw = item["group"] else { continue }
+            guard let g = raw as? [String: Any], let name = g["name"] as? String else {
+                throw ProviderError.unexpected("Unexpected status page group")
+            }
+            guard name == group else { continue }
+            guard let components = g["components"] as? [[String: Any]] else {
+                throw ProviderError.unexpected("Unexpected status page components")
+            }
+            for c in components {
+                guard let id = c["component_id"] as? String, !id.isEmpty else {
+                    throw ProviderError.unexpected("Unexpected status page component")
+                }
                 // "CLI" alone reads as anything; the page means Codex's.
                 let name = c["name"] as? String ?? group
-                if let id = c["component_id"] as? String { names[id] = name.contains(group) ? name : "\(group) \(name)" }
+                names[id] = name.contains(group) ? name : "\(group) \(name)"
             }
         }
         var worst: [String: Incident.Severity] = [:]
-        for c in summary["affected_components"] as? [[String: Any]] ?? [] {
-            guard let id = c["component_id"] as? String, let name = names[id],
-                  let level = (c["status"] as? String).flatMap(severity(componentStatus:))
-            else { continue }
+        for c in affected {
+            guard let id = c["component_id"] as? String, !id.isEmpty, let status = c["status"] as? String else {
+                throw ProviderError.unexpected("Unexpected affected status page component")
+            }
+            guard let name = names[id] else { continue }
+            if status == "operational" { continue }
+            guard let level = severity(componentStatus: status) else {
+                throw ProviderError.unexpected("Unexpected component status")
+            }
             worst[name] = max(worst[name] ?? level, level)
         }
         return worst.map { ($0.key, $0.value) }.sorted { $0.name < $1.name }
