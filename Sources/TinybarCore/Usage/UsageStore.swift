@@ -40,8 +40,13 @@ public actor UsageStore {
     private static let schemaVersion: Int64 = 6
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
-        db = try SQLiteDB(path: path.path)
-        try Self.migrate(db)
+        let db = try SQLiteDB(path: path.path)
+        try db.transaction {
+            try Self.migrate(db)
+            try Self.armBackfill(db, key: "stats_backfill")
+            try Self.armBackfill(db, key: "long_context_backfill", codexOnly: true)
+        }
+        self.db = db
     }
 
     private static func migrate(_ db: SQLiteDB) throws {
@@ -264,7 +269,7 @@ public actor UsageStore {
             try db.transaction {
                 for (path, stamp) in batch {
                     let (read, added) = try autoreleasepool {
-                        let cursor = try loadCursor(path: path)
+                        let cursor = try source == .codex ? codexCursor(path: path, stamp: stamp) : loadCursor(path: path)
                         switch source {
                         case .codex: return try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .incremental)
                         case .claude: return try ingestClaudeFile(path: path, stamp: stamp, cursor: cursor, mode: .incremental)
@@ -303,7 +308,7 @@ public actor UsageStore {
         case longContext
     }
 
-    private func ingestCodexFile(path: String, stamp: FileStamp, cursor: Cursor?, mode: ReadMode) throws -> (Int64, Int) {
+    private func ingestCodexFile(path: String, stamp: FileStamp, cursor: Cursor?, mode: ReadMode, limit: Int64? = nil) throws -> (Int64, Int) {
         let url = URL(fileURLWithPath: path)
         // Resume only if it's the same file and it only grew; otherwise start over.
         var parser = CodexLogParser()
@@ -311,16 +316,14 @@ public actor UsageStore {
         var until: Int64?
         if mode != .incremental {
             guard let cursor else { return (0, 0) }
-            until = cursor.offset
-        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset,
+            until = limit ?? cursor.offset
+        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size > cursor.stamp.size || stamp == cursor.stamp,
            let state = cursor.state, let decoded = try? JSONDecoder().decode(CodexLogParser.self, from: state)
         {
             parser = decoded
             offset = cursor.offset
-        } else if cursor != nil {
-            // Rewritten file: its earlier contribution can't be separated from the aggregate, so
-            // we accept a possible double count rather than keeping per-file rows. Rare for Codex.
-            offset = 0
+        } else if let state = cursor?.state, let decoded = try? JSONDecoder().decode(CodexLogParser.self, from: state) {
+            parser = CodexLogParser(replaying: decoded)
         }
 
         var agg: [AggKey: TokenCounts] = [:]
@@ -347,20 +350,21 @@ public actor UsageStore {
         for (key, t) in agg {
             try addDaily(day: key.day, provider: .codex, model: key.model, project: key.project, t)
         }
-        for (key, t) in long {
-            try addLong(day: key.day, provider: .codex, model: key.model, project: key.project, band: key.band, t)
+        for (key, tokens) in long {
+            let t = mode == .longContext ? try boundedBackfill(tokens, key: key) : tokens
+            if !t.isZero { try addLong(day: key.day, provider: .codex, model: key.model, project: key.project, band: key.band, t) }
         }
         try write(stats)
         let state = (try? JSONEncoder().encode(parser)).map { String(decoding: $0, as: UTF8.self) }
         if mode != .incremental, let cursor {
-            try saveCursor(path: path, source: .codex, stamp: cursor.stamp, offset: cursor.offset, state: state)
+            if until == cursor.offset { try saveCursor(path: path, source: .codex, stamp: cursor.stamp, offset: cursor.offset, state: state) }
         } else {
             try saveCursor(path: path, source: .codex, stamp: stamp, offset: endOffset, state: state)
         }
         return (endOffset - offset, added)
     }
 
-    private func ingestClaudeFile(path: String, stamp: FileStamp, cursor: Cursor?, mode: ReadMode) throws -> (Int64, Int) {
+    private func ingestClaudeFile(path: String, stamp: FileStamp, cursor: Cursor?, mode: ReadMode, limit: Int64? = nil) throws -> (Int64, Int) {
         // Counting is per message id and idempotent, so a replaced or truncated file can simply
         // be re-read from the start.
         var offset: Int64 = 0
@@ -368,8 +372,8 @@ public actor UsageStore {
         var session = ClaudeLogParser.Session(subagentFile: path.contains("/subagents/"))
         if mode == .backfill {
             guard let cursor else { return (0, 0) }
-            until = cursor.offset
-        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size >= cursor.offset {
+            until = limit ?? cursor.offset
+        } else if let cursor, cursor.stamp.inode == stamp.inode, stamp.size > cursor.stamp.size || stamp == cursor.stamp {
             offset = cursor.offset
             if let state = cursor.state, let decoded = try? JSONDecoder().decode(ClaudeLogParser.Session.self, from: state) {
                 session = decoded
@@ -422,24 +426,11 @@ public actor UsageStore {
         try write(stats)
         let state = (try? JSONEncoder().encode(session)).map { String(decoding: $0, as: UTF8.self) }
         if mode == .backfill, let cursor {
-            try saveCursor(path: path, source: .claude, stamp: cursor.stamp, offset: cursor.offset, state: state)
+            if until == cursor.offset { try saveCursor(path: path, source: .claude, stamp: cursor.stamp, offset: cursor.offset, state: state) }
         } else {
             try saveCursor(path: path, source: .claude, stamp: stamp, offset: endOffset, state: state)
         }
         return (endOffset - offset, added)
-    }
-
-    /// Streaming copies only ever grow, so the field-wise max is the final usage regardless of
-    /// the order copies are seen in.
-    private static func merged(_ a: UsageRecord, _ b: UsageRecord) -> UsageRecord {
-        var r = a
-        r.tokens = TokenCounts(
-            input: max(a.tokens.input, b.tokens.input),
-            output: max(a.tokens.output, b.tokens.output),
-            cacheWrite: max(a.tokens.cacheWrite, b.tokens.cacheWrite),
-            cacheRead: max(a.tokens.cacheRead, b.tokens.cacheRead))
-        if r.cwd == nil { r.cwd = b.cwd }
-        return r
     }
 
     /// Records a message's usage and activity, replacing any earlier count for the same id.
@@ -453,10 +444,11 @@ public actor UsageStore {
 
         if let e = existing {
             let old = TokenCounts(input: e[4].int, output: e[5].int, cacheWrite: e[6].int, cacheRead: e[7].int)
-            let final = Self.merged(UsageRecord(timestamp: record.timestamp, model: record.model, cwd: record.cwd, tokens: old), record)
+            // Activity-only replay must not change the snapshot paired with daily totals.
+            let final = countTokens ? old.mergingCopy(record.tokens) : old
             let oldStats = e[8].text.flatMap { try? JSONDecoder().decode(MessageStats.self, from: Data($0.utf8)) }
             let newStats = MessageStats(message).merged(with: oldStats)
-            let tokensChanged = final.tokens != old
+            let tokensChanged = final != old
             guard tokensChanged || newStats != oldStats else { return false }
 
             let day = e[0].text ?? ""
@@ -466,24 +458,24 @@ public actor UsageStore {
                 // Undo the old contribution, keeping its original day/model/project.
                 let project = e[3].text ?? ""
                 try addDaily(day: day, provider: provider, model: model, project: project, -old)
-                try addDaily(day: day, provider: provider, model: model, project: project, final.tokens)
+                try addDaily(day: day, provider: provider, model: model, project: project, final)
                 if let band = ContextBand.of(old) {
                     try addLong(day: day, provider: provider, model: model, project: project, band: band, -old)
                 }
-                if let band = ContextBand.of(final.tokens) {
-                    try addLong(day: day, provider: provider, model: model, project: project, band: band, final.tokens)
+                if let band = ContextBand.of(final) {
+                    try addLong(day: day, provider: provider, model: model, project: project, band: band, final)
                 }
             }
             var stats = StatBatch()
             stats.replace(
                 day: day, provider: provider, model: model,
-                old: oldStats?.contributions(tokens: old) ?? [:], new: newStats.contributions(tokens: final.tokens))
-            stats.addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, final.tokens.context)
+                old: oldStats?.contributions(tokens: old) ?? [:], new: newStats.contributions(tokens: final))
+            stats.addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, final.context)
             try write(stats)
             try db.run("""
             UPDATE claude_message SET input = ?, output = ?, cache_write = ?, cache_read = ?, stats = ? WHERE id = ?
-            """, [.int(final.tokens.input), .int(final.tokens.output), .int(final.tokens.cacheWrite),
-                  .int(final.tokens.cacheRead), .text(newStats.encoded), .text(id)])
+            """, [.int(final.input), .int(final.output), .int(final.cacheWrite),
+                  .int(final.cacheRead), .text(newStats.encoded), .text(id)])
             return false
         }
 
@@ -532,9 +524,17 @@ public actor UsageStore {
     /// offset, counting activity only. Runs once, in the history import's child process.
     @discardableResult
     public func backfillStats(progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult {
-        let cursors = try db.run("SELECT path, provider FROM file_cursor").compactMap { r -> (String, LogSource)? in
+        guard try !hasCompletedStatsBackfill() else { return IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0) }
+        try db.transaction {
+            try Self.armBackfill(db, key: "stats_backfill")
+            try relocateArchivedCursors()
+        }
+        let cursors = try db.run("""
+        SELECT path, provider, CAST(meta.value AS INTEGER) FROM file_cursor
+        JOIN meta ON meta.key = 'stats_backfill_limit:' || path ORDER BY path
+        """).compactMap { r -> (String, LogSource, Int64)? in
             guard let path = r[0].text, let source = r[1].text.flatMap(LogSource.init(rawValue:)) else { return nil }
-            return (path, source)
+            return (path, source, r[2].int)
         }
         var result = IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0)
         let batchSize = 200
@@ -542,16 +542,20 @@ public actor UsageStore {
         while index < cursors.count {
             let batch = cursors[index..<min(index + batchSize, cursors.count)]
             try db.transaction {
-                for (path, source) in batch {
+                for (path, source, limit) in batch {
+                    let checkpoint = "stats_backfill_file:" + path
+                    guard try db.run("SELECT 1 FROM meta WHERE key = ?", [.text(checkpoint)]).isEmpty else { continue }
                     guard let cursor = try loadCursor(path: path), let stamp = Self.stamp(path),
                           stamp.inode == cursor.stamp.inode, stamp.size >= cursor.offset
                     else { continue }  // gone or replaced: the next ingest reads it from the start
                     let (read, added) = try autoreleasepool {
                         switch source {
-                        case .codex: try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .backfill)
-                        case .claude: try ingestClaudeFile(path: path, stamp: stamp, cursor: cursor, mode: .backfill)
+                        case .codex: try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .backfill, limit: limit)
+                        case .claude: try ingestClaudeFile(path: path, stamp: stamp, cursor: cursor, mode: .backfill, limit: limit)
                         }
                     }
+                    // Commit the checkpoint with its counters, so a restarted backfill cannot add them twice.
+                    try db.run("INSERT INTO meta (key, value) VALUES (?, 'done')", [.text(checkpoint)])
                     result.filesScanned += 1
                     result.bytesRead += read
                     result.recordsAdded += added
@@ -572,21 +576,31 @@ public actor UsageStore {
     /// Runs once after upgrading to schema 6, in the history import's child process.
     @discardableResult
     public func backfillLongContext(progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult {
-        let paths = try db.run("SELECT path FROM file_cursor WHERE provider = ?", [.text(LogSource.codex.rawValue)])
-            .compactMap { $0.first?.text }
+        guard try !hasCompletedLongContextBackfill() else { return IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0) }
+        try db.transaction {
+            try Self.armBackfill(db, key: "long_context_backfill", codexOnly: true)
+            try relocateArchivedCursors()
+        }
+        let paths = try db.run("""
+        SELECT path, CAST(meta.value AS INTEGER) FROM file_cursor
+        JOIN meta ON meta.key = 'long_context_backfill_limit:' || path ORDER BY path
+        """).compactMap { r -> (String, Int64)? in r[0].text.map { ($0, r[1].int) } }
         var result = IngestResult(filesScanned: 0, bytesRead: 0, recordsAdded: 0)
         let batchSize = 200
         var index = 0
         while index < paths.count {
             let batch = paths[index..<min(index + batchSize, paths.count)]
             try db.transaction {
-                for path in batch {
+                for (path, limit) in batch {
+                    let checkpoint = "long_context_backfill_file:" + path
+                    guard try db.run("SELECT 1 FROM meta WHERE key = ?", [.text(checkpoint)]).isEmpty else { continue }
                     guard let cursor = try loadCursor(path: path), let stamp = Self.stamp(path),
                           stamp.inode == cursor.stamp.inode, stamp.size >= cursor.offset
                     else { continue }
                     let (read, added) = try autoreleasepool {
-                        try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .longContext)
+                        try ingestCodexFile(path: path, stamp: stamp, cursor: cursor, mode: .longContext, limit: limit)
                     }
+                    try db.run("INSERT INTO meta (key, value) VALUES (?, 'done')", [.text(checkpoint)])
                     result.filesScanned += 1
                     result.bytesRead += read
                     result.recordsAdded += added
@@ -603,12 +617,26 @@ public actor UsageStore {
         return result
     }
 
+    /// Freeze the pre-upgrade prefix before normal ingestion can advance any cursor.
+    private static func armBackfill(_ db: SQLiteDB, key: String, codexOnly: Bool = false) throws {
+        guard try db.run("SELECT 1 FROM meta WHERE key IN (?, ?) AND value = 'done'",
+                         [.text(key), .text(key + "_bounds")]).isEmpty else { return }
+        try db.run("""
+        INSERT OR IGNORE INTO meta (key, value)
+        SELECT ? || path, CAST(offset AS TEXT) FROM file_cursor
+        """ + (codexOnly ? " WHERE provider = 'codex'" : ""), [.text(key + "_limit:")])
+        try db.run("INSERT INTO meta (key, value) VALUES (?, 'done')", [.text(key + "_bounds")])
+    }
+
     public func hasCompletedLongContextBackfill() throws -> Bool {
         try db.run("SELECT value FROM meta WHERE key = 'long_context_backfill'").first?.first?.text == "done"
     }
 
     public func markLongContextBackfillDone() throws {
-        try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('long_context_backfill', 'done')")
+        try db.transaction {
+            try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('long_context_backfill', 'done')")
+            try db.exec("DELETE FROM meta WHERE key GLOB 'long_context_backfill_*'")
+        }
     }
 
     public func hasCompletedStatsBackfill() throws -> Bool {
@@ -616,7 +644,10 @@ public actor UsageStore {
     }
 
     public func markStatsBackfillDone() throws {
-        try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('stats_backfill', 'done')")
+        try db.transaction {
+            try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('stats_backfill', 'done')")
+            try db.exec("DELETE FROM meta WHERE key GLOB 'stats_backfill_*'")
+        }
     }
 
     /// How long a Claude message id is kept for de-duplication. Copies of a message in later
@@ -655,6 +686,20 @@ public actor UsageStore {
             cache_read = cache_read + excluded.cache_read
         """, [.text(day), .text(provider.rawValue), .text(model), .text(project),
               .int(t.input), .int(t.output), .int(t.cacheWrite), .int(t.cacheRead)])
+    }
+
+    /// Old cursors didn't keep their timezone or resolved Project. Don't create orphan bands
+    /// when replay attribution changed, or let a backfill exceed the totals actually on file.
+    private func boundedBackfill(_ t: TokenCounts, key: AggKey) throws -> TokenCounts {
+        let params: [SQLiteDB.Value] = [.text(key.day), .text(key.model), .text(key.project)]
+        let filter = " WHERE day = ? AND provider = 'codex' AND model = ? AND project = ?"
+        guard let total = try db.run("SELECT input, output, cache_write, cache_read FROM daily_usage" + filter, params).first
+        else { return TokenCounts() }
+        let used = try db.run("SELECT sum(input), sum(output), sum(cache_write), sum(cache_read) FROM daily_long_context" + filter, params).first!
+        let values = zip([t.input, t.output, t.cacheWrite, t.cacheRead], 0..<4).map { value, i in
+            min(max(0, value), max(0, total[i].int - used[i].int))
+        }
+        return TokenCounts(input: values[0], output: values[1], cacheWrite: values[2], cacheRead: values[3])
     }
 
     private func addLong(day: String, provider: ProviderID, model: String, project: String, band: Int64, _ t: TokenCounts) throws {
@@ -770,6 +815,35 @@ public actor UsageStore {
         func band(_ b: Int64) -> AggKey { AggKey(day: day, model: model, project: project, band: b) }
     }
 
+    /// Backfill runs before normal ingestion, so find rollouts archived since the last poll.
+    private func relocateArchivedCursors() throws {
+        let paths = try db.run("SELECT path FROM file_cursor WHERE provider = 'codex'").compactMap { $0[0].text }
+        for path in paths where Self.stamp(path) == nil {
+            var root = URL(fileURLWithPath: path).deletingLastPathComponent()
+            while root.path != "/", root.lastPathComponent != "sessions" { root.deleteLastPathComponent() }
+            guard root.lastPathComponent == "sessions" else { continue }
+            let archive = root.deletingLastPathComponent().appendingPathComponent("archived_sessions")
+            let file = archive.appendingPathComponent((path as NSString).lastPathComponent).path
+            if let stamp = Self.stamp(file) { _ = try codexCursor(path: file, stamp: stamp) }
+        }
+    }
+
+    /// Archiving renames a rollout without changing its inode. Move its cursor and any frozen
+    /// backfill bounds with it instead of importing the same session under a second path.
+    private func codexCursor(path: String, stamp: FileStamp) throws -> Cursor? {
+        if let cursor = try loadCursor(path: path) { return cursor }
+        guard let oldPath = try db.run("SELECT path FROM file_cursor WHERE provider = 'codex' AND inode = ?",
+                                       [.int(stamp.inode)]).compactMap({ $0[0].text }).first(where: {
+                                           ($0 as NSString).lastPathComponent == (path as NSString).lastPathComponent && Self.stamp($0) == nil
+                                       }),
+              let cursor = try loadCursor(path: oldPath) else { return nil }
+        try db.run("UPDATE file_cursor SET path = ? WHERE path = ?", [.text(path), .text(oldPath)])
+        for prefix in ["stats_backfill_limit:", "stats_backfill_file:", "long_context_backfill_limit:", "long_context_backfill_file:"] {
+            try db.run("UPDATE meta SET key = ? WHERE key = ?", [.text(prefix + path), .text(prefix + oldPath)])
+        }
+        return cursor
+    }
+
     private func loadCursor(path: String) throws -> Cursor? {
         guard let r = try db.run(
             "SELECT inode, size, mtime, offset, state FROM file_cursor WHERE path = ?", [.text(path)]).first
@@ -849,21 +923,38 @@ enum JSONLReader {
         url: URL, from start: Int64, until: Int64? = nil, _ body: (UnsafeRawBufferPointer) -> Void) throws -> Int64
     {
         let fd = open(url.path, O_RDONLY)
-        guard fd >= 0 else { return start }
+        guard fd >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
         defer { close(fd) }
-        guard lseek(fd, off_t(start), SEEK_SET) == off_t(start) else { return start }
+        // An offset inside a line only occurs while skipping an oversized line. Recover that
+        // state from the preceding byte, without rereading its already discarded prefix.
+        var skipping = false
+        if start > 0 {
+            guard lseek(fd, off_t(start - 1), SEEK_SET) == off_t(start - 1) else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            var previous: UInt8 = 0
+            let n = read(fd, &previous, 1)
+            guard n >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+            if n == 1 { skipping = previous != 0x0A }
+        }
+        guard lseek(fd, off_t(start), SEEK_SET) == off_t(start) else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
 
         let capacity = chunkSize + maxLineBytes
         let buf = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: 1)
         defer { buf.deallocate() }
         var filled = 0            // valid bytes in buf
         var consumedOffset = start // file offset just past the last complete line
-        var skipping = false       // inside an oversized line; drop bytes until the next newline
 
         var reachedLimit = false
         while !reachedLimit {
             let n = read(fd, buf + filled, capacity - filled)
-            if n <= 0 { break }
+            if n < 0 {
+                if errno == EINTR { continue }
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            if n == 0 { break }
             filled += n
             var lineStart = 0
             while lineStart < filled,
@@ -896,8 +987,6 @@ enum JSONLReader {
                 filled = rest
             }
         }
-        // If we stopped inside an oversized line, its remaining tail is read as one junk
-        // fragment next time, which the parser ignores.
         return consumedOffset
     }
 }

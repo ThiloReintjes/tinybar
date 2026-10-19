@@ -9,7 +9,7 @@ import TinybarCore
 
 let args = CommandLine.arguments.dropFirst()
 let command = args.first ?? "limits"
-let dbURL = args.dropFirst().first.map { URL(fileURLWithPath: $0) }
+let dbURL = args.dropFirst().first(where: { !$0.hasPrefix("--") }).map { URL(fileURLWithPath: $0) }
     ?? Paths.appSupport.appendingPathComponent("usage.sqlite")
 
 func printLimits(browser: Bool) async {
@@ -42,7 +42,7 @@ func printCookies() {
     for (domain, name) in [("claude.ai", "sessionKey"), ("chatgpt.com", "__Secure-next-auth.session-token"), ("cursor.com", "WorkosCursorSessionToken")] {
         if let found = BrowserCookies.find(domain: domain, required: [name]) {
             let value = BrowserCookies.joined(name, in: found.cookies) ?? ""
-            print("\(domain): found \(name) in \(found.browser) (\(value.count) chars, prefix \(value.prefix(7))…)")
+            print("\(domain): found \(name) in \(found.browser) (\(value.count) chars)")
         } else {
             print("\(domain): no \(name) cookie found")
         }
@@ -93,6 +93,7 @@ func stats() async throws {
 
 func backfill() async throws {
     let store = try UsageStore(path: dbURL)
+    guard !(try await store.hasCompletedStatsBackfill()) else { return }
     let start = Date()
     let r = try await store.backfillStats()
     print(String(format: "backfill files=%d bytes=%.1fMB in %.1fs", r.filesScanned, Double(r.bytesRead) / 1e6, Date().timeIntervalSince(start)))
@@ -100,6 +101,7 @@ func backfill() async throws {
 
 func backfillLong() async throws {
     let store = try UsageStore(path: dbURL)
+    guard !(try await store.hasCompletedLongContextBackfill()) else { return }
     let start = Date()
     let r = try await store.backfillLongContext()
     print(String(format: "long-context files=%d bytes=%.1fMB in %.1fs", r.filesScanned, Double(r.bytesRead) / 1e6, Date().timeIntervalSince(start)))

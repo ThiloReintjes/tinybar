@@ -64,11 +64,13 @@ enum ClaudeUsageAPI {
             guard eligible else { return [] }
             var out: [BankedReset] = []
             for case let grant? in grants.map(\.value) where !grant.paused && grant.resetsLeft > 0 {
-                if let s = grant.startsAt.flatMap(parseISODate), s > now { continue }
+                let starts = grant.startsAt.flatMap(parseISODate)
                 let ends = grant.endsAt.flatMap(parseISODate)
+                if grant.startsAt != nil && starts == nil || grant.endsAt != nil && ends == nil { continue }
+                if let starts, starts > now { continue }
                 if let ends, ends <= now { continue }
                 // An implausible count is malformed rather than a reason to draw 10,000 rows.
-                guard out.count + grant.resetsLeft <= 50 else { return [] }
+                guard grant.resetsLeft <= 50 - out.count else { return [] }
                 for _ in 0..<grant.resetsLeft {
                     out.append(BankedReset(id: "claude-\(out.count)", title: nil, status: "available", expiresAt: ends))
                 }

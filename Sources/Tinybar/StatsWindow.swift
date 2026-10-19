@@ -67,6 +67,8 @@ struct StatsView: View {
     /// The one model the card is filtered to, if any. Not remembered: the window opens on all models.
     @State private var picked: String?
     @State private var summary: StatsSummary?
+    @State private var summaryRevision = 0
+    @State private var loadFailed = false
     @State private var copied = false
     /// Which way the last page change went, so the new card comes in from that side.
     @State private var forward = true
@@ -106,21 +108,29 @@ struct StatsView: View {
             .padding(.trailing, 20)
             .frame(height: 52)
 
-            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page, forward: forward) { name in
+            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page,
+                      forward: forward, loadFailed: loadFailed, summaryRevision: summaryRevision) { name in
                 picked = picked == name ? nil : name
             }
         }
         .background(palette.canvas)
         .onExitCommand { picked = nil }
-        .task(id: "\(rangeRaw)|\(picked ?? "")|\(model.lastUpdated?.timeIntervalSince1970 ?? 0)|\(model.importProgress == nil)") {
+        .task(id: "\(rangeRaw)|\(picked ?? "")|\(model.lastUpdated?.timeIntervalSince1970 ?? 0)|\(model.isRefreshing)") {
+            guard !model.isRefreshing else { return }
             let next = await model.statsSummary(range, model: picked)
+            guard !Task.isCancelled else { return }
+            guard let next else { loadFailed = true; return }
+            loadFailed = false
             // A model not used in the new range has nothing to show: fall back to all models.
-            if let p = picked, let next, !next.models.contains(where: { $0.name == p }) {
+            if let p = picked, !next.models.contains(where: { $0.name == p }) {
                 picked = nil
                 return
             }
             // Everything stays in place and the figures move to their new values.
-            withAnimation(summary == nil || reduceMotion ? nil : .smooth(duration: 0.35)) { summary = next }
+            withAnimation(summary == nil || reduceMotion ? nil : .smooth(duration: 0.35)) {
+                summary = next
+                summaryRevision += 1
+            }
         }
     }
 
@@ -194,6 +204,8 @@ struct StatsCard: View {
     var page: StatsPage = .overview
     /// The page came after the previous one: it enters from the right.
     var forward = true
+    var loadFailed = false
+    var summaryRevision = 0
     /// Filters to a model, or back to all. Nil for the copied image, which is not interactive.
     var pick: ((String) -> Void)?
     @State private var tip: StatsTip?
@@ -215,6 +227,14 @@ struct StatsCard: View {
                     ProgressView(value: importing).frame(width: 220)
                 }
                 .foregroundStyle(palette.ink2)
+            } else if loadFailed {
+                VStack(spacing: 6) {
+                    Text("Couldn't load stats").font(.system(size: 17, weight: .semibold))
+                    Text("Try again after the next refresh.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.ink2)
+                }
+                .foregroundStyle(palette.ink)
             } else if summary != nil {
                 VStack(spacing: 6) {
                     Text("Nothing to count yet").font(.system(size: 17, weight: .semibold))
@@ -223,11 +243,23 @@ struct StatsCard: View {
                         .foregroundStyle(palette.ink2)
                 }
                 .foregroundStyle(palette.ink)
+            } else {
+                Text("Loading stats…")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(palette.ink2)
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
         .background(palette.canvas)
         .coordinateSpace(.named(Self.space))
+        .overlay(alignment: .top) {
+            if loadFailed, summary?.isEmpty == false {
+                Text("Couldn't update stats. Showing the last loaded numbers.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.ink2)
+                    .padding(.top, 5)
+            }
+        }
         .overlay {
             if let tip {
                 TipLayout(anchor: tip.anchor, beside: tip.beside) { TipView(tip: tip, palette: palette) }
@@ -239,8 +271,7 @@ struct StatsCard: View {
         })
         .environment(\.statsTipID, tip?.id)
         .environment(\.statsPick, pick.map { pick in { name in tip = nil; pick(name) } })
-        .onChange(of: summary?.model) { tip = nil }
-        .onChange(of: summary?.range) { tip = nil }
+        .onChange(of: summaryRevision) { tip = nil }
         .onChange(of: page) { tip = nil }
     }
 
@@ -569,15 +600,16 @@ struct TokensHero: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(palette.ink2)
                 Spacer()
-                if let cost = summary.cost {
+                if summary.tokens > 0 {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("$" + Int(cost.rounded()).formatted(.number)).font(.system(size: 16, weight: .semibold)).monospacedDigit()
+                        Text(StatsText.headlineCost(summary.cost, partial: summary.hasUnpriced))
+                            .font(.system(size: 16, weight: .semibold)).monospacedDigit()
                             .contentTransition(.numericText())
                         Text("at API prices").font(.system(size: 16, weight: .medium)).foregroundStyle(palette.ink2)
                     }
                     .statsTip(StatsTip(
                         id: "cost", title: "At API prices",
-                        note: "What these tokens would cost at the providers' pay-as-you-go API prices. Your subscription doesn't charge per token."))
+                        note: StatsText.costNote(summary.cost, partial: summary.hasUnpriced)))
                 }
             }
             HStack(spacing: 14) {
@@ -657,6 +689,9 @@ private struct Bars: View {
                         .clipShape(RoundedRectangle(cornerRadius: dense ? 1 : 2, style: .continuous))
                         .frame(width: slot, height: g.size.height, alignment: .bottom)
                         .opacity(!hovering || lit == "bar:\(bar.start)" ? 1 : 0.35)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(StatsText.barTip(bar, summary.bucket).title)
+                        .accessibilityValue("\(bar.totalTokens.formatted(.number)) tokens. " + StatsText.byProvider(bar.tokens).map { "\($0.label): \($0.value)" }.joined(separator: ", "))
                     }
                 }
             }
@@ -673,7 +708,7 @@ private struct Bars: View {
                 tip.anchor = CGRect(x: CGFloat(i) * slot, y: size.height - h, width: slot, height: h)
                 return tip
             }
-            .accessibilityElement()
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("Tokens \(StatsText.per(summary.bucket))")
             Text("Tokens \(StatsText.per(summary.bucket))")
                 .font(.system(size: 10.5))
@@ -772,6 +807,9 @@ private struct HeatMap: View {
                                             }
                                         }
                                         .frame(width: Self.cell, height: Self.cell)
+                                        .accessibilityElement(children: .ignore)
+                                        .accessibilityLabel(StatsText.hourTip(summary, day: day, hour: hour).title)
+                                        .accessibilityValue("\(heat[day][hour].tokens.formatted(.number)) tokens, \(heat[day][hour].responses.formatted(.number)) responses")
                                 }
                             }
                         }
@@ -815,7 +853,7 @@ private struct ToolBars: View {
         let top = tools.filter { $0.category != .other }.prefix(Self.rows)
         let largest = max(top.first?.calls ?? 1, 1)
         let hovering = lit?.hasPrefix("tool:") == true
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             SectionTitle(text: "Tool calls", palette: palette)
             ForEach(Array(top)) { tool in
                 HStack(spacing: 8) {
@@ -860,7 +898,7 @@ private struct ToolBars: View {
         }
     }
 
-    static let rows = 5
+    static let rows = 7
 }
 
 /// The top models, each a filter: clicking one shows only its stats. Every other model is one
@@ -1113,6 +1151,23 @@ struct SectionTitle: View {
 // MARK: Text
 
 enum StatsText {
+    /// Whole dollars for the headline; "+" when some models have no known price, "—" when none do.
+    static func headlineCost(_ c: Double?, partial: Bool) -> String {
+        guard let c else { return "—" }
+        return "$" + Int(c.rounded()).formatted(.number) + (partial ? "+" : "")
+    }
+
+    /// Cents in hover details, so a small day doesn't read as $0.
+    static func cost(_ c: Double?, partial: Bool) -> String {
+        c == nil ? "—" : Format.cost(c) + (partial ? "+" : "")
+    }
+
+    static func costNote(_ c: Double?, partial: Bool) -> String {
+        if c == nil { return "None of these models has a known API price." }
+        let base = "What these tokens would cost at the providers' pay-as-you-go API prices. Your subscription doesn't charge per token."
+        return partial ? base + " Some models have no known price, so their tokens aren't included." : base
+    }
+
     static let weekdayInitials = ["M", "T", "W", "T", "F", "S", "S"]
     private static let weekdayNames = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
 
@@ -1146,6 +1201,12 @@ enum StatsText {
 
     static func percent(_ f: Double) -> String { "\(Int((f * 100).rounded()))%" }
 
+    /// "1 full workday", "1.5 full workdays".
+    static func count(_ x: Double, _ unit: String) -> String {
+        let n = one(x)
+        return n == "1.0" || n == "1" ? "1 \(unit)" : "\(n) \(unit)s"
+    }
+
     static func one(_ x: Double) -> String {
         x >= 10 ? "\(Int(x.rounded()))" : x.formatted(.number.precision(.fractionLength(1)))
     }
@@ -1164,8 +1225,8 @@ enum StatsText {
     /// Agent Time as full-time work: 40-hour weeks, or 8-hour days below one week.
     static func workTime(_ ms: Int64) -> String? {
         let hours = Double(ms) / 3_600_000
-        if hours >= 40 { return "\(one(hours / 40)) full-time weeks" }
-        if hours >= 8 { return "\(one(hours / 8)) full workdays" }
+        if hours >= 40 { return count(hours / 40, "full-time week") }
+        if hours >= 8 { return count(hours / 8, "full workday") }
         return nil
     }
 
@@ -1214,7 +1275,7 @@ enum StatsText {
         }
         var rows: [StatsTip.Row] = [.init(label: "Tokens", value: bar.totalTokens.formatted(.number))]
         rows += byProvider(bar.tokens)
-        if let cost = bar.cost { rows.append(.init(label: "At API prices", value: "$" + Int(cost.rounded()).formatted(.number))) }
+        if bar.totalTokens > 0 { rows.append(.init(label: "At API prices", value: cost(bar.cost, partial: bar.hasUnpriced))) }
         if bar.prompts > 0 { rows.append(.init(label: "Prompts", value: bar.prompts.formatted(.number))) }
         if bar.toolCalls > 0 { rows.append(.init(label: "Tool calls", value: bar.toolCalls.formatted(.number))) }
         if bar.agentMillis > 0 { rows.append(.init(label: "Agent time", value: duration(bar.agentMillis))) }
@@ -1239,7 +1300,7 @@ enum StatsText {
             .init(label: "Tokens", value: m.tokens.formatted(.number)),
             .init(label: "Share", value: percent(Double(m.tokens) / Double(max(total, 1)))),
         ]
-        if let c = m.cost { rows.append(.init(label: "At API prices", value: "$" + Int(c.rounded()).formatted(.number))) }
+        rows.append(.init(label: "At API prices", value: cost(m.cost, partial: false)))
         rows.append(.init(label: "Responses", value: m.responses.formatted(.number)))
         if let speed = m.speed {
             rows.append(.init(label: "Avg speed", value: "\(one(speed)) tok/s"))

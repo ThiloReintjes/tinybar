@@ -41,7 +41,7 @@ public struct CodexProvider: UsageProvider {
                 lastError = error
             }
         }
-        throw lastError == .notConfigured ? ProviderError.notConfigured : ProviderError.loginExpired
+        throw lastError
     }
 
     private func fetch(with creds: CodexCredentials, source: DataSource) async throws -> ProviderSnapshot {

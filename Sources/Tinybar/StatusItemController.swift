@@ -73,6 +73,14 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             hidePercent: model.settings.hidePercentage,
             dark: button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua,
             alert: model.disruption?.severity)
+        var tip = pinned.map { "\($0.0.displayName) \($0.1.title): \(Int($0.1.remainingPercent.rounded()))% left" }
+        if let incident = model.disruption {
+            tip = [tip, "\(incident.provider.displayName): \(incident.title)"].compactMap { $0 }.joined(separator: "\n")
+        }
+        button.toolTip = tip
+        // The image carries the incident's light; VoiceOver gets it from the label.
+        button.setAccessibilityLabel(tip)
+
         guard key != lastRendered else { return }
         lastRendered = key
 
@@ -86,13 +94,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             alert: key.alert?.nsColor)
         button.title = ""
         button.appearsDisabled = stale
-        var tip = pinned.map { "\($0.0.displayName) \($0.1.title): \(Int($0.1.remainingPercent.rounded()))% left" }
-        if let incident = model.disruption {
-            tip = [tip, "\(incident.provider.displayName): \(incident.title)"].compactMap { $0 }.joined(separator: "\n")
-        }
-        button.toolTip = tip
-        // The image carries the incident's light; VoiceOver gets it from the label.
-        button.setAccessibilityLabel(tip)
     }
 
     @objc private func togglePopover() {

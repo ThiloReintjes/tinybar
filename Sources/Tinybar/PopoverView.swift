@@ -263,8 +263,8 @@ private struct OverviewRow: View {
     var body: some View {
         let state = model.providers[id]
         let snapshot = state?.snapshot
-        let binding = snapshot?.bindingWindow
         let stale = state?.isStale ?? false
+        let binding = (stale ? nil : snapshot?.firstRunOut(includeModelSpecific: false)?.window) ?? snapshot?.bindingWindow
 
         HStack(spacing: 12) {
             LimitRings(windows: snapshot?.ringWindows ?? [], provider: id, lineWidth: 4, gap: 1.5, dimmed: stale)
@@ -279,7 +279,7 @@ private struct OverviewRow: View {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
-                            .help(model.isAuto ? "Shown in the menu bar: it runs out first" : "Pinned to the menu bar")
+                            .help(model.isAuto ? "Shown in the menu bar: it's the closest to running out" : "Pinned to the menu bar")
                             .accessibilityLabel("Shown in the menu bar")
                     }
                 }
@@ -291,7 +291,7 @@ private struct OverviewRow: View {
             if let binding {
                 PercentText(percent: binding.remainingPercent, size: 20)
                     .opacity(stale ? 0.5 : 1)
-            } else if state?.error == nil {
+            } else if snapshot == nil, state?.error == nil {
                 ProgressView().controlSize(.small)
             }
             Image(systemName: "chevron.right")
@@ -322,7 +322,8 @@ private struct OverviewRow: View {
         } else if let binding {
             Text(ResetText.short(binding)).foregroundStyle(.secondary)
         } else if state?.snapshot != nil {
-            Text("No limits reported").foregroundStyle(.secondary)
+            Text(snapshot?.windows.isEmpty == false ? "Model-specific limits only" : "No limits reported")
+                .foregroundStyle(.secondary)
         } else {
             Text("Checking…").foregroundStyle(.secondary)
         }
@@ -512,7 +513,7 @@ private struct StaleBanner: View {
                 Text(StaleText.long(id: id, error: error))
                     .fixedSize(horizontal: false, vertical: true)
                 if let since {
-                    Text("Showing the numbers from \(since.formatted(date: .omitted, time: .shortened)).")
+                    Text("Showing the numbers from \(since.formatted(date: Calendar.current.isDateInToday(since) ? .omitted : .abbreviated, time: .shortened)).")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -531,7 +532,7 @@ private struct WindowRow: View {
     /// When the window runs out at its pace so far, before or after its reset.
     let runOut: Date?
     let pinned: Bool
-    /// Shown because it runs out first, not because the user pinned it.
+    /// Shown because it's the closest to running out, not because the user pinned it.
     let auto: Bool
     let dimmed: Bool
     let onPin: () -> Void
@@ -580,8 +581,8 @@ private struct WindowRow: View {
 
     private var help: String {
         switch (pinned, auto) {
-        case (true, true): "In the menu bar because it runs out first. Click to keep it there."
-        case (true, false): "Pinned to the menu bar. Click to show whichever limit runs out first."
+        case (true, true): "In the menu bar because it's the closest to running out. Click to keep it there."
+        case (true, false): "Pinned to the menu bar. Click to show whichever limit is closest to running out."
         default: "Click to pin to the menu bar"
         }
     }
@@ -604,7 +605,7 @@ private struct Extras: View {
             if let credits = snapshot.credits, credits.hasCredits {
                 line("Credits", icon: "circle.hexagongrid", value: credits.unlimited
                     ? "Unlimited"
-                    : credits.balance.map { $0.formatted(.number.precision(.fractionLength(0))) } ?? "—")
+                    : credits.balance.map { $0.formatted(.number.precision(.significantDigits(1...6))) } ?? "—")
             }
             if let banked = snapshot.bankedResets?.filter(\.isAvailable), !banked.isEmpty {
                 let next = banked.compactMap(\.expiresAt).min()
@@ -682,10 +683,13 @@ private struct UsagePanel: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 1) {
-                            Text(Format.cost(summary.cost))
+                            Text(Format.cost(summary.cost) + (summary.cost != nil && summary.hasUnpriced ? "+" : ""))
                                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                                 .tracking(-0.5)
                                 .monospacedDigit()
+                                .help(summary.hasUnpriced
+                                    ? "Some models have no known price, so their tokens aren't included."
+                                    : "What these tokens would cost at current API prices.")
                             Text(range == .today ? "at API prices, so far today" : "at API prices")
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
@@ -800,7 +804,9 @@ private struct UpdatePill: View {
         switch updater.state {
         case .preparing: "Downloading with Homebrew. Tinybar restarts when it's ready."
         case let .failed(_, reason): "\(reason) Click to copy the command to run in Terminal: \(Updater.command)"
-        default: "Install Tinybar \(updater.release?.version ?? "") and restart"
+        default: updater.installsWithHomebrew
+            ? "Install Tinybar \(updater.release?.version ?? "") and restart"
+            : "Open the download page for Tinybar \(updater.release?.version ?? "")"
         }
     }
 
@@ -847,9 +853,11 @@ private struct AboutPage: View {
             .padding(14)
             .platter()
             .padding(.top, 4)
-            .task(id: visible) {
-                guard visible else { return }
-                coverage = await model.statsSummary(.month)?.activityCoverage ?? [:]
+            .task(id: "\(visible)|\(model.lastUpdated?.timeIntervalSince1970 ?? 0)|\(model.isRefreshing)") {
+                guard visible, !model.isRefreshing else { return }
+                let next = await model.statsSummary(.month)
+                guard !Task.isCancelled, let next else { return }
+                coverage = next.activityCoverage
             }
     }
 }
@@ -909,7 +917,7 @@ private struct SettingsPage: View {
                         if auto { settings.pinnedLimit = nil } else if let (id, w) = model.pinned { model.pin(id, w) }
                     }))
                 {
-                    Text("Show whichever limit runs out first")
+                    Text("Show the limit closest to running out")
                 }
             }
         }

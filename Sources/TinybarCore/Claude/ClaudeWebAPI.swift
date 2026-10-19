@@ -24,7 +24,12 @@ enum ClaudeWebAPI {
         }
     }
 
-    static func fetch(sessionKey: String, session: URLSession) async throws -> ProviderSnapshot {
+    private static let overageBackoff = HTTP.Backoff()
+
+    static func fetch(
+        sessionKey: String, session: URLSession, backoff: HTTP.Backoff = overageBackoff,
+        now: @Sendable () -> Date = { Date() }) async throws -> ProviderSnapshot
+    {
         let orgs = try JSONDecoder().decode([Organization].self, from: try await get("organizations", sessionKey, session))
         // The subscription lives on the chat organization, not API-only ones.
         guard let org = orgs.first(where: { ($0.capabilities ?? []).contains("chat") })
@@ -39,13 +44,19 @@ enum ClaudeWebAPI {
         var snapshot = ClaudeUsageAPI.snapshot(from: usage, plan: nil)
         snapshot.source = .browser
 
-        if snapshot.extraUsage == nil,
-           let data = try? await get("organizations/\(org.uuid)/overage_spend_limit", sessionKey, session),
-           let overage = try? JSONDecoder().decode(OverageLimit.self, from: data),
-           overage.isEnabled == true, let used = overage.usedCredits
-        {
-            snapshot.extraUsage = ExtraUsageSpend(
-                used: used / 100, limit: overage.monthlyCreditLimit.map { $0 / 100 }, currency: overage.currency ?? "USD")
+        if snapshot.extraUsage == nil, await backoff.permitsRequest(at: now()) {
+            do {
+                let data = try await get("organizations/\(org.uuid)/overage_spend_limit", sessionKey, session)
+                let overage = try JSONDecoder().decode(OverageLimit.self, from: data)
+                if overage.isEnabled == true, let used = overage.usedCredits {
+                    snapshot.extraUsage = ExtraUsageSpend(
+                        used: used / 100, limit: overage.monthlyCreditLimit.map { $0 / 100 }, currency: overage.currency ?? "USD")
+                }
+            } catch ProviderError.rateLimited(let delay) {
+                await backoff.deferRequests(until: now().addingTimeInterval(delay ?? 300))
+            } catch {
+                // Optional spending data must not hide fresh limits.
+            }
         }
         return snapshot
     }

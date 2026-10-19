@@ -56,12 +56,15 @@ enum CodexAppServer {
         let extras = (r.rateLimitsByLimitId ?? [:])
             .filter { $0.key != (main.limitId ?? "codex") }
             .sorted { $0.key < $1.key }
-        for (snapshot, isExtra) in [(main, false)] + extras.map({ ($0.value, true) }) {
-            let name = isExtra ? (snapshot.limitName ?? snapshot.limitId) : nil
-            let prefix = name.map { $0.lowercased().replacingOccurrences(of: " ", with: "-") }
+        for (snapshot, isExtra, key) in [(main, false, "codex")] + extras.map({ ($0.value, true, $0.key) }) {
+            let name = isExtra ? (snapshot.limitName ?? snapshot.limitId ?? key) : nil
+            let prefix = name.map(CodexUsageAPI.slugify)
             for (w, fallbackID) in [(snapshot.primary, "primary"), (snapshot.secondary, "secondary")] {
                 guard let w else { continue }
-                let seconds = w.windowDurationMins.map { $0 * 60 }
+                let seconds = w.windowDurationMins.flatMap { minutes -> Int? in
+                    let (seconds, overflow) = minutes.multipliedReportingOverflow(by: 60)
+                    return overflow || seconds <= 0 ? nil : seconds
+                }
                 let base = WindowKind(durationSeconds: seconds).idComponent ?? fallbackID
                 let id = prefix.map { "\($0)-\(base)" } ?? base
                 guard seen.insert(id).inserted else { continue }
@@ -107,7 +110,7 @@ enum CodexAppServer {
         return candidates.first { fm.isExecutableFile(atPath: $0) }
     }
 
-    private static func runRPC(executable: String, timeout: TimeInterval) throws -> Response {
+    static func runRPC(executable: String, timeout: TimeInterval) throws -> Response {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = ["-s", "read-only", "-a", "never", "app-server"]
@@ -119,32 +122,41 @@ enum CodexAppServer {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
-
-        do { try process.run() } catch { throw ProviderError.unexpected("Could not launch codex: \(error.localizedDescription)") }
-        defer {
-            try? stdin.fileHandleForWriting.close()
-            if process.isRunning { process.terminate() }
+        guard fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
+            throw ProviderError.unexpected("Could not prepare codex input")
         }
 
-        // Kill the child if it hangs; closing its stdout unblocks our reader.
-        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        do { try process.run() } catch { throw ProviderError.unexpected("Could not launch codex: \(error.localizedDescription)") }
+        // Process creates its own group on macOS; include the npm launcher's native child.
+        let pid = process.processIdentifier
+        let target = getpgid(pid) == pid ? -pid : pid
+        defer {
+            try? stdin.fileHandleForWriting.close()
+            kill(target, SIGKILL)
+            process.waitUntilExit()
+        }
+
+        // SIGTERM can be ignored; kill the group so inherited stdout handles close too.
+        let watchdog = DispatchWorkItem { kill(target, SIGKILL) }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
         defer { watchdog.cancel() }
 
         func send(_ object: [String: Any]) throws {
             var data = try JSONSerialization.data(withJSONObject: object)
             data.append(0x0A)
-            try stdin.fileHandleForWriting.write(contentsOf: data)
+            do { try stdin.fileHandleForWriting.write(contentsOf: data) }
+            catch { throw ProviderError.unexpected("codex app-server closed its input") }
         }
 
         var reader = LineReader(handle: stdout.fileHandleForReading)
         func response(id: Int) throws -> [String: Any] {
-            while let line = reader.next() {
+            while let line = try reader.next() {
                 guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                       (obj["id"] as? NSNumber)?.intValue == id
                 else { continue }
-                if let error = obj["error"] as? [String: Any] {
-                    throw ProviderError.unexpected("codex app-server: \(error["message"] as? String ?? "error")")
+                if obj["error"] is [String: Any] {
+                    // CLI errors can include upstream response bodies or credential details.
+                    throw ProviderError.unexpected("codex app-server request failed")
                 }
                 return obj
             }
@@ -156,7 +168,7 @@ enum CodexAppServer {
         try send(["method": "initialized", "params": [String: Any]()])
         try send(["id": 2, "method": "account/rateLimits/read", "params": [String: Any]()])
         let message = try response(id: 2)
-        guard let result = message["result"] else { throw ProviderError.unexpected("codex app-server: no result") }
+        guard let result = message["result"] as? [String: Any] else { throw ProviderError.unexpected("codex app-server: no result") }
         let data = try JSONSerialization.data(withJSONObject: result)
         do {
             return try JSONDecoder().decode(Response.self, from: data)
@@ -173,7 +185,7 @@ struct LineReader {
 
     init(handle: FileHandle) { self.handle = handle }
 
-    mutating func next() -> Data? {
+    mutating func next() throws -> Data? {
         while true {
             if let nl = buffer.firstIndex(of: 0x0A) {
                 let line = buffer[buffer.startIndex..<nl]
@@ -187,6 +199,7 @@ struct LineReader {
                 return buffer
             }
             buffer.append(chunk)
+            guard buffer.count <= 1 << 20 else { throw ProviderError.unexpected("codex app-server response is too large") }
         }
     }
 }
