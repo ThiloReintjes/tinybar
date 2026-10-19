@@ -279,7 +279,7 @@ private struct OverviewRow: View {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
-                            .help(model.isAuto ? "Shown in the menu bar: it runs out first" : "Pinned to the menu bar")
+                            .help(model.isAuto ? "Shown in the menu bar: it's the closest to running out" : "Pinned to the menu bar")
                             .accessibilityLabel("Shown in the menu bar")
                     }
                 }
@@ -532,7 +532,7 @@ private struct WindowRow: View {
     /// When the window runs out at its pace so far, before or after its reset.
     let runOut: Date?
     let pinned: Bool
-    /// Shown because it runs out first, not because the user pinned it.
+    /// Shown because it's the closest to running out, not because the user pinned it.
     let auto: Bool
     let dimmed: Bool
     let onPin: () -> Void
@@ -581,8 +581,8 @@ private struct WindowRow: View {
 
     private var help: String {
         switch (pinned, auto) {
-        case (true, true): "In the menu bar because it runs out first. Click to keep it there."
-        case (true, false): "Pinned to the menu bar. Click to show whichever limit runs out first."
+        case (true, true): "In the menu bar because it's the closest to running out. Click to keep it there."
+        case (true, false): "Pinned to the menu bar. Click to show whichever limit is closest to running out."
         default: "Click to pin to the menu bar"
         }
     }
@@ -804,7 +804,9 @@ private struct UpdatePill: View {
         switch updater.state {
         case .preparing: "Downloading with Homebrew. Tinybar restarts when it's ready."
         case let .failed(_, reason): "\(reason) Click to copy the command to run in Terminal: \(Updater.command)"
-        default: "Install Tinybar \(updater.release?.version ?? "") and restart"
+        default: updater.installsWithHomebrew
+            ? "Install Tinybar \(updater.release?.version ?? "") and restart"
+            : "Open the download page for Tinybar \(updater.release?.version ?? "")"
         }
     }
 
@@ -915,7 +917,7 @@ private struct SettingsPage: View {
                         if auto { settings.pinnedLimit = nil } else if let (id, w) = model.pinned { model.pin(id, w) }
                     }))
                 {
-                    Text("Show whichever limit runs out first")
+                    Text("Show the limit closest to running out")
                 }
             }
         }

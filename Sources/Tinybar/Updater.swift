@@ -83,6 +83,9 @@ final class Updater {
 
     // MARK: Installing
 
+    /// Whether Update installs in place; otherwise it opens the release page.
+    var installsWithHomebrew: Bool { brew != nil }
+
     /// Homebrew, if Tinybar was installed with it.
     private var brew: String? {
         let runningApp = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
