@@ -85,6 +85,8 @@ public struct UpdateSchedule: Sendable, Hashable {
     }
 
     public mutating func attempt(at now: Date, version current: String) {
+        // An answer for an older version doesn't count, so a failed check retries within the hour.
+        if version != current { lastCheck = nil }
         lastAttempt = now
         version = current
     }

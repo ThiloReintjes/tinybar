@@ -218,4 +218,6 @@ private func codexLines(context: Int, output: Int) -> String {
     var updated = checked
     updated.attempt(at: t0 + 60, version: "0.5.1")
     #expect(!updated.isDue(now: t0 + 120, version: "0.5.1"))
+    // That failed, and the old version's answer doesn't hold it off for a day.
+    #expect(updated.isDue(now: t0 + 60 + 3600, version: "0.5.1"))
 }

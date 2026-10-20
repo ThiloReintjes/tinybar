@@ -1168,7 +1168,7 @@ enum StatsText {
     /// Whole dollars for the headline; "+" when some models have no known price, "—" when none do.
     static func headlineCost(_ c: Double?, partial: Bool) -> String {
         guard let c else { return "—" }
-        return "$" + Int(c.rounded()).formatted(.number) + (partial ? "+" : "")
+        return "$" + c.formatted(.number.precision(.fractionLength(0))) + (partial ? "+" : "")
     }
 
     /// Cents in hover details, so a small day doesn't read as $0.
