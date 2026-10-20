@@ -29,13 +29,24 @@ final class StatsWindowController: NSObject, NSWindowDelegate {
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.delegate = self
+        // The hosting controller initially gives the window a zero-sized frame. Establish its
+        // content size, then measure again with the title bar's safe area before positioning it.
+        window.setContentSize(host.view.fittingSize)
+        host.view.layoutSubtreeIfNeeded()
+        window.setContentSize(host.view.fittingSize)
         window.center()
         window.setFrameAutosaveName("Stats")
+        // Recover positions saved by the old zero-sized layout or a disconnected display.
+        if let screen = window.screen, !screen.visibleFrame.contains(window.frame) {
+            window.center()
+        }
         self.window = window
         window.makeKeyAndOrderFront(nil)
     }
 
     func windowWillClose(_ notification: Notification) {
+        // AppKit may retain the closed window. Free the name so the next one can restore it.
+        window?.setFrameAutosaveName("")
         // Drop the SwiftUI tree with the window; the next open builds it fresh.
         window?.contentViewController = nil
         window = nil
@@ -114,6 +125,9 @@ struct StatsView: View {
             }
         }
         .background(palette.canvas)
+        // AppStorage can deliver an update outside the button action's transaction. Tie motion
+        // to the rendered selection so clicks, shortcuts and preference updates animate alike.
+        .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35), value: page)
         .onExitCommand { picked = nil }
         .task(id: "\(rangeRaw)|\(picked ?? "")|\(model.lastUpdated?.timeIntervalSince1970 ?? 0)|\(model.isRefreshing)") {
             guard !model.isRefreshing else { return }
@@ -140,7 +154,7 @@ struct StatsView: View {
         forward = all.firstIndex(of: next)! > all.firstIndex(of: page)!
         // A turn later, so the card leaving already knows which way to go.
         DispatchQueue.main.async {
-            withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35)) { pageRaw = next.rawValue }
+            pageRaw = next.rawValue
         }
     }
 

@@ -231,6 +231,8 @@ Grok and Kimi providers; token history for other CLIs; multiple accounts; token 
 A separate window for numbers that are fun rather than actionable, built to be shared as a
 screenshot. Claude Code and Codex only. Opened from the popover footer (⌘S); built when opened and
 released when closed, so it costs nothing otherwise. Activity is counted at ingest (ADR 0006).
+The window opens centered, remembers its position, and recenters saved positions outside the visible
+screen. ⌘W closes it.
 
 **Layout**: fixed 960 × 600 cards under a title bar row with the pages (Overview, Commands,
 Models, Languages; ⌘1 to ⌘4, the last one remembered), the range (7 days, 30 days, All time) and
