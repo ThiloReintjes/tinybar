@@ -212,7 +212,8 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
   to approve the first launch. With an account: Developer ID signing and notarization
   (`build-app.sh` supports both), then the official cask (`brew install --cask tinybar`; Homebrew
   rejects casks that fail Gatekeeper).
-- **Updates** (ADR 0007): once a day, `GET api.github.com/repos/ThiloReintjes/tinybar/releases/latest`.
+- **Updates** (ADR 0007): once a day, `GET api.github.com/repos/ThiloReintjes/tinybar/releases/latest`;
+  an hour after a check that got no answer, and right away when Tinybar's own version changes.
   A newer version replaces the footer's check time with "Update to x.y.z" and is notified once
   (with Limit Alerts' setting). Clicking it, for a Homebrew install: pull the tap, check the cask
   lists that version, `brew fetch` it ("Updating…"), then hand over to a script that waits for
