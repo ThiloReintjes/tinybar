@@ -184,3 +184,38 @@ private func codexLines(context: Int, output: Int) -> String {
     #expect(!ReleaseCheck.isNewer("0.4", than: "0.4.0"))
     #expect(!ReleaseCheck.isNewer("0.3.9", than: "0.4.0"))
 }
+
+@Test func updateChecksWaitADayAfterAnAnswer() {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    var schedule = UpdateSchedule()
+    #expect(schedule.isDue(now: t0, version: "0.5.0"))
+    schedule.attempt(at: t0, version: "0.5.0")
+    schedule.lastCheck = t0
+    #expect(!schedule.isDue(now: t0 + 23 * 3600, version: "0.5.0"))
+    #expect(schedule.isDue(now: t0 + 24 * 3600, version: "0.5.0"))
+}
+
+@Test func failedUpdateChecksRetryWithinTheHour() {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    // Answered a day ago, then the next one failed.
+    var schedule = UpdateSchedule(lastCheck: t0 - 24 * 3600, lastAttempt: t0 - 24 * 3600, version: "0.5.0")
+    schedule.attempt(at: t0, version: "0.5.0")
+    #expect(!schedule.isDue(now: t0 + 59 * 60, version: "0.5.0"))
+    #expect(schedule.isDue(now: t0 + 3600, version: "0.5.0"))
+    // Never answered at all: the same hour, not a day.
+    var fresh = UpdateSchedule()
+    fresh.attempt(at: t0, version: "0.5.0")
+    #expect(fresh.isDue(now: t0 + 3600, version: "0.5.0"))
+}
+
+@Test func aNewVersionChecksRightAway() {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    let checked = UpdateSchedule(lastCheck: t0, lastAttempt: t0, version: "0.5.0")
+    #expect(checked.isDue(now: t0 + 60, version: "0.5.1"))
+    // Stores from before the version was kept check once too.
+    #expect(UpdateSchedule(lastCheck: t0).isDue(now: t0 + 60, version: "0.5.0"))
+    // Once the new version has asked, even without an answer, the usual waits apply.
+    var updated = checked
+    updated.attempt(at: t0 + 60, version: "0.5.1")
+    #expect(!updated.isDue(now: t0 + 120, version: "0.5.1"))
+}

@@ -117,7 +117,8 @@ When a login expires the card turns **stale** and tells you to run `claude`, `co
 explains why and what it costs.
 
 The other network calls carry no login: `models.dev/api.json` for prices and GitHub's latest-release
-API for updates, each at most once a day, and the public status pages of Claude, OpenAI and Cursor
+API for updates, each once a day (updates retry after an hour if GitHub doesn't answer, and check
+right away after Tinybar itself updates), and the public status pages of Claude, OpenAI and Cursor
 on each check (about 20 KB).
 
 ## Permissions

@@ -57,3 +57,35 @@ public enum ReleaseCheck {
         return a.prerelease.count > b.prerelease.count
     }
 }
+
+/// When to ask GitHub next (SPEC §11): a day after a check that got an answer, an hour after one
+/// that didn't, and right away once Tinybar runs a different version than the one that last asked.
+public struct UpdateSchedule: Sendable, Hashable {
+    public static let interval: TimeInterval = 24 * 3600
+    public static let retry: TimeInterval = 3600
+
+    /// The last check that got an answer.
+    public var lastCheck: Date?
+    /// The last check, answered or not.
+    public var lastAttempt: Date?
+    /// The running version at the last check.
+    public var version: String?
+
+    public init(lastCheck: Date? = nil, lastAttempt: Date? = nil, version: String? = nil) {
+        self.lastCheck = lastCheck
+        self.lastAttempt = lastAttempt
+        self.version = version
+    }
+
+    public func isDue(now: Date, version current: String) -> Bool {
+        guard version == current else { return true }
+        if let lastAttempt, now.timeIntervalSince(lastAttempt) < Self.retry { return false }
+        guard let lastCheck else { return true }
+        return now.timeIntervalSince(lastCheck) >= Self.interval
+    }
+
+    public mutating func attempt(at now: Date, version current: String) {
+        lastAttempt = now
+        version = current
+    }
+}
