@@ -22,7 +22,6 @@ final class Updater {
 
     static let cask = "thiloreintjes/tinybar/tinybar"
     static let command = "brew upgrade --cask \(cask)"
-    private static let checkInterval: TimeInterval = 24 * 3600
 
     private let defaults = UserDefaults.standard
     private var log: URL { Paths.appSupport.appendingPathComponent("update.log") }
@@ -58,15 +57,27 @@ final class Updater {
         current.map { ReleaseCheck.isNewer(r.version, than: $0) } ?? false
     }
 
-    /// Asks GitHub if a day has passed since the last check. Returns a release seen for the first
+    private var schedule: UpdateSchedule {
+        get {
+            UpdateSchedule(
+                lastCheck: defaults.object(forKey: "lastUpdateCheck") as? Date,
+                lastAttempt: defaults.object(forKey: "lastUpdateAttempt") as? Date,
+                version: defaults.string(forKey: "lastUpdateCheckVersion"))
+        }
+        set {
+            defaults.set(newValue.lastCheck, forKey: "lastUpdateCheck")
+            defaults.set(newValue.lastAttempt, forKey: "lastUpdateAttempt")
+            defaults.set(newValue.version, forKey: "lastUpdateCheckVersion")
+        }
+    }
+
+    /// Asks GitHub when `UpdateSchedule` says it's time. Returns a release seen for the first
     /// time, to notify about once.
     func checkIfDue(now: Date = Date()) async -> Release? {
-        guard current != nil else { return nil }
-        if let last = defaults.object(forKey: "lastUpdateCheck") as? Date, now.timeIntervalSince(last) < Self.checkInterval {
-            return nil
-        }
-        defaults.set(now, forKey: "lastUpdateCheck")
+        guard let current, schedule.isDue(now: now, version: current) else { return nil }
+        schedule.attempt(at: now, version: current)
         guard let latest = try? await ReleaseCheck.latest() else { return nil }
+        schedule.lastCheck = now
         let isFirstSighting = known?.version != latest.version
         known = latest
         if case .preparing = state { return isNewer(latest) && isFirstSighting ? latest : nil }
