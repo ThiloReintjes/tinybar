@@ -58,6 +58,8 @@ public struct CodexLogParser: Sendable, Codable {
     private var lastTimestamp: Date?
     private var replayThrough: Date?
     private var replayTotal: [Int64]?
+    /// The cumulative total already counted when `replayThrough` was set.
+    private var replaySeenTotal: [Int64]?
 
     /// Rebuild context from a rewritten file without counting its already-seen prefix again.
     init(replaying previous: CodexLogParser) {
@@ -66,7 +68,14 @@ public struct CodexLogParser: Sendable, Codable {
         } else {
             replayThrough = previous.lastTimestamp ?? previous.replayThrough
             lastTimestamp = replayThrough
-            if replayThrough == nil { replayTotal = previous.lastTotal }
+            if replayThrough == nil {
+                replayTotal = previous.lastTotal
+            } else if let seen = previous.replaySeenTotal, let last = previous.lastTotal {
+                // A shorter copy read since then must not lower the watermark.
+                replaySeenTotal = zip(seen, last).map { max($0, $1) }
+            } else {
+                replaySeenTotal = previous.replaySeenTotal ?? previous.lastTotal
+            }
         }
     }
     // Activity state. Optional so cursors saved by earlier versions still decode.
@@ -94,6 +103,11 @@ public struct CodexLogParser: Sendable, Codable {
         let head = UnsafeRawBufferPointer(rebasing: line.prefix(160))
         if Self.contains(head, Self.tokenCountMarker) {
             let record = consumeTokenCount(Data(line))
+            // A line at the last instant already read may still be new: its cumulative total says so.
+            if replay, timestamp == replayThrough, let seen = replaySeenTotal, let now = lastTotal,
+               now != seen, zip(now, seen).allSatisfy({ $0 >= $1 }) {
+                return record
+            }
             return replay ? nil : record
         }
         if Self.activityMarkers.contains(where: { Self.contains(head, $0) }) {

@@ -146,6 +146,10 @@ public enum StatusFeed {
                   }) else {
                 throw ProviderError.unexpected("Unexpected status page components")
             }
+            let impact = entry["impact"] ?? NSNull()
+            guard impact is NSNull || (impact as? String).map({ $0 == "none" || severity(impact: $0) != nil }) == true else {
+                throw ProviderError.unexpected("Unexpected status page impact")
+            }
             let affected = listed.filter { ($0["name"] as? String).map(counts) ?? false }
             if !listed.isEmpty && affected.isEmpty { continue }
             let fromComponents = affected.compactMap { ($0["status"] as? String).flatMap(severity(componentStatus:)) }.max()

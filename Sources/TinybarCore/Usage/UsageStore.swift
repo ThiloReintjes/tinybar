@@ -470,6 +470,17 @@ public actor UsageStore {
             stats.replace(
                 day: day, provider: provider, model: model,
                 old: oldStats?.contributions(tokens: old) ?? [:], new: newStats.contributions(tokens: final))
+            if final.context < old.context {
+                // A complete copy can carry less context than its preliminary line: drop the peak
+                // that line set to the largest of the day's other messages.
+                let others = try db.run("""
+                SELECT max(input + cache_write + cache_read) FROM claude_message
+                WHERE day = ? AND provider = ? AND model = ? AND id != ?
+                """, [.text(day), .text(provider.rawValue), .text(model), .text(id)]).first?.first?.int ?? 0
+                try db.run("""
+                UPDATE daily_stat SET value = ? WHERE day = ? AND provider = ? AND model = ? AND key = ? AND value = ?
+                """, [.int(others), .text(day), .text(provider.rawValue), .text(model), .text(StatKey.contextMax), .int(old.context)])
+            }
             stats.addMaximum(day: day, provider: provider, model: model, StatKey.contextMax, final.context)
             try write(stats)
             try db.run("""
@@ -541,7 +552,9 @@ public actor UsageStore {
         var index = 0
         while index < cursors.count {
             let batch = cursors[index..<min(index + batchSize, cursors.count)]
-            try db.transaction {
+            let finished = try db.transaction {
+                // Another run (the CLI, a second app) may have finished and dropped the checkpoints.
+                if try hasCompletedStatsBackfill() { return true }
                 for (path, source, limit) in batch {
                     let checkpoint = "stats_backfill_file:" + path
                     guard try db.run("SELECT 1 FROM meta WHERE key = ?", [.text(checkpoint)]).isEmpty else { continue }
@@ -560,7 +573,9 @@ public actor UsageStore {
                     result.bytesRead += read
                     result.recordsAdded += added
                 }
+                return false
             }
+            if finished { break }
             index += batch.count
             progress?(IngestProgress(filesDone: index, filesTotal: cursors.count))
         }
@@ -590,7 +605,9 @@ public actor UsageStore {
         var index = 0
         while index < paths.count {
             let batch = paths[index..<min(index + batchSize, paths.count)]
-            try db.transaction {
+            let finished = try db.transaction {
+                // Another run (the CLI, a second app) may have finished and dropped the checkpoints.
+                if try hasCompletedLongContextBackfill() { return true }
                 for (path, limit) in batch {
                     let checkpoint = "long_context_backfill_file:" + path
                     guard try db.run("SELECT 1 FROM meta WHERE key = ?", [.text(checkpoint)]).isEmpty else { continue }
@@ -605,7 +622,9 @@ public actor UsageStore {
                     result.bytesRead += read
                     result.recordsAdded += added
                 }
+                return false
             }
+            if finished { break }
             index += batch.count
             progress?(IngestProgress(filesDone: index, filesTotal: paths.count))
         }

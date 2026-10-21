@@ -72,7 +72,7 @@ import Testing
     #expect(try StatusFeed.incidentIOAffected(native, group: "Codex").isEmpty)
 }
 
-@Test func malformedIncidentRecordsAndNativeComponentsThrow() {
+@Test func malformedIncidentRecordsAndNativeComponentsThrow() throws {
     let base = URL(string: "https://status.example.com")!
     for entry in ["{}", #"{"name":"Outage"}"#, #"{"name":4,"status":"investigating"}"#] {
         let data = Data("{\"incidents\":[\(entry)]}".utf8)
@@ -84,6 +84,14 @@ import Testing
         let data = Data("{\"summary\":{\"affected_components\":[{\"component_id\":\"cli\",\"status\":\"full_outage\"}],\"structure\":{\"items\":[{\"group\":{\"name\":\"Codex\",\"components\":\(components)}}]}}}".utf8)
         #expect(throws: (any Error).self) { try StatusFeed.incidentIOAffected(data, group: "Codex") }
     }
+    for impact in ["true", "3", #""catastrophic""#] {
+        let data = Data("{\"incidents\":[{\"name\":\"Outage\",\"status\":\"investigating\",\"impact\":\(impact)}]}".utf8)
+        #expect(throws: (any Error).self) {
+            try StatusFeed.statuspage(data, provider: .claude, base: base, components: nil)
+        }
+    }
+    let noImpact = Data(#"{"incidents":[{"name":"Notice","status":"investigating","impact":"none"}]}"#.utf8)
+    #expect(try StatusFeed.statuspage(noImpact, provider: .claude, base: base, components: nil).isEmpty)
     let badAffected = Data(#"{"summary":{"affected_components":[{}],"structure":{"items":[]}}}"#.utf8)
     #expect(throws: (any Error).self) { try StatusFeed.incidentIOAffected(badAffected, group: "Codex") }
 }
