@@ -11,6 +11,8 @@ final class SQLiteDB {
         guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
             throw ProviderError.unexpected("Cannot open database at \(path)")
         }
+        // The app, its history import child and the CLI share the file; wait out each other's writes.
+        sqlite3_busy_timeout(db, 5000)
         try exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-2000;")
     }
 

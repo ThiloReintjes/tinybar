@@ -13,6 +13,37 @@ private func rolloutCount(_ second: Int, input: Int, output: Int, totalInput: In
     #expect(parser.consume(line: Data(rolloutCount(2, input: 50, output: 5, totalInput: 150, totalOutput: 15).utf8))?.tokens.total == 55)
 }
 
+@Test func rewriteKeepsNewUsageAtTheLastSeenInstant() {
+    var original = CodexLogParser()
+    _ = original.consume(line: Data(rolloutCount(1, input: 100, output: 10, totalInput: 100, totalOutput: 10).utf8))
+    var parser = CodexLogParser(replaying: original)
+    #expect(parser.consume(line: Data(rolloutCount(1, input: 100, output: 10, totalInput: 100, totalOutput: 10).utf8)) == nil)
+    #expect(parser.consume(line: Data(rolloutCount(1, input: 50, output: 5, totalInput: 150, totalOutput: 15).utf8))?.tokens.total == 55)
+}
+
+@Test func shorterCopyDoesNotLowerTheReplayWatermark() {
+    let a = Data(rolloutCount(1, input: 100, output: 10, totalInput: 100, totalOutput: 10).utf8)
+    let b = Data(rolloutCount(2, input: 50, output: 5, totalInput: 150, totalOutput: 15).utf8)
+    var full = CodexLogParser()
+    _ = full.consume(line: a); _ = full.consume(line: b)
+    var shorter = CodexLogParser(replaying: full)
+    #expect(shorter.consume(line: a) == nil)
+    var restored = CodexLogParser(replaying: shorter)
+    #expect(restored.consume(line: a) == nil)
+    #expect(restored.consume(line: b) == nil)
+}
+
+@Test func storesWaitForAnotherProcessesWrite() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    _ = try UsageStore(path: url)
+    let holder = try SQLiteDB(path: url.path)
+    try holder.exec("BEGIN IMMEDIATE")
+    nonisolated(unsafe) let release = holder
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { try? release.exec("COMMIT") }
+    _ = try UsageStore(path: url)
+}
+
 @Test func sameSizeRewriteReadsNewUsage() async throws {
     for claude in [false, true] {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
