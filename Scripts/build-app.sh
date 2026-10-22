@@ -1,8 +1,9 @@
 #!/bin/bash
 # Builds a universal Tinybar.app into build/, ad-hoc signed by default.
 #
-# For distribution, set SIGN_IDENTITY="Developer ID Application: …". With NOTARY_PROFILE set too
-# (a `xcrun notarytool store-credentials` profile), the app is notarized and stapled.
+# For distribution, set SIGN_IDENTITY="Developer ID Application: …". With notary credentials too,
+# the app is notarized and stapled: NOTARY_PROFILE (a `xcrun notarytool store-credentials` profile),
+# or an App Store Connect API key as NOTARY_KEY (path to the .p8), NOTARY_KEY_ID and NOTARY_ISSUER.
 # `--zip` also writes build/Tinybar-<version>.zip, the release asset.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,9 +28,14 @@ echo "Built $APP"
 if [[ "${1:-}" == "--zip" ]]; then
     VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
     ZIP="build/Tinybar-$VERSION.zip"
-    if [[ -n "${SIGN_IDENTITY:-}" && -n "${NOTARY_PROFILE:-}" ]]; then
+    if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+        NOTARY=(--keychain-profile "$NOTARY_PROFILE")
+    elif [[ -n "${NOTARY_KEY:-}" ]]; then
+        NOTARY=(--key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+    fi
+    if [[ -n "${SIGN_IDENTITY:-}" && -n "${NOTARY+x}" ]]; then
         ditto -c -k --keepParent "$APP" "$ZIP"
-        xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+        xcrun notarytool submit "$ZIP" "${NOTARY[@]}" --wait
         xcrun stapler staple "$APP"
     fi
     rm -f "$ZIP"

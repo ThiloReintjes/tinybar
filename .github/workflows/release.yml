@@ -1,8 +1,8 @@
 name: Release
 
 # Push a tag like v0.1.0 to publish a GitHub Release with Tinybar-<version>.zip attached and
-# bump the cask in ThiloReintjes/homebrew-tinybar. Releases are ad-hoc signed until the repo has
-# Developer ID secrets.
+# bump the cask in ThiloReintjes/homebrew-tinybar. The app is signed with Developer ID and notarized;
+# the release stops if either is missing, so an ad-hoc build never reaches Homebrew.
 on:
   push:
     tags: ["v*"]
@@ -27,7 +27,43 @@ jobs:
           [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} ≠ v${version}"; exit 1; }
           echo "VERSION=${version}" >> "$GITHUB_ENV"
       - run: swift test
-      - run: ./Scripts/build-app.sh --zip
+      - name: Import the Developer ID certificate
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          printf '%s' "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$keychain" -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/developer-id.p12"
+          # Pinned to the team that holds the Apple Developer Program membership.
+          identity=$(security find-identity -v -p codesigning "$keychain" | grep -o '"Developer ID Application: .* (Y7CP988PG5)"' | head -1 | tr -d '"')
+          [[ -n "$identity" ]] || { echo "No Developer ID Application identity for Y7CP988PG5 in DEVELOPER_ID_P12"; exit 1; }
+          echo "SIGN_IDENTITY=${identity}" >> "$GITHUB_ENV"
+      - name: Build, sign and notarize
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          export NOTARY_KEY="$RUNNER_TEMP/notary.p8"
+          printf '%s' "$NOTARY_KEY_P8" | base64 --decode > "$NOTARY_KEY"
+          ./Scripts/build-app.sh --zip
+          rm "$NOTARY_KEY"
+      - name: Check Gatekeeper accepts the release
+        run: |
+          check="$RUNNER_TEMP/check"
+          mkdir "$check" && ditto -x -k "build/Tinybar-${VERSION}.zip" "$check"
+          codesign --verify --strict --deep "$check/Tinybar.app"
+          xcrun stapler validate "$check/Tinybar.app"
+          spctl --assess --type execute -vv "$check/Tinybar.app"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,3 +101,6 @@ jobs:
               commit -qam "Update Tinybar to ${VERSION}"
           fi
           git push -q
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
