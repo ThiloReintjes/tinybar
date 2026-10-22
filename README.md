@@ -75,15 +75,11 @@ around one idea: a status item should cost nothing while you're not looking at i
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ThiloReintjes/tinybar/main/Scripts/install.sh | bash
+brew install --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
 ```
 
-The script installs Tinybar with Homebrew and opens it. Releases aren't notarized yet, so macOS
-blocks the first launch once: click **Done** on the warning, then **Open Anyway** in the Privacy &
-Security settings the script opens.
-
-Without the script, run `brew install --cask thiloreintjes/tinybar/tinybar`, or download the zip
-from [Releases](https://github.com/ThiloReintjes/tinybar/releases), and make the same two clicks.
+Or download the zip from [Releases](https://github.com/ThiloReintjes/tinybar/releases). Releases
+are signed with Developer ID and notarized by Apple.
 
 Tinybar starts at login. On first launch it finds the CLIs you're signed in to and turns those
 providers on, so there's nothing to configure.
