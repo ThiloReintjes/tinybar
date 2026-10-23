@@ -36,7 +36,12 @@ if [[ "${1:-}" == "--zip" ]]; then
     if [[ -n "${SIGN_IDENTITY:-}" && -n "${NOTARY+x}" ]]; then
         ditto -c -k --keepParent "$APP" "$ZIP"
         xcrun notarytool submit "$ZIP" "${NOTARY[@]}" --wait
-        xcrun stapler staple "$APP"
+        # Apple's ticket server sometimes drops the connection right after notarization.
+        for attempt in 1 2 3 4 5; do
+            xcrun stapler staple "$APP" && break
+            [[ $attempt == 5 ]] && exit 1
+            sleep 15
+        done
     fi
     rm -f "$ZIP"
     ditto -c -k --keepParent "$APP" "$ZIP"
