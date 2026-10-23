@@ -141,7 +141,9 @@ final class Updater {
         let script = """
         set -e
         tap="$("$BREW" --repository thiloreintjes/tinybar)"
-        /usr/bin/git -C "$tap" pull --ff-only --quiet
+        # Reset rather than fast-forward, so a rewritten tap history can't block the update.
+        /usr/bin/git -C "$tap" fetch --quiet
+        /usr/bin/git -C "$tap" reset --hard --quiet '@{u}'
         listed="$("$BREW" info --cask --json=v2 "$CASK" | /usr/bin/sed -n 's/.*"version": *"\\([^"]*\\)".*/\\1/p' | /usr/bin/head -1)"
         if [ "$listed" != "$VERSION" ]; then echo "Homebrew doesn't list $VERSION yet. Try again in a few minutes."; exit 3; fi
         "$BREW" fetch --cask "$CASK"
