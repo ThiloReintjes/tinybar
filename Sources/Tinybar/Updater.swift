@@ -157,10 +157,7 @@ final class Updater {
         let app = Bundle.main.bundleURL.path
         let script = """
         while /bin/kill -0 "$PID" 2>/dev/null; do /bin/sleep 0.2; done
-        if "$BREW" upgrade --cask "$CASK" >> "$LOG" 2>&1; then
-          # Not notarized yet: clear the quarantine Homebrew sets, as the user asked for this update.
-          /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null
-        else
+        if ! "$BREW" upgrade --cask "$CASK" >> "$LOG" 2>&1; then
           /usr/bin/tail -n 1 "$LOG" > "$MARKER"
         fi
         /usr/bin/open "$APP"

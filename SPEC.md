@@ -207,19 +207,17 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 - Public GitHub repo `ThiloReintjes/tinybar`, MIT license.
 - Pushing a `v*` tag publishes a GitHub Release with a zipped app and bumps the cask in the
-  `ThiloReintjes/homebrew-tinybar` tap. `Scripts/install.sh` installs it and guides the first launch.
-- Until an Apple Developer account is available, releases are ad-hoc signed, so macOS asks the user
-  to approve the first launch. With an account: Developer ID signing and notarization
-  (`build-app.sh` supports both), then the official cask (`brew install --cask tinybar`; Homebrew
-  rejects casks that fail Gatekeeper).
+  `ThiloReintjes/homebrew-tinybar` tap. `Scripts/install.sh` installs it and opens it.
+- Releases are signed with Developer ID and notarized, so Gatekeeper opens them without asking.
+  The release workflow stops if signing or notarization fails. Next: the official cask
+  (`brew install --cask tinybar`).
 - **Updates** (ADR 0007): once a day, `GET api.github.com/repos/ThiloReintjes/tinybar/releases/latest`;
   an hour after a check that got no answer, and right away when Tinybar's own version changes.
   A newer version replaces the footer's check time with "Update to x.y.z" and is notified once
   (with Limit Alerts' setting). Clicking it, for a Homebrew install: pull the tap, check the cask
   lists that version, `brew fetch` it ("Updating…"), then hand over to a script that waits for
-  Tinybar to quit, runs `brew upgrade --cask thiloreintjes/tinybar/tinybar`, clears the quarantine
-  flag and opens the app. On failure the old version reopens with "Update failed"; clicking that
-  copies the command. Other installs open the release page.
+  Tinybar to quit, runs `brew upgrade --cask thiloreintjes/tinybar/tinybar` and opens the app. On
+  failure the old version reopens with "Update failed"; clicking that copies the command. Other installs open the release page.
 - First run needs no configuration: auto-detect Providers, launch at login, request notification permission.
 
 ## 12. Later (explicitly deferred)
