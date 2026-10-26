@@ -920,6 +920,14 @@ private struct SettingsPage: View {
                     Text("Show the limit closest to running out")
                 }
             }
+            // Selectable, so it can be copied into a bug report.
+            if let version = model.updater.current {
+                Text("Tinybar \(version)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity)
+            }
         }
         .padding(.top, 4)
     }
