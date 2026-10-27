@@ -44,8 +44,8 @@ write code. Docs-only fixes are the exception.
   ```
 
 - You used the app with your change, including after a restart.
-- Rebased on `main`, squashed into logical commits with imperative messages
-  (`Add Gemini provider`).
+- Up to date with `main`. PRs are squash-merged, so the PR title becomes the commit: make it
+  imperative (`Add Gemini provider`).
 - Anything in `SPEC.md`, `CONTEXT.md` or `README.md` your change makes wrong is fixed.
 - Read your own diff top to bottom before opening the PR.
 
