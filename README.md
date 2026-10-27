@@ -2,9 +2,8 @@
 
 # Tinybar
 
-**A tiny, fully native macOS menu bar app for your AI subscriptions. What's left of your Claude,
-Codex, Gemini and Cursor limits, the tokens you burned, and what they would have cost at API prices, in about 20 MB of
-RAM.**
+**See what's left of your Claude, Codex, Gemini and Cursor limits from the macOS menu bar, plus the
+tokens you used and what they would have cost at API prices.**
 
 <p align="center">
   <a href="https://github.com/ThiloReintjes/tinybar/actions/workflows/ci.yml">
@@ -21,54 +20,15 @@ RAM.**
        src="https://img.shields.io/badge/status-early-F2A33A?style=flat">
 </p>
 
-AppKit and SwiftUI, **zero third-party dependencies**, no Electron, no WebViews and no telemetry.
-Tinybar is a from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar), built
-around one idea: a status item should cost nothing while you're not looking at it.
+Tinybar is native AppKit and SwiftUI. It uses about 20 MB of memory and 0% CPU while the popover is
+closed, and has no dependencies, no WebViews and no telemetry. It reads the logins your CLIs
+already have and never changes anything on your account. It's a from-scratch alternative to
+[CodexBar](https://github.com/steipete/CodexBar).
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
     <img src="docs/screenshot.png" alt="Tinybar overview with Claude, Codex and Gemini limits and today's usage" width="340">
-  </picture>
-</p>
-
-## Features
-
-- **What's left of every limit.** The 5-hour and weekly windows for Claude, Codex and Gemini (via
-  Antigravity), and Cursor's billing cycle, counting down from 100% to 0% with reset countdowns.
-  Model-scoped limits, Claude extra usage, Cursor on-demand spend, Codex credits and Claude and
-  Codex banked resets are included.
-- **Run-out forecast.** At your pace so far, when each window hits 0%. It turns orange if that comes
-  before the reset; otherwise the gap to the reset shows how much harder you can push.
-- **Menu bar at a glance.** A ring and a percentage for whichever limit runs out first, or for the
-  one you pin: click any limit on a subscription's page.
-- **Outages.** When Anthropic, OpenAI or Cursor report trouble with Claude Code, Codex or Cursor on
-  their status pages, the ring gets an orange or red light and the subscription's page says what's
-  wrong, with a link to the incident.
-- **Overview plus one page per subscription.** The overview shows each subscription as rings with
-  the limit closest to running out. Click a row, or press 1–4, for its limits, extras and usage.
-- **Token history and theoretical cost.** Today, 7 days and 30 days from the local Claude Code and
-  Codex logs, with a daily chart, the top models and projects (git worktrees count as their main
-  repo), and what those tokens would have cost at [models.dev](https://models.dev) API prices,
-  long-context rates included.
-  Gemini and Cursor show limits only.
-- **History that outlives the logs.** Daily totals live in a small local database, so they survive
-  Claude Code deleting transcripts after 30 days.
-- **Stats for nerds.** A separate window for Claude Code and Codex: every token you burned in full
-  digits, agent hours, tool calls, lines added, when your agents work, model speeds, streaks and
-  compactions. Three more cards go deeper: the commands your agents run (and whether they reach
-  for `grep` or `rg`), how each model works, and which languages they write. Point at anything for
-  its details, click a model to see it alone. **Copy image** puts the card on your clipboard, ready
-  to post.
-- **Limit alerts.** A notification at 90% and 95% of a 5-hour or weekly window, and when a window
-  you nearly used up resets.
-- **Browser fallback.** Optional, per provider: if a CLI login is missing or expired, Tinybar reads
-  your signed-in browser session instead.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/stats-dark.png">
-    <img src="docs/stats.png" alt="Tinybar Stats: 30 days of tokens, agent time, tool calls, lines added, an hour-by-weekday heatmap and model speeds" width="720">
   </picture>
 </p>
 
@@ -78,106 +38,89 @@ around one idea: a status item should cost nothing while you're not looking at i
 brew install --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
 ```
 
-Or download the zip from [Releases](https://github.com/ThiloReintjes/tinybar/releases). Releases
-are signed with Developer ID and notarized by Apple.
+Or download the zip from [Releases](https://github.com/ThiloReintjes/tinybar/releases). Releases are
+signed with Developer ID and notarized by Apple.
 
-Tinybar starts at login. On first launch it finds the CLIs you're signed in to and turns those
-providers on, so there's nothing to configure.
+Tinybar starts at login and turns on every provider whose CLI you're signed in to, so there is
+nothing to set up. When a new version is out, the popover shows **Update to x.y.z**, and one click
+updates it through Homebrew. To uninstall, run `brew uninstall --cask thiloreintjes/tinybar/tinybar`
+and add `--zap` to also delete your history and settings.
 
-**Update.** When a new version is out, the popover's footer shows **Update to x.y.z**. Click it:
-Tinybar updates itself through Homebrew and restarts. By hand, Homebrew quits Tinybar while it
-upgrades, so open it again afterwards:
+## What it shows
 
-```sh
-brew upgrade --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
-```
+- **Every limit.** The 5-hour and weekly windows for Claude, Codex and Gemini, and Cursor's billing
+  cycle, with reset countdowns. Model-specific limits, Claude extra usage, Cursor on-demand spend,
+  Codex credits and banked resets are included.
+- **When you'll run out.** At your pace so far, the time each window hits 0%. It turns orange if
+  that comes before the reset.
+- **One ring in the menu bar** for the limit closest to running out, or the one you pin.
+- **Outages.** When Claude Code, Codex or Cursor report trouble on their status page, the ring gets
+  an orange or red light, and the subscription's page links to the incident.
+- **Token history and cost.** Today, 7 days and 30 days from your Claude Code and Codex logs, by
+  model and project, priced at [models.dev](https://models.dev) API rates. Tinybar keeps daily totals
+  in a local database, so they survive Claude Code deleting transcripts after 30 days. Gemini and
+  Cursor show limits only.
+- **Stats.** A separate window with every token you used, agent hours, tool calls, lines added, the
+  commands your agents run and the languages they write. **Copy image** puts a card on your
+  clipboard.
+- **Alerts.** A notification at 90% and 95% of a window, and when a nearly used-up window resets.
 
-**Uninstall.** `brew uninstall --cask thiloreintjes/tinybar/tinybar`. Add `--zap` to also delete
-the usage history and settings.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/stats-dark.png">
+    <img src="docs/stats.png" alt="Tinybar Stats: 30 days of tokens, agent time, tool calls, lines added, an hour-by-weekday heatmap and model speeds" width="720">
+  </picture>
+</p>
 
-## Safe by design
+## Read-only by design
 
-Tinybar only ever **reads**. It uses the logins your official CLIs already store and calls the same
-read-only endpoints they call for `/usage` and `/status`:
+Tinybar uses the logins your official CLIs already store and calls the same endpoints they call for
+`/usage`. It never refreshes a token, sends a prompt or redeems a banked reset. When a login
+expires, the card turns stale until you run `claude`, `codex` or `agy` once, or open Cursor.
+[ADR 0001](docs/adr/0001-read-only-credentials.md) explains why.
 
-| Provider | Limits | Token history |
-| -------- | ------ | ------------- |
-| Claude   | Claude Code's OAuth login (`~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item) → `api.anthropic.com/api/oauth/usage` (with banked resets, as claude.ai asks) | `~/.claude/projects/**/*.jsonl` |
-| Codex    | `~/.codex/auth.json` → `chatgpt.com/backend-api/wham/usage`, falling back to a short-lived `codex app-server` in read-only mode | `~/.codex/sessions`, `~/.codex/archived_sessions` |
-| Gemini   | a short-lived `agy -p /usage` (Antigravity CLI's built-in usage report: no prompt, no tokens spent) | none |
-| Cursor   | Cursor.app's login (`state.vscdb`), else the `cursor.com` session cookie in your browser → `cursor.com/api/usage-summary` | none |
+| Provider | Login | Limits from | Token history |
+| -------- | ----- | ----------- | ------------- |
+| Claude | `~/.claude/.credentials.json` or the `Claude Code-credentials` Keychain item | `api.anthropic.com/api/oauth/usage` | `~/.claude/projects` |
+| Codex | `~/.codex/auth.json` | `chatgpt.com/backend-api/wham/usage`, else a read-only `codex app-server` | `~/.codex/sessions`, `~/.codex/archived_sessions` |
+| Gemini | none | `agy -p /usage`, Antigravity CLI's own report | none |
+| Cursor | Cursor.app's `state.vscdb`, else your browser's `cursor.com` cookie | `cursor.com/api/usage-summary` | none |
 
-It **never refreshes or rewrites a token**, never sends a prompt, and never redeems a banked reset.
-When a login expires the card turns **stale** and tells you to run `claude`, `codex` or `agy` once
-(or open Cursor), and the client renews its own login. [ADR 0001](docs/adr/0001-read-only-credentials.md)
-explains why and what it costs.
+The only other requests carry no login. Prices come from `models.dev` and the latest release from
+GitHub, once a day each. The Claude, OpenAI and Cursor status pages are checked with every poll.
 
-The other network calls carry no login: `models.dev/api.json` for prices and GitHub's latest-release
-API for updates, each once a day (updates retry after an hour if GitHub doesn't answer, and check
-right away after Tinybar itself updates), and the public status pages of Claude, OpenAI and Cursor
-on each check (about 20 KB).
-
-## Permissions
-
-- **Notifications.** Asked once, for limit alerts. Turn alerts off in Settings any time.
-- **Keychain.** Claude's login is read through `/usr/bin/security`, the tool Claude Code itself uses
-  to store it, so there is no prompt. The browser fallback is off by default, and so is Cursor unless
-  Cursor.app is signed in. Turning either on for a Chromium browser (Chrome, Arc, Dia, Brave, Edge,
-  Comet) asks once for that browser's "Safe Storage" key. Firefox needs nothing; Safari isn't
-  supported.
+Notifications are requested once, for alerts. Tinybar reads Claude's Keychain item through
+`/usr/bin/security`, the tool Claude Code itself uses, so there is no prompt. If a CLI login is
+missing or expired, Tinybar can read your browser session instead. This fallback is off by default, and a
+Chromium browser asks once for its "Safe Storage" key. Firefox needs nothing, and Safari isn't
+supported.
 
 ## Performance
 
-Measured on an Apple silicon Mac with 16 GB of Codex logs (100k files) and 8 GB of Claude
-transcripts:
+Measured on Apple silicon with 16 GB of Codex logs and 8 GB of Claude transcripts:
 
 | | |
 | --- | --- |
-| Idle CPU | 0.0%: one 5-minute poll, no animations, no timers faster than that |
-| Idle memory | ~20 MB footprint |
-| Keeping up | FSEvents reports which log files changed; only appended bytes are read |
-| First launch | the whole history imports in about two minutes, in a child process that exits when done |
+| Idle CPU | 0.0%, with one poll every 5 minutes and no animations |
+| Memory | about 20 MB |
+| New log lines | FSEvents reports the changed files, and Tinybar reads only the appended bytes |
+| First launch | the full history imports in about two minutes, in a child process |
 
-## Building from source
+## Build from source
 
-Swift 6 toolchain (Xcode 16 or newer), macOS 14+. Plain SwiftPM, no Xcode project.
-
-```sh
-git clone https://github.com/ThiloReintjes/tinybar.git
-cd tinybar
-./Scripts/build-app.sh && open build/Tinybar.app   # universal, ad-hoc signed (--zip for a release zip)
-swift test                                         # unit tests
-```
-
-Developer tools:
+Needs macOS 14 or later and Swift 6 (Xcode 16 or newer). There is no Xcode project.
 
 ```sh
-swift run tinybar-cli limits [--browser]   # limits and run-out times for all four providers
-swift run tinybar-cli cookies              # which browser holds session cookies
-swift run tinybar-cli ingest [db]          # ingest Claude + Codex logs
-swift run tinybar-cli usage [db]           # print usage summaries
-swift run tinybar-cli stats [db]           # raw Activity counters, to check against the logs
-swift Scripts/make-icon.swift              # redraw Resources/AppIcon.icns and docs/icon.png
-.build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--backdrop] [--redact-projects]
-.build/debug/Tinybar --snapshot out.png --stats [--page commands|models|languages] [--range week|month|all] [--model <id>] [--hover x,y]   # a Stats card
+git clone https://github.com/ThiloReintjes/tinybar.git && cd tinybar
+./Scripts/build-app.sh && open build/Tinybar.app
+swift test
 ```
-
-`--snapshot` renders the popover to PNG in light and dark; `--backdrop` puts a worst-case window
-behind it and `--redact-projects` hides your project names.
-
-[SPEC.md](SPEC.md) is the v1 scope, [CONTEXT.md](CONTEXT.md) the vocabulary (Limit Window, Run-out
-Time, Banked Reset, Theoretical Cost, Agent Time, …), and [docs/adr/](docs/adr) the decisions behind them.
 
 ## Contributing
 
-> [!IMPORTANT]
-> **Open an issue before you write code.** Get the bug or feature agreed first. Tinybar stays small on
-> purpose: "CodexBar has it" is not a reason on its own, and new providers are added one at a time,
-> only when someone actually uses them.
-
-Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first. It covers the performance budget every change is
-held to and the read-only rule for credentials. Security issues go through
-[SECURITY.md](SECURITY.md), not the issue tracker.
+Open an issue before you write code. Tinybar stays small on purpose, so "CodexBar has it" isn't a
+reason on its own, and providers are added one at a time. [CONTRIBUTING.md](CONTRIBUTING.md) has
+the rules and the developer tools. Report security issues through [SECURITY.md](SECURITY.md).
 
 ## License
 
