@@ -920,8 +920,32 @@ private struct SettingsPage: View {
                     Text("Show the limit closest to running out")
                 }
             }
+            HStack(spacing: 4) {
+                if let version = model.updater.current {
+                    Text("Tinybar \(version)").textSelection(.enabled)
+                    Text("·")
+                }
+                Button("Report a bug") { NSWorkspace.shared.open(bugReportURL) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
         }
         .padding(.top, 4)
+    }
+
+    /// The bug report form on GitHub, with the version fields filled in from their ids.
+    private var bugReportURL: URL {
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        var url = URLComponents(string: "https://github.com/ThiloReintjes/tinybar/issues/new")!
+        url.queryItems = [
+            URLQueryItem(name: "template", value: "bug_report.yml"),
+            URLQueryItem(name: "version", value: model.updater.current),
+            URLQueryItem(name: "macos", value: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"),
+        ]
+        return url.url!
     }
 }
 
