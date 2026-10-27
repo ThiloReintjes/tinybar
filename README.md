@@ -16,8 +16,6 @@ tokens you used and what they would have cost at API prices.**
   <a href="LICENSE">
     <img alt="License: MIT"
          src="https://img.shields.io/badge/License-MIT-3DA639?style=flat"></a>
-  <img alt="Status: early"
-       src="https://img.shields.io/badge/status-early-F2A33A?style=flat">
 </p>
 
 Tinybar is native AppKit and SwiftUI. It uses about 20 MB of memory and 0% CPU while the popover is
