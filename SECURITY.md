@@ -4,14 +4,14 @@
 
 Report privately through GitHub: **Security** tab → **Report a vulnerability**.
 
-Include your macOS version, the Tinybar commit or version, reproduction steps and the impact. Please
+Include your macOS version, the Tinybar version, reproduction steps and the impact. Please
 don't disclose publicly until it's fixed.
 
 We'll respond as quickly as we can and keep you posted.
 
 ## Supported versions
 
-Only the latest `main` until the first release. After that, the current release.
+The latest release only. Update (`brew upgrade --cask thiloreintjes/tinybar/tinybar`) before reporting.
 
 ## What Tinybar touches
 

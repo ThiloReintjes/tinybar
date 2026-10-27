@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in Tinybar is broken or shows the wrong numbers
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: existing
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched open and closed issues and didn't find this already reported
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got instead. A screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: wrong-numbers
+    attributes:
+      label: Wrong numbers only
+      description: >
+        The provider, the time range, and what the official client (`/usage`, `/status`, the
+        provider's website) shows for the same range.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Tinybar version
+      placeholder: "0.6.1"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.5"
+    validations:
+      required: true
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      description: >
+        Wait until a maintainer agrees on a fix in this issue before you start, and read
+        [CONTRIBUTING.md](https://github.com/ThiloReintjes/tinybar/blob/main/CONTRIBUTING.md) first.
+      options:
+        - label: I'm willing to fix this myself
+          required: false

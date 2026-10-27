@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an idea or a new provider
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Tinybar stays small on purpose. "CodexBar has it" is not a reason on its own, and nothing
+        that refreshes a login or changes account state will be added
+        ([ADR 0001](https://github.com/ThiloReintjes/tinybar/blob/main/docs/adr/0001-read-only-credentials.md)).
+  - type: textarea
+    id: what
+    attributes:
+      label: What should it do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it belong in Tinybar?
+      description: >
+        Who needs it and how often. For a new provider: which plan you're on, and where its own CLI
+        or app keeps the usage data.
+    validations:
+      required: true
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      description: >
+        Wait until a maintainer agrees on it in this issue before you start, and read
+        [CONTRIBUTING.md](https://github.com/ThiloReintjes/tinybar/blob/main/CONTRIBUTING.md) first.
+      options:
+        - label: I'm willing to build this myself
+          required: false
