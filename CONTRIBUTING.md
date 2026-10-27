@@ -29,8 +29,25 @@ write code. Docs-only fixes are the exception.
   login). `./Scripts/build-app.sh && open build/Tinybar.app` for the real thing.
 - Layout: `Sources/TinybarCore` holds providers, parsing, storage and pricing, with no UI;
   `Sources/Tinybar` is the menu bar app; `Sources/tinybar-cli` is a developer tool.
-- Read [SPEC.md](SPEC.md) and [CONTEXT.md](CONTEXT.md). Use the glossary's terms in code and PRs:
-  Provider, Limit Window, Banked Reset, Usage Record, Theoretical Cost.
+- Read [SPEC.md](SPEC.md), [CONTEXT.md](CONTEXT.md) and the decisions in [docs/adr](docs/adr). Use
+  the glossary's terms in code and PRs: Provider, Limit Window, Banked Reset, Usage Record,
+  Theoretical Cost.
+
+Developer tools:
+
+```sh
+swift run tinybar-cli limits [--browser]   # limits and run-out times for all four providers
+swift run tinybar-cli cookies              # which browser holds session cookies
+swift run tinybar-cli ingest [db]          # ingest Claude + Codex logs
+swift run tinybar-cli usage [db]           # print usage summaries
+swift run tinybar-cli stats [db]           # raw Activity counters, to check against the logs
+swift Scripts/make-icon.swift              # redraw Resources/AppIcon.icns and docs/icon.png
+.build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--backdrop] [--redact-projects]
+.build/debug/Tinybar --snapshot out.png --stats [--page commands|models|languages] [--range week|month|all] [--model <id>] [--hover x,y]   # a Stats card
+```
+
+`--snapshot` renders the popover to PNG in light and dark. `--backdrop` puts a worst-case window
+behind it, and `--redact-projects` hides your project names.
 
 ## Before submitting
 
