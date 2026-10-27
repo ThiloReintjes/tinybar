@@ -51,6 +51,7 @@ write code. Docs-only fixes are the exception.
 
 ## Pull requests
 
+- Fill in the [PR template](.github/PULL_REQUEST_TEMPLATE.md), or say why a section doesn't apply.
 - Visual change → before and after screenshots, light and dark. `.build/debug/Tinybar --snapshot
   out.png --redact-projects` renders both without your project names.
 - Non-visual → say what you tested and how.
@@ -70,7 +71,8 @@ Open an issue first and say which plan you're on. For the PR:
 
 ## Bugs
 
-macOS version, Tinybar commit, steps, expected vs actual. For wrong numbers: the provider, the time
+Use the [bug report form](https://github.com/ThiloReintjes/tinybar/issues/new?template=bug_report.yml):
+macOS version, Tinybar version, steps, expected vs actual. For wrong numbers: the provider, the time
 range, and what the official client shows for the same range.
 
 ## Security
