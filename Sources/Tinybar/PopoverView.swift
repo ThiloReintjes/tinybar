@@ -612,7 +612,7 @@ private struct Extras: View {
                 line(
                     "\(banked.count) banked reset\(banked.count == 1 ? "" : "s")",
                     icon: "arrow.counterclockwise",
-                    value: next.map { "next expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")
+                    value: next.map { "next expires in \(Format.countdown(to: $0))" } ?? "")
             }
             if let extra = snapshot.extraUsage {
                 line(snapshot.provider == .cursor ? "On-demand spend" : "Extra usage", icon: "creditcard", value: extra.formatted)
