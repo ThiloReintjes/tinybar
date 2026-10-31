@@ -43,7 +43,7 @@ swift run tinybar-cli usage [db]           # print usage summaries
 swift run tinybar-cli stats [db]           # raw Activity counters, to check against the logs
 swift Scripts/make-icon.swift              # redraw Resources/AppIcon.icns and docs/icon.png
 .build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--backdrop] [--redact-projects]
-.build/debug/Tinybar --snapshot out.png --stats [--page commands|models|languages] [--range week|month|all] [--model <id>] [--hover x,y]   # a Stats card
+.build/debug/Tinybar --snapshot out.png --stats [--page commands|models|languages|plans] [--range week|month|all] [--model <id>] [--hover x,y]   # a Stats card
 ```
 
 `--snapshot` renders the popover to PNG in light and dark. `--backdrop` puts a worst-case window

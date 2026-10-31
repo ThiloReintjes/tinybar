@@ -59,8 +59,9 @@ and add `--zap` to also delete your history and settings.
   in a local database, so they survive Claude Code deleting transcripts after 30 days. Gemini and
   Cursor show limits only.
 - **Stats.** A separate window with every token you used, agent hours, tool calls, lines added, the
-  commands your agents run and the languages they write. **Copy image** puts a card on your
-  clipboard.
+  commands your agents run and the languages they write. **Plans** compares what each subscription
+  gets you at API prices, measured from your limits and logs, and how its models score on
+  [Artificial Analysis](https://artificialanalysis.ai). **Copy image** puts a card on your clipboard.
 - **Alerts.** A notification at 90% and 95% of a window, and when a nearly used-up window resets.
 
 <p align="center">

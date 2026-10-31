@@ -70,7 +70,7 @@ enum PopoverSnapshot {
                 model.updater.showForSnapshot(parts.count < 2 ? .available(r)
                     : parts[1] == "preparing" ? .preparing(r) : .failed(r, "Homebrew doesn't list \(version) yet."))
             }
-            // `--stats [--range week|month|all] [--model <id>] [--page commands|models|languages]`
+            // `--stats [--range week|month|all] [--model <id>] [--page commands|models|languages|plans]`
             // renders a Stats card instead, as Copy image does.
             if args.contains("--stats") {
                 var range = StatsRange.month
@@ -103,7 +103,7 @@ enum PopoverSnapshot {
                 window.orderOut(nil)
                 guard let summary = await model.statsSummary(range, model: picked) else { fail("Couldn't load Stats.") }
                 for (scheme, suffix) in [(ColorScheme.dark, ".dark"), (.light, "")] {
-                    guard let image = StatsCard.image(summary, page: page, scheme: scheme), let tiff = image.tiffRepresentation
+                    guard let image = StatsCard.image(summary, page: page, plans: model.plans, scheme: scheme), let tiff = image.tiffRepresentation
                     else { fail("Couldn't render the Stats card.") }
                     write(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]),
                           to: URL(fileURLWithPath: out.deletingPathExtension().path + suffix + ".png"))

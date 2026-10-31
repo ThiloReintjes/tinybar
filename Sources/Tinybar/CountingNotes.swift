@@ -26,6 +26,13 @@ struct CountingNotes: View {
                 from models.dev, including the higher rate some models charge for a request with a \
                 long context. Your subscription doesn't charge per token.
                 """)
+            note("Plans", """
+                The Plans page in Stats divides what your logged use this week would cost at API \
+                prices by the share of your weekly limit it took. That gives a full week in dollars. \
+                Your pace is the last 7 days at the same prices. Per $1 uses the plan's US list price. \
+                Scores, task costs and minutes come from the Artificial Analysis Intelligence Index \
+                at maximum effort, not your work.
+                """)
             note("Stats", activity)
             note("Your data", """
                 Logs, totals and stats stay on this Mac. Of shell commands, Tinybar keeps only the \
