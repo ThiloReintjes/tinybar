@@ -180,6 +180,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`. Every counter is kept per model, including `hour.HH` (responses started in that hour) and `tokens.hour.HH` (their tokens), `cmd.*` (Shell Commands: `cmd.prog.<program>`, `cmd.git.<subcommand>` and habit counts) and `ext.added|removed|edits.<extension>`.
 - `claude_event(id, day)`: Claude Prompts, edit results and Compactions already counted, pruned with message ids.
 - `daily_long_context(day, provider, model, project, band, …tokens)`: the part of `daily_usage` from long requests, for Long-context Prices (§10).
+- `limit_reading(provider, window, resets_at, duration, plan, used_bp, read_at, plan_changed)`: the highest share of each weekly Limit Window seen, the newest 8 per window (§14).
 - The schema allows a future `account` column (multi-account later).
 
 ### Day boundary
@@ -233,7 +234,7 @@ The window opens centered, remembers its position, and recenters saved positions
 screen. ⌘W closes it.
 
 **Layout**: fixed 960 × 600 cards under a title bar row with the pages (Overview, Commands,
-Models, Languages; ⌘1 to ⌘4, the last one remembered), the range (7 days, 30 days, All time) and
+Models, Languages, Plans; ⌘1 to ⌘5, the last one remembered), the range (7 days, 30 days, All time) and
 **Copy image**, which puts the current card on the clipboard at 2× in the current appearance. The
 tabs aren't part of the card. Each card opens with the Tinybar mark, name and (but for the
 overview) its page on the left and its date span on the right, and never shows project names. A
@@ -340,6 +341,8 @@ which Tinybar doesn't read.
 counters are cleared once (schema 4) and recounted the same way, per model. 0.3.0 had no Shell
 Commands, Languages or parallel counts; schema 5 clears and recounts once more.
 
+Schema 7 adds `limit_reading`.
+
 Schema 6 (0.5.0) adds Context Bands. Claude's come at once from the message ids kept for
 de-duplication (90 days); Codex logs still on disk are re-read once, in the child process, up to
 their saved offsets, for long requests only. Older days stay at base prices.
@@ -350,3 +353,40 @@ normal ingestion carries on. Migrations run in one transaction. Before 0.5.1, GP
 logged by Claude Code were counted from the largest value of each field across their streamed
 copies, which counted cached context twice; stored totals from those days are not rewritten, but
 a message seen again is replaced by its complete copy.
+
+## 14. Plans (ADR 0008)
+
+A page of the Stats window, for Claude and Codex (Gemini and Cursor have no token logs). It turns
+each weekly Limit Window into API dollars, then compares the models. The range picker doesn't apply
+and hides.
+
+- **Reading**: after each ingest, a fresh snapshot's weekly account-wide window updates its
+  `limit_reading` row when its share rises, with the time of that reading. A Reset within an hour of
+  the stored one is the same window. A plan change marks the window. Only Tinybar's own polls are
+  read, so a user's history starts with this version.
+- **A window's value**: Theoretical Cost from its start (Reset minus duration) up to now while it's
+  open, or to its last reading once it's over, ÷ share used × 100. A day partly inside takes the
+  share of its tokens from `tokens.hour.HH`, per model, assuming tokens fall evenly in an hour.
+- **Full week**: the median of up to 8 windows on the current plan with at least 10% used and no
+  plan change. Below 10%, 1% steps are too coarse. Nothing is shown before one window qualifies.
+- **Per $1**: full week × 4.35 weeks ÷ the plan's list price in US dollars. Every window is assumed
+  used in full; Banked Resets and other extra resets aren't counted. A plan with no known price
+  drops this figure.
+- **Models**: a table bundled with the app holds each current model's Artificial Analysis
+  Intelligence Index score, cost per Benchmark Task and minutes per Benchmark Task, at maximum
+  effort, with the date it was copied. Tasks a week = full week ÷ cost per Benchmark Task, which
+  assumes the limit counts every model at its API price. Models are listed by score.
+- **Your use**: the last 7 days' Theoretical Cost, today included, as Usage's 7d shows it, and each
+  model's share of it. Per $1 at your pace = that × 4.35 ÷ the list price. A meter shows it against a
+  full week, full at or above one; going over can follow an early reset.
+- **Display**: a column per plan, then one comparison of every model. Each column has two large
+  numbers of equal weight, API usage per $1 at your pace and if you use it all (without a known
+  price, the last 7 days' and a full week's dollars); the meter; and, with a known price, the total
+  dollars of both. Below, the heading links to the index, with a plain list of each model's score and
+  tasks per week beside a chart of one against the other. The chart has score 20 to 60 up and tasks
+  across on a log scale fitted to the models. Marks are circles for Claude and squares for Codex,
+  filled when used in the last 7 days (5% or more) and outlined otherwise. Pointing at a row or a
+  mark shows the full figures and dims the rest. Estimates keep two significant figures, and a +
+  marks a figure with use that has no known price.
+- **How this is worked out**: a button at the bottom opens the workings, the assumptions and the
+  source in a popover. The copied image leaves it out.

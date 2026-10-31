@@ -23,6 +23,8 @@ final class AppModel {
     private(set) var usage: [UsageRange: UsageSummary] = [:]
     /// One Provider each, for its detail view.
     private(set) var providerUsage: [ProviderID: [UsageRange: UsageSummary]] = [:]
+    /// What each subscription with token history gets you, for the Stats window's Plans page.
+    private(set) var plans: [PlanRow] = []
     private var usageRows: [DailyUsage] = []
     private var prices = PriceTable.empty
     /// Open Incidents from each subscription's status page.
@@ -297,6 +299,31 @@ final class AppModel {
         guard !isAsleep, !isLocked else { return }
         usageRows = (try? await store.daily(since: DayKey.daysAgo(UsageRange.month.days - 1))) ?? []
         rebuildUsage()
+        await refreshPlanValues(store)
+    }
+
+    /// Notes each fresh weekly reading, then works out what the plans buy (SPEC §14).
+    private func refreshPlanValues(_ store: UsageStore) async {
+        var readings: [ProviderID: [LimitReading]] = [:]
+        for id in enabledProviders where id == .claude || id == .codex {
+            guard let state = providers[id], let snapshot = state.snapshot else { continue }
+            if !state.isStale { try? await store.recordLimitReadings(snapshot) }
+            readings[id] = (try? await store.limitReadings(provider: id)) ?? []
+        }
+        // Kept windows go back further than the rows held for Usage.
+        let month = DayKey.daysAgo(UsageRange.month.days - 1)
+        let oldest = readings.values.joined().map(\.start).min().map { DayKey.string(for: $0) }
+        let since = min(oldest ?? month, month)
+        let rows = since < month ? (try? await store.daily(since: since)) ?? usageRows : usageRows
+        let hours = (try? await store.hourlyTokens(since: since)) ?? []
+        plans = readings.keys.sorted().compactMap { id in
+            guard let snapshot = providers[id]?.snapshot else { return nil }
+            let value = PlanValue.build(
+                provider: id, plan: snapshot.plan, readings: readings[id] ?? [],
+                usage: rows.filter { $0.provider == id }, hours: hours.filter { $0.provider == id },
+                prices: prices)
+            return value.map { PlanRow(id: id, plan: snapshot.plan, value: $0) }
+        }
     }
 
     /// Recomputes summaries from the in-memory 30-day rows (a few thousand at most), so opening

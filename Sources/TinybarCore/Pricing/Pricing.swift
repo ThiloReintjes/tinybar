@@ -70,8 +70,8 @@ public struct PriceTable: Sendable {
         let key = ModelName.normalize(model)
         if let exact = table[key] { return exact }
         // Dated snapshots use their base id; providers spell dates as YYYYMMDD or YYYY-MM-DD.
-        if let date = key.range(of: #"-(?:[0-9]{8}|[0-9]{4}-[0-9]{2}-[0-9]{2})$"#, options: .regularExpression) {
-            return table[String(key[..<date.lowerBound])]
+        if case let base = ModelName.undated(key), base != key {
+            return table[base]
         }
         return nil
     }

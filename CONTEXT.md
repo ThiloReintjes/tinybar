@@ -64,6 +64,14 @@ _Avoid_: Spend, cost, bill
 The higher API price a Provider charges for a whole request whose context is over a size (272K tokens for current GPT models).
 _Avoid_: Tier pricing, surcharge
 
+**Plan Value**:
+What a subscription's weekly Limit Window would cost at the Provider's API prices, measured from the user's own limits and logs: Theoretical Cost since the window started ÷ share used. It is a floor, because use outside the logged CLIs takes up the limit too.
+_Avoid_: Worth, ROI, savings
+
+**Benchmark Task**:
+One job from the Artificial Analysis Intelligence Index, which that benchmark prices and times per model. It describes the benchmark, not the user's work.
+_Avoid_: Task (alone), job
+
 ### Activity
 
 **Activity**:

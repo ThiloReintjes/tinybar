@@ -461,11 +461,17 @@ public enum DayKeyDate {
 }
 
 extension ModelName {
+    /// Without a trailing date stamp, which providers spell as YYYYMMDD or YYYY-MM-DD:
+    /// "claude-sonnet-5-5-20260101" → "claude-sonnet-5-5".
+    public static func undated(_ name: String) -> String {
+        guard let date = name.range(of: #"-(?:[0-9]{8}|[0-9]{4}-[0-9]{2}-[0-9]{2})$"#, options: .regularExpression)
+        else { return name }
+        return String(name[..<date.lowerBound])
+    }
+
     /// "claude-opus-5-5" → "Opus 5.5", "gpt-6.1-sol" → "GPT-6.1 Sol". For display only.
     public static func display(_ name: String) -> String {
-        var parts = name.split(separator: "-").map(String.init)
-        // Drop a trailing date stamp (claude-sonnet-5-5-20260101).
-        if let last = parts.last, last.count == 8, Int(last) != nil { parts.removeLast() }
+        var parts = undated(name).split(separator: "-").map(String.init)
         if parts.first == "claude" { parts.removeFirst() }
         var words: [String] = []
         var version: [String] = []

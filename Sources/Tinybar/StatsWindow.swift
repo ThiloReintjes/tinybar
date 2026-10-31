@@ -55,7 +55,7 @@ final class StatsWindowController: NSObject, NSWindowDelegate {
 
 /// The Stats window's cards: the overview, and a closer look at one kind of activity each.
 enum StatsPage: String, CaseIterable, Identifiable {
-    case overview, commands, models, languages
+    case overview, commands, models, languages, plans
 
     var id: String { rawValue }
 
@@ -65,6 +65,7 @@ enum StatsPage: String, CaseIterable, Identifiable {
         case .commands: "Commands"
         case .models: "Models"
         case .languages: "Languages"
+        case .plans: "Plans"
         }
     }
 }
@@ -106,11 +107,14 @@ struct StatsView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 210)
+                // Plans are about the current week, whatever the range.
+                .opacity(page == .plans ? 0 : 1)
+                .disabled(page == .plans)
                 Button(action: copy) {
                     Label(copied ? "Copied" : "Copy image", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .frame(minWidth: 96)
                 }
-                .disabled(summary?.isEmpty ?? true)
+                .disabled(summary.map { $0.isEmpty && page != .plans } ?? true)
                 .keyboardShortcut("c")
                 .help("Copy this card as an image, ready to paste")
             }
@@ -119,7 +123,7 @@ struct StatsView: View {
             .padding(.trailing, 20)
             .frame(height: 52)
 
-            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page,
+            StatsCard(summary: summary, importing: model.importProgress, palette: palette, page: page, plans: model.plans,
                       forward: forward, loadFailed: loadFailed, summaryRevision: summaryRevision) { name in
                 picked = picked == name ? nil : name
             }
@@ -159,7 +163,7 @@ struct StatsView: View {
     }
 
     private func copy() {
-        guard let summary, let image = StatsCard.image(summary, page: page, scheme: scheme) else { return }
+        guard let summary, let image = StatsCard.image(summary, page: page, plans: model.plans, scheme: scheme) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
         copied = true
@@ -216,6 +220,7 @@ struct StatsCard: View {
     let importing: Double?
     let palette: StatsPalette
     var page: StatsPage = .overview
+    var plans: [PlanRow] = []
     /// The page came after the previous one: it enters from the right.
     var forward = true
     var loadFailed = false
@@ -233,7 +238,8 @@ struct StatsCard: View {
 
     var body: some View {
         ZStack {
-            if let summary, !summary.isEmpty {
+            // Plans don't depend on the range, which an empty summary would strand you in.
+            if let summary, !summary.isEmpty || page == .plans {
                 content(summary)
             } else if let importing {
                 VStack(spacing: 10) {
@@ -299,6 +305,7 @@ struct StatsCard: View {
                     case .commands: CommandsPage(summary: s, palette: palette).padding(.top, 18)
                     case .models: ModelsPage(summary: s, palette: palette).padding(.top, 22)
                     case .languages: LanguagesPage(summary: s, palette: palette).padding(.top, 18)
+                    case .plans: PlansPage(plans: plans, palette: palette).padding(.top, 18)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -349,8 +356,8 @@ struct StatsCard: View {
 
     /// The card as an image at twice its size, for the clipboard.
     @MainActor
-    static func image(_ summary: StatsSummary, page: StatsPage = .overview, scheme: ColorScheme) -> NSImage? {
-        let renderer = ImageRenderer(content: StatsCard(summary: summary, importing: nil, palette: StatsPalette(scheme), page: page)
+    static func image(_ summary: StatsSummary, page: StatsPage = .overview, plans: [PlanRow] = [], scheme: ColorScheme) -> NSImage? {
+        let renderer = ImageRenderer(content: StatsCard(summary: summary, importing: nil, palette: StatsPalette(scheme), page: page, plans: plans)
             .environment(\.colorScheme, scheme))
         renderer.scale = 2
         return renderer.nsImage
@@ -538,7 +545,9 @@ private struct Header: View {
                     .transition(.opacity)
             }
             Spacer()
-            Text(StatsText.span(summary)).font(.system(size: 12, weight: .medium)).foregroundStyle(palette.ink2)
+            Text(page == .plans ? "Benchmark from \(ModelBenchmark.asOf)" : StatsText.span(summary))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.ink2)
         }
     }
 }

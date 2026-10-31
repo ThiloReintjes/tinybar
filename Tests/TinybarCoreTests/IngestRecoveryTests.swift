@@ -76,7 +76,7 @@ private func recoveryLog(model: String = "gpt-test", output: Int = 1) -> String 
     #expect(try db.run("SELECT count(*) FROM daily_long_context").first?.first?.int == 0)
     try db.exec("DROP TRIGGER fail_migration")
     _ = try UsageStore(path: url)
-    #expect(try db.run("PRAGMA user_version").first?.first?.int == 6)
+    #expect(try db.run("PRAGMA user_version").first?.first?.int == 7)
 }
 
 @Test func completedSchemaSixBackfillsRemainUntouched() async throws {
