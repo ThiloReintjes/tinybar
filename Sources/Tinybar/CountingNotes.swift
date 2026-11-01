@@ -18,8 +18,9 @@ struct CountingNotes: View {
                 window so far.
                 """)
             note("Tokens", """
-                Counted from the Claude Code and Codex logs on this Mac and kept as daily totals, so \
-                they stay when the CLIs delete old logs. Gemini and Cursor show limits only.
+                Counted from the Claude Code and Codex logs and OpenCode's database on this Mac, and \
+                kept as daily totals, so they stay when old logs are deleted. Of OpenCode, only use \
+                of its Go subscription counts. Gemini and Cursor show limits only.
                 """)
             note("At API prices", """
                 What those tokens would cost on each provider's pay-as-you-go API, at today's prices \
@@ -46,7 +47,8 @@ struct CountingNotes: View {
 
     private var activity: String {
         var text = """
-            Prompts, tool calls, lines and agent time are counted from the logs still on disk. \
+            Stats covers Claude Code and Codex. Prompts, tool calls, lines and agent time are \
+            counted from the logs still on disk. \
             Codex compresses older logs, which Tinybar can't read yet, so some days have tokens but \
             little activity.
             """

@@ -283,7 +283,7 @@ public enum BrowserFallback {
             guard let found = BrowserCookies.find(domain: "cursor.com", required: [name]), let value = found.cookies[name]
             else { throw ProviderError.notConfigured }
             return (found.browser, try await CursorUsageAPI.fetch(cookieHeader: "\(name)=\(value)", source: .browser, session: session))
-        case .gemini:
+        case .gemini, .opencode:
             throw ProviderError.notConfigured
         }
     }

@@ -29,6 +29,7 @@ enum HTTP {
     /// A status the caller asked to handle itself (see `send(_:session:providerName:passing:)`).
     struct Status: Error {
         var code: Int
+        var body = Data()
     }
 
     static func retryAfter(_ value: String, now: Date = Date()) -> TimeInterval? {
@@ -56,14 +57,18 @@ enum HTTP {
             throw ProviderError.network(error.localizedDescription)
         }
         guard let http = response as? HTTPURLResponse else { throw ProviderError.unexpected("No HTTP response") }
-        if passing.contains(http.statusCode) { throw Status(code: http.statusCode) }
+        if passing.contains(http.statusCode) { throw Status(code: http.statusCode, body: data) }
         switch http.statusCode {
         case 200..<300: return data
         case 401, 403: throw ProviderError.loginExpired
         case 429:
             let retry = http.value(forHTTPHeaderField: "Retry-After").flatMap { retryAfter($0) }
             throw ProviderError.rateLimited(retryAfter: retry)
-        default: throw ProviderError.unexpected("\(providerName) API returned HTTP \(http.statusCode)")
+        default: throw failure(providerName: providerName, status: http.statusCode)
         }
+    }
+
+    static func failure(providerName: String, status: Int) -> ProviderError {
+        .unexpected("\(providerName) API returned HTTP \(status)")
     }
 }

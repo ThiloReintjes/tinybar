@@ -43,7 +43,7 @@ public struct Incident: Sendable, Hashable, Codable {
     public var page: String {
         guard let source = StatusFeed.source(provider) else { return url.host ?? "" }
         switch source {
-        case let .statuspage(base, _), let .incidentIO(base, _): return base.host ?? ""
+        case let .statuspage(base, _), let .incidentIO(base, _), let .openCode(base): return base.host ?? ""
         }
     }
 }
@@ -57,6 +57,8 @@ public enum StatusFeed {
         case statuspage(URL, components: [String]?)
         /// An incident.io page (OpenAI), counting one component group.
         case incidentIO(URL, group: String)
+        /// OpenCode's own page, counting its Go service.
+        case openCode(URL)
     }
 
     static func source(_ id: ProviderID) -> Source? {
@@ -66,6 +68,7 @@ public enum StatusFeed {
         case .cursor: .statuspage(URL(string: "https://status.cursor.com")!, components: nil)
         // Antigravity has no status page; Google's Workspace feed covers the Gemini app instead.
         case .gemini: nil
+        case .opencode: .openCode(URL(string: "https://status.opencode.ai")!)
         }
     }
 
@@ -87,6 +90,8 @@ public enum StatusFeed {
             // page's statuspage-style summary.
             let summary = try? await get(base.appendingPathComponent("api/v2/summary.json"), session)
             return incidentIO(affected: affected, summary: summary, provider: id, base: base, group: group)
+        case let .openCode(base):
+            return try openCode(try await get(base.appendingPathComponent("api/status"), session), base: base)
         }
     }
 
@@ -163,6 +168,37 @@ public enum StatusFeed {
                 url: link, updatedAt: (entry["updated_at"] as? String).flatMap(parseISODate)))
         }
         return out.sorted { $0.severity > $1.severity }
+    }
+
+    // MARK: OpenCode
+
+    /// `api/status`, what the page itself reads. Only the `go` service counts: Zen's free models are
+    /// often degraded, which says nothing about a Go subscription. A page that says its own data is
+    /// stale is no answer, so the last one stays.
+    static func openCode(_ data: Data, base: URL) throws -> [Incident] {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let components = root["components"] as? [[String: Any]],
+              let go = components.first(where: { $0["service"] as? String == "go" }),
+              let status = go["status"] as? String,
+              root["stale"] as? Bool != true
+        else { throw ProviderError.unexpected("Unexpected status page response") }
+        let severity: Incident.Severity
+        switch status {
+        case "operational", "monitoring": return []
+        case "degraded": severity = .degraded
+        case "outage": severity = .majorOutage
+        default: throw ProviderError.unexpected("Unexpected status page component")
+        }
+        let name = ProviderID.opencode.displayName
+        let title = switch go["reason"] as? String {
+        case "errors": "\(name) has elevated errors"
+        case "latency": "\(name) is responding slowly"
+        case "upstream": "\(name) has problems upstream"
+        default: severity == .majorOutage ? "\(name) is down" : "\(name) is degraded"
+        }
+        return [Incident(
+            provider: .opencode, title: title, severity: severity, components: [name], url: base,
+            updatedAt: (go["since"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) })]
     }
 
     // MARK: incident.io

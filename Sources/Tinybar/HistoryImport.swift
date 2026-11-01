@@ -7,11 +7,12 @@ enum HistoryImport {
         case importHistory = "--import-history"
         case backfillStats = "--backfill-stats"
         case backfillLongContext = "--backfill-long-context"
+        case importOpenCode = "--import-opencode"
     }
 
     /// Child side: ingest everything, printing "done/total" lines. Called before the app starts.
     static func runChildIfRequested() {
-        guard let job = [Job.importHistory, .backfillStats, .backfillLongContext].first(where: { CommandLine.arguments.contains($0.rawValue) })
+        guard let job = [Job.importHistory, .backfillStats, .backfillLongContext, .importOpenCode].first(where: { CommandLine.arguments.contains($0.rawValue) })
         else { return }
         Task.detached(priority: .utility) {
             do {
@@ -29,11 +30,15 @@ enum HistoryImport {
                     if !(try await store.hasCompletedStatsBackfill()) { _ = try await store.backfillStats(progress: report) }
                     if !(try await store.hasCompletedLongContextBackfill()) { _ = try await store.backfillLongContext(progress: report) }
                     _ = try await store.ingestAll(progress: report)
+                    // OpenCode's own job retries this: a bad database of theirs doesn't stop the rest.
+                    try? await store.importOpenCode()
                     try await store.markInitialImportDone()
                 case .backfillStats:
                     if !(try await store.hasCompletedStatsBackfill()) { _ = try await store.backfillStats(progress: report) }
                 case .backfillLongContext:
                     if !(try await store.hasCompletedLongContextBackfill()) { _ = try await store.backfillLongContext(progress: report) }
+                case .importOpenCode:
+                    if !(try await store.hasCompletedOpenCodeImport()) { try await store.importOpenCode() }
                 }
                 exit(0)
             } catch {

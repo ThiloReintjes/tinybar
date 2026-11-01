@@ -69,7 +69,7 @@ public struct ModelBenchmark: Sendable, Hashable {
                 ModelBenchmark(model: "gpt-6.1-terra", score: 51.0, cost: 0.96, minutes: 10.7),
                 ModelBenchmark(model: "gpt-6-luna", score: 27.8, cost: 0.15, minutes: 10.2),
             ]
-        case .gemini, .cursor: []
+        case .gemini, .cursor, .opencode: []
         }
     }
 }

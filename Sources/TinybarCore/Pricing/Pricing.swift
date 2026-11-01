@@ -85,7 +85,7 @@ public struct PriceTable: Sendable {
     }
 
     /// models.dev provider ids for each Provider.
-    static let sourceProviders: [ProviderID: String] = [.codex: "openai", .claude: "anthropic"]
+    static let sourceProviders: [ProviderID: String] = [.codex: "openai", .claude: "anthropic", .opencode: "opencode-go"]
 
     private static func rates(_ cost: [String: Any]) throws -> ModelPrice? {
         func number(_ key: String) throws -> Double? {

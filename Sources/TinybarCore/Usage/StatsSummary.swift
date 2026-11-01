@@ -200,7 +200,9 @@ public struct StatsSummary: Sendable {
         } else {
             first = min(allDays.first ?? today, today)
         }
-        let allUsage = usage.filter { $0.day >= first && $0.day <= today }
+        // Only Providers with Activity: the page's figures explain each other, and a token count
+        // with no prompts or tools behind it would read as missing logs.
+        let allUsage = usage.filter { $0.day >= first && $0.day <= today && $0.provider.hasActivity }
         let allStats = stats.filter { $0.day >= first && $0.day <= today }
         let usage = model.map { m in allUsage.filter { $0.model == m } } ?? allUsage
         let stats = model.map { m in allStats.filter { $0.model == m } } ?? allStats

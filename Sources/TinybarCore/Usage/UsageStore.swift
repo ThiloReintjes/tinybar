@@ -37,7 +37,7 @@ public struct DailyStat: Sendable, Hashable {
 public actor UsageStore {
     private let db: SQLiteDB
     private let projects = ProjectResolver()
-    private static let schemaVersion: Int64 = 7
+    private static let schemaVersion: Int64 = 8
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
         let db = try SQLiteDB(path: path.path)
@@ -52,8 +52,8 @@ public actor UsageStore {
     private static func migrate(_ db: SQLiteDB) throws {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
-        try db.exec(limitReadingSchema)
-        if version == 6 {
+        try db.exec(limitReadingSchema + openCodeMessageSchema)
+        if version >= 6 {
             try db.exec("PRAGMA user_version = \(schemaVersion);")
             return
         }
@@ -97,7 +97,7 @@ public actor UsageStore {
         }
         try db.exec(claudeMessageSchema + statSchema + longContextSchema)
         try db.exec("""
-        INSERT OR REPLACE INTO meta (key, value) VALUES ('long_context_backfill', 'done');
+        INSERT OR REPLACE INTO meta (key, value) VALUES ('long_context_backfill', 'done'), ('opencode_import', 'done');
         CREATE TABLE IF NOT EXISTS daily_usage (
             day TEXT NOT NULL,
             provider TEXT NOT NULL,
@@ -177,6 +177,12 @@ public actor UsageStore {
     ) WITHOUT ROWID;
     """
 
+    /// The OpenCode responses already counted (`OpenCodeHistory.Row.key`). Kept for good, as a fork
+    /// can copy a message of any age.
+    private static let openCodeMessageSchema = """
+    CREATE TABLE IF NOT EXISTS opencode_message (key TEXT PRIMARY KEY) WITHOUT ROWID;
+    """
+
     /// Activity counters (SPEC §9), and the ids of one-off Claude events (prompts, edits,
     /// compactions) already counted, since resumed sessions copy them into new transcripts.
     private static let statSchema = """
@@ -225,7 +231,7 @@ public actor UsageStore {
         }
     }
 
-    /// Ingests every log source. With `only`, just those paths are checked (from `LogWatcher`)
+    /// Ingests every source. With `only`, just those log paths are checked (from `LogWatcher`)
     /// instead of walking every root.
     @discardableResult
     public func ingestAll(
@@ -239,6 +245,8 @@ public actor UsageStore {
             total.bytesRead += r.bytesRead
             total.recordsAdded += r.recordsAdded
         }
+        // A store from before OpenCode reads its history once in the child process first.
+        if try hasCompletedOpenCodeImport() { total.recordsAdded += try ingestOpenCode() }
         try pruneClaudeMessagesDaily()
         return total
     }
@@ -259,6 +267,78 @@ public actor UsageStore {
         progress: (@Sendable (IngestProgress) -> Void)? = nil) throws -> IngestResult
     {
         try ingest(.claude, roots: roots, only: only, progress: progress)
+    }
+
+    /// OpenCode's database and WAL at the last good read, to skip reading them unchanged.
+    private var openCodeStamps: [FileStamp?] = []
+
+    /// OpenCode keeps a database, not logs, so it is checked on every ingest. One that can't be read
+    /// or has changed shape adds nothing and doesn't stop the other sources. Returns the responses added.
+    @discardableResult
+    func ingestOpenCode(
+        database: URL? = OpenCodeData().database,
+        read: @Sendable (URL, Int64) -> OpenCodeHistory.Reading? = OpenCodeHistory.read(database:after:)) throws -> Int
+    {
+        guard let database else { return 0 }
+        func stamps() -> [FileStamp?] { [database.path, database.path + "-wal"].map(Self.stamp) }
+        let before = stamps()
+        guard before != openCodeStamps else { return 0 }
+        // Never past now: one row dated in the future, by a wrong clock or corruption, would
+        // otherwise hide every later row for good.
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        // Another file (a restored backup, a new `OPENCODE_DB`) starts over; responses count once anyway.
+        let source = "\(database.path)#\(before[0]?.inode ?? 0)"
+        let sameSource = try db.run("SELECT value FROM meta WHERE key = 'opencode_source'").first?.first?.text == source
+        let cursor = sameSource ? try db.run("SELECT value FROM meta WHERE key = 'opencode_cursor'").first?.first?.text.flatMap { Int64($0) } : nil
+        var seen = min(cursor ?? 0, now)
+        guard var reading = read(database, seen) else { return 0 }
+        if reading.newest < seen {
+            // The database went back, as when a backup is restored over the same file.
+            seen = 0
+            guard let whole = read(database, seen) else { return 0 }
+            reading = whole
+        }
+        // A checkpoint between copying the database and its WAL can leave out an older row while
+        // keeping a newer one. What was read still counts, but only a settled read moves on from it.
+        let settled = stamps() == before
+        let newest = settled ? min(max(seen, reading.newest), now) : seen
+        var added = 0
+        if !reading.rows.isEmpty || newest > seen {
+            try db.transaction {
+                for row in reading.rows {
+                    try db.run("INSERT OR IGNORE INTO opencode_message (key) VALUES (?)", [.text(row.key)])
+                    guard db.changes > 0 else { continue }
+                    try addTokens(
+                        day: DayKey.string(for: row.record.timestamp), provider: .opencode,
+                        model: ModelName.normalize(row.record.model), project: projects.project(for: row.record.cwd),
+                        row.record.tokens)
+                    added += 1
+                }
+                try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('opencode_cursor', ?), ('opencode_source', ?)", [.text(String(newest)), .text(source)])
+            }
+        }
+        if settled { openCodeStamps = before }
+        return added
+    }
+
+    /// The first read of OpenCode's history for a store that predates it, in the child process.
+    public func importOpenCode() throws {
+        try importOpenCode(database: OpenCodeData().database)
+    }
+
+    /// Done only once it has read the database whole, or there is none. Until then normal ingestion
+    /// stays away, and the next launch tries again. A busy database gets a few tries.
+    func importOpenCode(database: URL?) throws {
+        openCodeStamps = []
+        for _ in 0..<3 where openCodeStamps.isEmpty { try ingestOpenCode(database: database) }
+        if let database, FileManager.default.fileExists(atPath: database.path), openCodeStamps.isEmpty {
+            throw ProviderError.unexpected("Couldn't read OpenCode's database")
+        }
+        try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('opencode_import', 'done')")
+    }
+
+    public func hasCompletedOpenCodeImport() throws -> Bool {
+        try db.run("SELECT value FROM meta WHERE key = 'opencode_import'").first?.first?.text == "done"
     }
 
     /// Reads only bytes appended since the last run of each changed file.
@@ -516,10 +596,7 @@ public actor UsageStore {
         let provider = ClaudeLogParser.provider(forModel: model)
         let project = projects.project(for: record.cwd)
         if countTokens {
-            try addDaily(day: day, provider: provider, model: model, project: project, record.tokens)
-            if let band = ContextBand.of(record.tokens) {
-                try addLong(day: day, provider: provider, model: model, project: project, band: band, record.tokens)
-            }
+            try addTokens(day: day, provider: provider, model: model, project: project, record.tokens)
         }
         let newStats = MessageStats(message)
         var stats = StatBatch()
@@ -715,6 +792,14 @@ public actor UsageStore {
         try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('claude_message_pruned', ?)", [.text(today)])
     }
 
+    /// A new response's tokens, in the daily totals and, if it was long, its Context Band.
+    private func addTokens(day: String, provider: ProviderID, model: String, project: String, _ t: TokenCounts) throws {
+        try addDaily(day: day, provider: provider, model: model, project: project, t)
+        if let band = ContextBand.of(t) {
+            try addLong(day: day, provider: provider, model: model, project: project, band: band, t)
+        }
+    }
+
     private func addDaily(day: String, provider: ProviderID, model: String, project: String, _ t: TokenCounts) throws {
         try db.run("""
         INSERT INTO daily_usage (day, provider, model, project, input, output, cache_write, cache_read)
@@ -876,13 +961,14 @@ public actor UsageStore {
     }
 
     /// Every day with any tokens, oldest first: streaks span the whole history.
-    /// Days with any usage, or with usage of one model.
+    /// Days with any usage, or with usage of one model, of the Providers Stats covers.
     public func activeDays(model: String? = nil) throws -> [String] {
+        let covered = "provider IN (" + ProviderID.allCases.filter(\.hasActivity).map { "'\($0.rawValue)'" }.joined(separator: ", ") + ")"
         if let model {
-            return try db.run("SELECT DISTINCT day FROM daily_usage WHERE model = ? ORDER BY day", [.text(model)])
+            return try db.run("SELECT DISTINCT day FROM daily_usage WHERE \(covered) AND model = ? ORDER BY day", [.text(model)])
                 .compactMap { $0.first?.text }
         }
-        return try db.run("SELECT DISTINCT day FROM daily_usage ORDER BY day").compactMap { $0.first?.text }
+        return try db.run("SELECT DISTINCT day FROM daily_usage WHERE \(covered) ORDER BY day").compactMap { $0.first?.text }
     }
 
     public func hasCompletedInitialImport() throws -> Bool {
