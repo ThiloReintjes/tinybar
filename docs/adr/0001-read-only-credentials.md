@@ -10,4 +10,4 @@ Where a Provider exposes no readable token, Tinybar runs the client itself for a
 
 - If a CLI sits unused until its login expires, that Provider's limits go stale. That is intended, not a bug to fix with a refresh flow.
 - If staleness becomes a real problem, revisit it with a new ADR rather than quietly adding refresh logic.
-- claude-swap, if the user turns it on, can renew its own Accounts' logins when Tinybar asks it for their limits. That is the one case where Tinybar's polling can lead to a refresh (ADR 0009).
+- claude-swap, if the user turns it on, can renew its own Accounts' logins when Tinybar asks it for their limits. That is the one case where Tinybar's polling can lead to a refresh (ADR 0010).

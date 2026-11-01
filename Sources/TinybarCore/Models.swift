@@ -5,6 +5,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
     case codex
     case gemini
     case cursor
+    case opencode
 
     public var displayName: String {
         switch self {
@@ -12,6 +13,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .codex: "Codex"
         case .gemini: "Gemini"
         case .cursor: "Cursor"
+        case .opencode: "OpenCode Go"
         }
     }
 
@@ -22,6 +24,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .codex: "codex"
         case .gemini: "agy"
         case .cursor: nil
+        case .opencode: "opencode"
         }
     }
 
@@ -30,12 +33,16 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         switch self {
         case .claude, .codex, .gemini: "run `\(cliCommand!)` once to refresh"
         case .cursor: "open Cursor or sign in at cursor.com"
+        case .opencode: "run `opencode auth login`"
         }
     }
 
     /// Whether the opt-in browser fallback applies. Cursor reads its browser session as a
     /// regular source, so it has no separate toggle.
     public var hasBrowserFallback: Bool { self == .claude || self == .codex }
+
+    /// Whether its logs are read for Activity, which the Stats window is built on (ADR 0006).
+    public var hasActivity: Bool { self == .claude || self == .codex }
 
     public static func < (lhs: ProviderID, rhs: ProviderID) -> Bool {
         allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!

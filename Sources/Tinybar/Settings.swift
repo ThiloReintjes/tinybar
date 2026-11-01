@@ -24,7 +24,7 @@ final class Settings {
     }
 
     /// Whether to read accounts from claude-swap. Off by default, as `cswap list` can renew idle
-    /// logins itself (ADR 0009).
+    /// logins itself (ADR 0010).
     var readClaudeSwap: Bool {
         didSet {
             if savesChanges { defaults.set(readClaudeSwap, forKey: "readClaudeSwap") }
@@ -79,8 +79,8 @@ final class Settings {
     // MARK: Providers
 
     /// Auto-detected Providers are on unless the user turned them off.
-    func isEnabled(_ id: ProviderID, detected: Bool) -> Bool {
-        (defaults.object(forKey: "enabled.\(id.rawValue)") as? Bool) ?? detected
+    func isEnabled(_ id: ProviderID, detected: @autoclosure () -> Bool) -> Bool {
+        (defaults.object(forKey: "enabled.\(id.rawValue)") as? Bool) ?? detected()
     }
 
     func setEnabled(_ id: ProviderID, _ enabled: Bool) {

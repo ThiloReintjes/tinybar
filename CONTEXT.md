@@ -7,7 +7,7 @@ A macOS menu bar app that shows how much of each AI coding subscription is used 
 ### Subscriptions and limits
 
 **Provider**:
-A company whose AI subscription Tinybar tracks (e.g. Anthropic via Claude, OpenAI via Codex, Google via Gemini, Anysphere via Cursor).
+A company whose AI subscription Tinybar tracks (e.g. Anthropic via Claude, OpenAI via Codex, Google via Gemini, Anysphere via Cursor, OpenCode via its Go subscription).
 _Avoid_: Service, vendor, integration
 
 **Account**:
@@ -57,7 +57,7 @@ _Avoid_: Offline, error state
 ### Token history
 
 **Usage Record**:
-A single model response from a local coding CLI log, with its token counts (input, output, cache write, cache read), model, timestamp and Project.
+A single model response from a local coding CLI log or database, with its token counts (input, output, cache write, cache read), model, timestamp and Project.
 _Avoid_: Event, entry, log line
 
 **Project**:

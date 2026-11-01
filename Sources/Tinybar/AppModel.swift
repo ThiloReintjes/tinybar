@@ -85,6 +85,7 @@ final class AppModel {
             .codex: CodexProvider(allowBrowser: { browserFlags.isEnabled(.codex) }),
             .gemini: GeminiProvider(),
             .cursor: CursorProvider(),
+            .opencode: OpenCodeProvider(),
         ]
         // `TINYBAR_DB` points development runs (snapshots) at a scratch database.
         store = try? ProcessInfo.processInfo.environment["TINYBAR_DB"].map { try UsageStore(path: URL(fileURLWithPath: $0)) }
@@ -400,6 +401,7 @@ final class AppModel {
             } else {
                 if !((try? await store.hasCompletedStatsBackfill()) ?? true) { jobs.append(.backfillStats) }
                 if !((try? await store.hasCompletedLongContextBackfill()) ?? true) { jobs.append(.backfillLongContext) }
+                if !((try? await store.hasCompletedOpenCodeImport()) ?? true) { jobs.append(.importOpenCode) }
             }
             for job in jobs {
                 guard !isAsleep, !isLocked else { return }

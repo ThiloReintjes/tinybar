@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reads the Accounts claude-swap manages, through its versioned `cswap list --json` (ADR 0009).
+/// Reads the Accounts claude-swap manages, through its versioned `cswap list --json` (ADR 0010).
 /// Opt-in, because that command can renew an idle account's login. Tinybar never sees a token, and
 /// never runs anything else, so it can't switch accounts.
 public enum ClaudeSwap {

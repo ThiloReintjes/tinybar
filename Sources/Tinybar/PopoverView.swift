@@ -127,6 +127,10 @@ private struct TabBar: View {
     let select: (Page) -> Void
     @Namespace private var lens
 
+    /// Five names don't fit in the popover: then only the selected tab has one, and the others
+    /// make room for it.
+    private var crowded: Bool { model.enabledProviders.count > 4 }
+
     var body: some View {
         HStack(spacing: 2) {
             tab(.overview) {
@@ -140,9 +144,11 @@ private struct TabBar: View {
                     HStack(spacing: 5) {
                         ProviderDot(id: id)
                             .opacity(model.providers[id]?.isStale == true ? 0.35 : 1)
-                        Text(id.displayName)
+                        if !crowded || page == .provider(id) { Text(id.displayName) }
                     }
+                    .accessibilityLabel(id.displayName)
                 }
+                .help(id.displayName)
             }
         }
         .padding(3)
@@ -152,13 +158,14 @@ private struct TabBar: View {
 
     private func tab(_ target: Page, @ViewBuilder label: () -> some View) -> some View {
         let selected = page == target
+        let shrinks = target == .overview || (crowded && !selected && page != .overview)
         return Button { select(target) } label: {
             label()
                 .font(.system(size: 12, weight: selected ? .semibold : .medium))
                 .lineLimit(1)
                 .foregroundStyle(selected ? .primary : .secondary)
                 .padding(.horizontal, 9)
-                .frame(maxWidth: target == .overview ? nil : .infinity, minHeight: 26)
+                .frame(maxWidth: shrinks ? nil : .infinity, minHeight: 26)
                 .background {
                     if selected {
                         Capsule()

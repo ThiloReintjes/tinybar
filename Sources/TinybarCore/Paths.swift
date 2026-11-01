@@ -17,6 +17,13 @@ public enum Paths {
         return home.appendingPathComponent(".codex", isDirectory: true)
     }
 
+    /// OpenCode's data directory: `XDG_DATA_HOME` if absolute, as OpenCode reads it, else `~/.local/share`.
+    public static func openCodeData(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        let base = env["XDG_DATA_HOME"].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
+            ?? home.appendingPathComponent(".local/share", isDirectory: true)
+        return base.appendingPathComponent("opencode", isDirectory: true)
+    }
+
     /// Claude Code config dirs: `CLAUDE_CONFIG_DIR` (comma-separated) or `~/.claude` and
     /// `~/.config/claude`, whichever exist.
     public static func claudeConfigDirs(env: [String: String] = ProcessInfo.processInfo.environment) -> [URL] {
@@ -50,7 +57,7 @@ public enum Paths {
         case .codex:
             prefix = ".codex"
             defaults = isSet("CODEX_HOME") ? [codexHome(env: env)] : [home.appendingPathComponent(".codex", isDirectory: true)]
-        case .gemini, .cursor:
+        case .gemini, .cursor, .opencode:
             return []
         }
         // claude-swap's own store isn't a login, though its name looks like one.

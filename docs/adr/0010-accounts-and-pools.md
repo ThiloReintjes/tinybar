@@ -21,5 +21,5 @@ claude-swap is opt-in, and read through `cswap list --json` as CodexBar does. Th
 - Pooled windows don't start or end together, so a Pool has no Run-out Time.
 - A folder's Keychain item is named with a hash of its path. That naming is undocumented, so a change in Claude Code would hide those Accounts until Tinybar is updated.
 - Logs don't say which Account made a request after `cswap switch`, so token history stays per Provider, and Plan Value covers the whole Pool (ADR 0008).
-- Cursor and Gemini stay at one Account until a way to read a second login turns up.
+- Cursor, Gemini and OpenCode Go stay at one Account until a way to read a second login turns up.
 - `cswap` is an external program whose output can change. An unknown `schemaVersion` keeps the last good reading rather than guessing.

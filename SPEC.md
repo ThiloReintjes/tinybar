@@ -9,12 +9,12 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), 
 **Goals**
 - A one-command install that runs with zero configuration.
 - Near-zero resource use (see §2).
-- Accurate Limit Windows, Resets and Banked Resets for Claude, Codex, Gemini and Cursor.
+- Accurate Limit Windows, Resets and Banked Resets for Claude, Codex, Gemini, Cursor and OpenCode Go.
 - Daily token history and Theoretical Cost from local CLI logs.
 - Publishable: MIT license, notarized, auto-updating.
 
 **Non-goals (v1)**
-- Providers other than Claude, Codex, Gemini and Cursor. Grok and Kimi come later, one at a time.
+- Providers other than Claude, Codex, Gemini, Cursor and OpenCode Go. Grok and Kimi come later, one at a time.
 - Token history for Gemini and Cursor (neither keeps usable local logs; limits only).
 - Refreshing tokens or writing to CLI credential files (ADR 0001).
 - Token usage from web/desktop chat apps (no local logs).
@@ -79,9 +79,17 @@ Enabled automatically when `agy` and `~/.gemini/antigravity-cli` exist.
 Displayed: the billing-cycle window (total plan usage), Auto and API-model windows as model-specific, on-demand spend as extra usage, reset at the cycle end.
 Enabled automatically only when Cursor.app holds a login. No Limit Alerts (billing cycles are neither 5h nor weekly).
 
+### OpenCode Go
+Only the subscription: Zen's balance and Console budgets have no Limit Window (ADR 0009).
+1. **OpenCode's login**: the selected `opencode-go` credential, else `opencode` (a Console login), from `opencode.db` in `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, read-only, ordered as OpenCode does (`active DESC, time_created DESC, id DESC`). OpenCode 1.x keeps it in `auth.json` beside that database instead; a database with `session_v2` (2.x) never falls back to it. An expired login is not refreshed.
+   → `GET https://opencode.ai/zen/go/v1/usage`, the request OpenCode's client makes, with `Authorization: Bearer` and, for a Console login, `x-opencode-org-id`. A login is sent only to opencode.ai or a Console on this Mac. A 403 with OpenCode's own error body means no Go subscription; the site's firewall answers 403 too, and is reported as an HTTP error.
+
+Displayed: the 5-hour, weekly and monthly windows. A `rate-limited` window shows nothing left, whatever its share. No plan name (the report has none), and no model-specific windows: Go's limits are per model but it reports one share per window.
+Enabled automatically only with an `opencode-go` credential, as a Console login may have no Go plan. No Limit Alerts for the monthly window.
+
 ### Detection and staleness
 - On launch, a Provider is enabled automatically if its CLI credentials exist. It can be toggled in Settings.
-- If a fetch fails (expired token, network, 401), the Account becomes **Stale**. It keeps its last values and says how to fix it: run `claude` once (or `codex`, `agy`, or "open Cursor or sign in at cursor.com").
+- If a fetch fails (expired token, network, 401), the Account becomes **Stale**. It keeps its last values and says how to fix it: run `claude` once (or `codex`, `agy`, "open Cursor or sign in at cursor.com", or `opencode auth login`).
 - This section describes the default login. Other Accounts: §15.
 
 Implementation note: endpoint shapes are undocumented. Verify request headers and response fields against CodexBar's sources (`Sources/CodexBarCore/Providers/{Claude,Codex}/`, `docs/codex.md`) before implementing.
@@ -107,13 +115,14 @@ Read on every poll and popover refresh (same throttle), without credentials, onl
 - **Claude**: `status.claude.com/api/v2/summary.json` (statuspage.io). Counts the components `claude.ai`, `Claude API` and `Claude Code`; Console, Cowork and Government don't count.
 - **Codex**: `status.openai.com/proxy/status.openai.com` (incident.io), counting the components of the "Codex" group; when any is affected, `status.openai.com/api/v2/summary.json` supplies the incident's title (the open incident naming Codex, else the first open one with an impact).
 - **Cursor**: `status.cursor.com/api/v2/summary.json`, all components.
+- **OpenCode Go**: `status.opencode.ai/api/status`, its `go` service only: Zen's free models are often degraded, which says nothing about the subscription. A page reporting its own data as stale is no answer.
 - **Gemini**: none. Antigravity has no status page, and Google's Workspace feed (about 350 KB) covers the Gemini app instead.
 An unresolved incident counts when it names a counted component, or names none and has an impact. Its severity is the worst status among counted components (degraded, partial outage, major outage), else its impact. Maintenance in progress counts as maintenance. A page that can't be read keeps its last answer.
 
 ## 7. Popover (344 × 540 pt, fixed; long pages scroll inside)
 
 Two levels, one click apart. A tab bar at the top always shows Overview plus one tab per enabled
-Provider (keys 0–4). The popover keeps one fixed size; pages sit side by side and slide into
+Provider (keys 0–5). With all five on, a Provider page shows only its own name and the other tabs a dot, with the name on hover. The popover keeps one fixed size; pages sit side by side and slide into
 view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 
 1. **Overview**:
@@ -131,7 +140,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
    - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
      by Provider, and top models and Projects, each bar split by Provider.
    - Colours come from each logo: Claude orange, Codex monochrome (black or white), Gemini its
-     four-colour spark, Cursor grey.
+     four-colour spark, Cursor grey, and OpenCode teal, as its mark is monochrome too.
 2. **Provider page**:
    - Large rings with the tightest % left, name and plan.
    - A banner per Incident: status light, title, severity and affected components, when it was
@@ -182,6 +191,8 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 - **Codex**: `~/.codex/sessions/**` (and archived sessions). Token counts are cumulative per session, so store deltas and handle forked sessions without double counting.
 - **Every Account together**: the same logs of each extra login folder and of `cswap run` profiles (`~/.claude-swap-backup/sessions/*/projects`), where those folders exist, looked for on each ingest. These are read whether or not the Account is toggled on or claude-swap is turned on, because they are only local logs. Folders that resolve to the same place count once. Token history stays per Provider: after `cswap switch`, nothing in a log says which Account made a request.
 
+- **OpenCode**: `opencode.db`, as a copy of the database and its WAL (a clone on APFS). Finished `message` rows (1.x) and `session_message` rows (2.x, assistant and compaction) whose provider is `opencode-go`; everything else is left out (ADR 0009). `output` plus `reasoning` counts as output. Forks and the upgrade to 2.x copy rows under new ids, so a response is identified by its time, model and tokens. Each read starts 10 minutes before the newest row seen, never counted past now, and is skipped while the database and WAL are unchanged. No Activity.
+
 Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored/CostUsage/` before implementing.
 
 ### Ingestion
@@ -193,6 +204,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - `daily_usage(day, provider, model, project, input, output, cache_write, cache_read)`, primary key (day, provider, model, project).
 - `file_cursor(path, inode, size, mtime, offset)`.
 - `claude_message(id, …, stats)`: the tokens and Activity counted per Claude message id, for de-duplication. Ids older than 90 days are pruned once a day; daily totals are kept.
+- `opencode_message(key)`: the OpenCode responses already counted, kept for good as a fork can copy a message of any age.
 - `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`. Every counter is kept per model, including `hour.HH` (responses started in that hour) and `tokens.hour.HH` (their tokens), `cmd.*` (Shell Commands: `cmd.prog.<program>`, `cmd.git.<subcommand>` and habit counts) and `ext.added|removed|edits.<extension>`.
 - `claude_event(id, day)`: Claude Prompts, edit results and Compactions already counted, pruned with message ids.
 - `daily_long_context(day, provider, model, project, band, …tokens)`: the part of `daily_usage` from long requests, for Long-context Prices (§10).
@@ -238,7 +250,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 12. Later (explicitly deferred)
 
-Grok and Kimi providers; token history for other CLIs; a second Account for Cursor and Gemini; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
+Grok and Kimi providers; token history for other CLIs; OpenCode usage routed to other subscriptions; Activity for OpenCode; a second Account for Cursor, Gemini and OpenCode Go; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
 
 ## 13. Stats window
 
@@ -356,6 +368,9 @@ which Tinybar doesn't read.
 counters are cleared once (schema 4) and recounted the same way, per model. 0.3.0 had no Shell
 Commands, Languages or parallel counts; schema 5 clears and recounts once more.
 
+Schema 8 adds `opencode_message`. A store from before it reads OpenCode's history once, in the child
+process, before normal ingestion does.
+
 Schema 7 adds `limit_reading`.
 
 Schema 6 (0.5.0) adds Context Bands. Claude's come at once from the message ids kept for
@@ -371,7 +386,7 @@ a message seen again is replaced by its complete copy.
 
 ## 14. Plans (ADR 0008)
 
-A page of the Stats window, for Claude and Codex (Gemini and Cursor have no token logs). It turns
+A page of the Stats window, for Claude and Codex (Gemini and Cursor have no token logs, and OpenCode Go limits differ by model at the same price, ADR 0009). It turns
 each weekly Limit Window into API dollars, then compares the models. The range picker doesn't apply
 and hides.
 
@@ -414,7 +429,7 @@ and hides.
 - **How this is worked out**: a button at the bottom opens the workings, the assumptions and the
   source in a popover. The copied image leaves it out.
 
-## 15. Accounts (ADR 0009)
+## 15. Accounts (ADR 0010)
 
 A Provider has one or more Accounts, and its own Limit Windows are their Pool. With one Account, everything works as it did before Accounts.
 
@@ -432,7 +447,7 @@ A Provider has one or more Accounts, and its own Limit Windows are their Pool. W
 
 The browser fallback's numbers (§4) aren't filed under the CLI's login, since that browser may be signed in as someone else: the default login then counts as having no readable email.
 
-Cursor and Gemini have only the default login.
+Cursor, Gemini and OpenCode Go have only the default login.
 
 ### Identity and names
 - An Account's identity is its email and organization, lowercased, and pins, alert state and `limit_reading` store only a SHA-256 hash of them. (Log paths in `file_cursor` can still name one: claude-swap names its `cswap run` profiles after the account.) An Account with no readable email uses a hash of its folder's path. The same identity found twice is one Account; the default login wins, then a folder, then claude-swap.

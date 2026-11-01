@@ -41,6 +41,27 @@ final class SQLiteDB {
     func run(_ sql: String, _ params: [Value] = []) throws -> [[Value]] {
         let stmt = try prepare(sql)
         defer { sqlite3_reset(stmt); sqlite3_clear_bindings(stmt) }
+        Self.bind(params, to: stmt)
+        guard let rows = Self.collect(stmt) else {
+            throw ProviderError.unexpected("SQLite: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        return rows
+    }
+
+    /// A query on a handle this wrapper doesn't own (`CredentialDatabase`). nil if it fails.
+    static func rows(_ handle: OpaquePointer, _ sql: String, _ params: [Value] = []) -> [[Value]]? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bind(params, to: stmt)
+        return collect(stmt)
+    }
+
+    static func hasTable(_ name: String, in handle: OpaquePointer) -> Bool {
+        rows(handle, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", [.text(name)])?.isEmpty == false
+    }
+
+    private static func bind(_ params: [Value], to stmt: OpaquePointer) {
         for (i, p) in params.enumerated() {
             let idx = Int32(i + 1)
             switch p {
@@ -49,13 +70,14 @@ final class SQLiteDB {
             case .null: sqlite3_bind_null(stmt, idx)
             }
         }
+    }
+
+    private static func collect(_ stmt: OpaquePointer) -> [[Value]]? {
         var rows: [[Value]] = []
         while true {
             let rc = sqlite3_step(stmt)
-            if rc == SQLITE_DONE { break }
-            guard rc == SQLITE_ROW else {
-                throw ProviderError.unexpected("SQLite: \(String(cString: sqlite3_errmsg(db)))")
-            }
+            if rc == SQLITE_DONE { return rows }
+            guard rc == SQLITE_ROW else { return nil }
             let n = sqlite3_column_count(stmt)
             var row: [Value] = []
             row.reserveCapacity(Int(n))
@@ -68,7 +90,6 @@ final class SQLiteDB {
             }
             rows.append(row)
         }
-        return rows
     }
 
     var changes: Int { Int(sqlite3_changes(db)) }

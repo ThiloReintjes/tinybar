@@ -583,7 +583,7 @@ private func weekly(used: Double, resets: Date, read: Date, plan: String? = "Max
     #expect(kept.last?.usedPercent == 7)
 }
 
-@Test func readingsMigrateUnclaimedFromSchemaSeven() async throws {
+@Test(arguments: [7, 8]) func readingsMigrateUnclaimedFromBeforeAccounts(version: Int) async throws {
     let home = try tempHome()
     defer { try? FileManager.default.removeItem(at: home) }
     let url = home.appendingPathComponent("usage.sqlite")
@@ -596,10 +596,10 @@ private func weekly(used: Double, resets: Date, read: Date, plan: String? = "Max
         plan TEXT, used_bp INTEGER NOT NULL, read_at INTEGER NOT NULL, plan_changed INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (provider, window, resets_at)) WITHOUT ROWID;
     INSERT INTO limit_reading VALUES ('claude', 'weekly', 1800000000, 604800, 'Pro', 2500, 1799900000, 0);
-    PRAGMA user_version = 7;
+    PRAGMA user_version = \(version);
     """)
     let store = try UsageStore(path: url)
-    #expect(try db.run("PRAGMA user_version").first?.first?.int == 8)
+    #expect(try db.run("PRAGMA user_version").first?.first?.int == 9)
     let readings = try await store.limitReadings(provider: .claude)
     #expect(readings.count == 1)
     #expect(readings[0].account == "")

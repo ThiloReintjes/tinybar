@@ -2,8 +2,8 @@ import Foundation
 import TinybarCore
 
 // Developer tool: exercises TinybarCore without the UI.
-//   tinybar-cli limits [--browser] [--swap]  fetch limits (optionally allowing the browser
-//                               fallback, or reading claude-swap's accounts)
+//   tinybar-cli limits [--browser] [--swap] [--provider=<id>]  fetch limits (optionally allowing the
+//                               browser fallback, or reading claude-swap's accounts)
 //   tinybar-cli cookies         check which browser holds session cookies
 //   tinybar-cli ingest [db]     ingest Codex logs into a store
 //   tinybar-cli usage [db]      print usage summaries
@@ -26,8 +26,10 @@ func printLimits(browser: Bool, swap: Bool) async {
         CodexProvider(allowBrowser: { browser }),
         GeminiProvider(),
         CursorProvider(),
+        OpenCodeProvider(),
     ]
-    for provider in providers {
+    let only = args.first { $0.hasPrefix("--provider=") }.map { String($0.dropFirst(11)) }
+    for provider in providers where only == nil || provider.id.rawValue == only {
         do {
             let s = try await provider.fetch()
             print("\(provider.id.displayName) \(s.plan ?? "") [source: \(s.source.rawValue)]")
@@ -153,12 +155,12 @@ case "stats": try await stats()
 case "backfill": try await backfill()
 case "backfill-long": try await backfillLong()
 case "status": await printStatus()
-default: print("usage: tinybar-cli [limits [--browser]|cookies|ingest|usage|stats|backfill|backfill-long|status] [db-path]")
+default: print("usage: tinybar-cli [limits [--browser] [--provider=<id>]|cookies|ingest|usage|stats|backfill|backfill-long|status] [db-path]")
 }
 
 // `tinybar-cli web`: exercises only the browser-cookie paths.
 func printWeb() async {
-    for provider in ProviderID.allCases where provider != .gemini {
+    for provider in ProviderID.allCases where provider != .gemini && provider != .opencode {
         do {
             let (browser, s) = try await BrowserFallback.fetch(provider)
             print("\(provider.displayName) via \(browser): " + s.windows.map { "\($0.title) \(Int($0.remainingPercent))% left" }.joined(separator: ", "))
