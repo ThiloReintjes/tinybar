@@ -74,6 +74,12 @@ public enum Paths {
         }
     }
 
+    /// Where the CLIs log by default: all that versions before Accounts read.
+    static func defaultLogRoots(env: [String: String] = ProcessInfo.processInfo.environment) -> [URL] {
+        claudeConfigDirs(env: env).map { $0.appendingPathComponent("projects", isDirectory: true) }
+            + ["sessions", "archived_sessions"].map { codexHome(env: env).appendingPathComponent($0, isDirectory: true) }
+    }
+
     /// Every place Claude Code logs, the default first. Folders that resolve to the same place, like
     /// a `cswap run --share-history` profile, count once. Others are returned resolved, since the log
     /// walk doesn't follow a link at its root; the default stays as it was, as saved cursors name it.

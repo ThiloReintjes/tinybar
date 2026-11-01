@@ -43,7 +43,7 @@ func printLimits(browser: Bool, swap: Bool) async {
             print("\(provider.id.displayName) error: \(error.localizedDescription)")
         }
     }
-    for folder in LoginFolders.find() {
+    for folder in LoginFolders.find() where only == nil || only == folder.provider.rawValue {
         do {
             let s = try await folder.source.fetch()
             print("\(folder.provider.displayName) ~/\(folder.id) \(s.plan ?? "")")
@@ -52,7 +52,7 @@ func printLimits(browser: Bool, swap: Bool) async {
             print("\(folder.provider.displayName) ~/\(folder.id) error: \(error.localizedDescription)")
         }
     }
-    if swap, let cswap = ClaudeSwap.locate() {
+    if swap, only == nil || only == ProviderID.claude.rawValue, let cswap = ClaudeSwap.locate() {
         do {
             for account in try ClaudeSwap.read(executable: cswap) {
                 print("claude-swap \(account.displayName)\(account.isActive ? " [active]" : "")\(account.error.map { " error: \($0.localizedDescription)" } ?? "")")

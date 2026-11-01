@@ -197,6 +197,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ### Ingestion
 - **First launch**: import all available logs once, in the background at low priority (`.utility`), with progress shown in the popover.
+- **A log folder that appears** (§15) can hold a whole history, so it gets the same background import in a child process. Normal ingestion waits until that finishes, and until the next launch if it fails. The folders present when a store first reads this are the defaults, which it has already read.
 - **Afterwards**: incremental. Store per file (path, inode, size, mtime, byte offset). Only read appended bytes. Re-read a file from zero if it was truncated or replaced.
 - Stored daily totals survive the CLIs deleting old logs (Claude Code deletes after 30 days by default).
 

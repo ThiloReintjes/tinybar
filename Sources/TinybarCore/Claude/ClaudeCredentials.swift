@@ -71,7 +71,7 @@ public struct ClaudeCredentials: Sendable {
     public static func identity(folder: URL? = nil, env: [String: String] = ProcessInfo.processInfo.environment) -> LoginIdentity? {
         // The folder `load` would take the token from, so limits are filed under whose they are.
         let dirs = folder.map { [$0] } ?? Paths.claudeConfigDirs(env: env)
-        let configHome = dirs.first { FileManager.default.fileExists(atPath: $0.appendingPathComponent(".credentials.json").path) } ?? dirs[0]
+        let configHome = dirs.first { FileManager.default.isReadableFile(atPath: $0.appendingPathComponent(".credentials.json").path) } ?? dirs[0]
         let base = folder ?? (env["CLAUDE_CONFIG_DIR"]?.isEmpty == false ? configHome : Paths.home)
         // An older config file wins while it holds anything, as it does in Claude Code.
         let legacy = configHome.appendingPathComponent(".config.json")

@@ -52,6 +52,13 @@ private func account(
     try Data("{}".utf8).write(to: b.appendingPathComponent(".credentials.json"))
     let identity = ClaudeCredentials.identity(env: ["CLAUDE_CONFIG_DIR": "\(a.path),\(b.path)"])
     #expect(identity?.email == "b@example.com")
+
+    // A token that can't be read doesn't count, as `load` wouldn't take it.
+    let unreadable = a.appendingPathComponent(".credentials.json")
+    try Data("{}".utf8).write(to: unreadable)
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: unreadable.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: unreadable.path) }
+    #expect(ClaudeCredentials.identity(env: ["CLAUDE_CONFIG_DIR": "\(a.path),\(b.path)"])?.email == "b@example.com")
 }
 
 @Test func codexIdentityComesFromTheIdToken() throws {
@@ -390,6 +397,23 @@ private func folder(_ path: String, in home: URL) throws -> URL {
     let codex = Paths.codexLogRoots(home: home, env: ["CODEX_HOME": home.appendingPathComponent(".codex").path]).map(\.path)
     #expect(codex.contains(home.appendingPathComponent(".codex_alt/sessions").path))
     #expect(codex.contains(home.appendingPathComponent(".codex_alt/archived_sessions").path))
+}
+
+@Test func aNewLogFolderWaitsForItsOwnImport() async throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let store = try UsageStore(path: home.appendingPathComponent("usage.sqlite"))
+    let extra = home.appendingPathComponent(".claude_side/projects")
+    // What earlier versions read isn't new, whatever is added beside it.
+    let defaults = Paths.defaultLogRoots()
+    #expect(try await store.unreadLogRoots(defaults).isEmpty)
+    #expect(try await store.unreadLogRoots(defaults + [extra]) == [extra])
+    try await store.markLogRootsRead(defaults + [extra])
+    #expect(try await store.unreadLogRoots(defaults + [extra]).isEmpty)
+    // Marking one doesn't forget the others.
+    let another = home.appendingPathComponent(".claude-swap-backup/sessions/2-x/projects")
+    try await store.markLogRootsRead([another])
+    #expect(try await store.unreadLogRoots(defaults + [extra, another]).isEmpty)
 }
 
 @Test func theSameMessageInTwoFoldersCountsOnce() async throws {

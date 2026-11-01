@@ -402,6 +402,7 @@ final class AppModel {
                 if !((try? await store.hasCompletedStatsBackfill()) ?? true) { jobs.append(.backfillStats) }
                 if !((try? await store.hasCompletedLongContextBackfill()) ?? true) { jobs.append(.backfillLongContext) }
                 if !((try? await store.hasCompletedOpenCodeImport()) ?? true) { jobs.append(.importOpenCode) }
+                if !((try? await store.unreadLogRoots().isEmpty) ?? true) { jobs.append(.importLogFolders) }
             }
             for job in jobs {
                 guard !isAsleep, !isLocked else { return }
@@ -421,7 +422,8 @@ final class AppModel {
         guard !isAsleep, !isLocked else { return }
         // A failed initial import must not fall back to a heavy read in this process.
         // A failed backfill can wait for relaunch without stopping new usage from being counted.
-        if !initialImportFailed {
+        // A log folder its import didn't finish is as heavy as an initial import, so it waits too.
+        if !initialImportFailed, (try? await store.unreadLogRoots().isEmpty) ?? true {
             // A login folder or `cswap run` profile that appeared gets watched and read from now on.
             let roots = UsageStore.codexRoots + UsageStore.claudeRoots
             if roots != logRoots {

@@ -8,11 +8,12 @@ enum HistoryImport {
         case backfillStats = "--backfill-stats"
         case backfillLongContext = "--backfill-long-context"
         case importOpenCode = "--import-opencode"
+        case importLogFolders = "--import-log-folders"
     }
 
     /// Child side: ingest everything, printing "done/total" lines. Called before the app starts.
     static func runChildIfRequested() {
-        guard let job = [Job.importHistory, .backfillStats, .backfillLongContext, .importOpenCode].first(where: { CommandLine.arguments.contains($0.rawValue) })
+        guard let job = [Job.importHistory, .backfillStats, .backfillLongContext, .importOpenCode, .importLogFolders].first(where: { CommandLine.arguments.contains($0.rawValue) })
         else { return }
         Task.detached(priority: .utility) {
             do {
@@ -29,9 +30,11 @@ enum HistoryImport {
                     // store's pending migrations before reading new bytes; each marks itself done.
                     if !(try await store.hasCompletedStatsBackfill()) { _ = try await store.backfillStats(progress: report) }
                     if !(try await store.hasCompletedLongContextBackfill()) { _ = try await store.backfillLongContext(progress: report) }
+                    let roots = UsageStore.codexRoots + UsageStore.claudeRoots
                     _ = try await store.ingestAll(progress: report)
                     // OpenCode's own job retries this: a bad database of theirs doesn't stop the rest.
                     try? await store.importOpenCode()
+                    try await store.markLogRootsRead(roots)
                     try await store.markInitialImportDone()
                 case .backfillStats:
                     if !(try await store.hasCompletedStatsBackfill()) { _ = try await store.backfillStats(progress: report) }
@@ -39,6 +42,10 @@ enum HistoryImport {
                     if !(try await store.hasCompletedLongContextBackfill()) { _ = try await store.backfillLongContext(progress: report) }
                 case .importOpenCode:
                     if !(try await store.hasCompletedOpenCodeImport()) { try await store.importOpenCode() }
+                case .importLogFolders:
+                    let roots = UsageStore.codexRoots + UsageStore.claudeRoots
+                    _ = try await store.ingestAll(progress: report)
+                    try await store.markLogRootsRead(roots)
                 }
                 exit(0)
             } catch {

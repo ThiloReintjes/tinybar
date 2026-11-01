@@ -989,6 +989,27 @@ public actor UsageStore {
         return try db.run("SELECT DISTINCT day FROM daily_usage WHERE \(covered) ORDER BY day").compactMap { $0.first?.text }
     }
 
+    /// Log folders no import has read yet. A login folder or `cswap run` profile that appears can hold
+    /// a whole history, so the app reads those in a child process, not during a normal ingest.
+    public func unreadLogRoots(_ roots: [URL] = UsageStore.codexRoots + UsageStore.claudeRoots) throws -> [URL] {
+        let read = try readLogRoots()
+        return roots.filter { !read.contains($0.path) }
+    }
+
+    /// `roots` are those listed before reading, so one that appears meanwhile is still imported later.
+    public func markLogRootsRead(_ roots: [URL]) throws {
+        let all = try readLogRoots().union(roots.map(\.path)).sorted()
+        let json = String(decoding: try JSONEncoder().encode(all), as: UTF8.self)
+        try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('read_log_roots', ?)", [.text(json)])
+    }
+
+    private func readLogRoots() throws -> Set<String> {
+        guard let stored = try db.run("SELECT value FROM meta WHERE key = 'read_log_roots'").first?.first?.text else {
+            return Set(Paths.defaultLogRoots().map(\.path))
+        }
+        return Set((try? JSONDecoder().decode([String].self, from: Data(stored.utf8))) ?? [])
+    }
+
     public func hasCompletedInitialImport() throws -> Bool {
         try db.run("SELECT value FROM meta WHERE key = 'initial_import'").first?.first?.text == "done"
     }
