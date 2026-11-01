@@ -16,7 +16,6 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), 
 **Non-goals (v1)**
 - Providers other than Claude, Codex, Gemini and Cursor. Grok and Kimi come later, one at a time.
 - Token history for Gemini and Cursor (neither keeps usable local logs; limits only).
-- Multiple accounts per Provider.
 - Refreshing tokens or writing to CLI credential files (ADR 0001).
 - Token usage from web/desktop chat apps (no local logs).
 - Historical pricing.
@@ -82,7 +81,8 @@ Enabled automatically only when Cursor.app holds a login. No Limit Alerts (billi
 
 ### Detection and staleness
 - On launch, a Provider is enabled automatically if its CLI credentials exist. It can be toggled in Settings.
-- If a fetch fails (expired token, network, 401), the Provider becomes **Stale**. It keeps its last values and says how to fix it: run `claude` once (or `codex`, `agy`, or "open Cursor or sign in at cursor.com").
+- If a fetch fails (expired token, network, 401), the Account becomes **Stale**. It keeps its last values and says how to fix it: run `claude` once (or `codex`, `agy`, or "open Cursor or sign in at cursor.com").
+- This section describes the default login. Other Accounts: §15.
 
 Implementation note: endpoint shapes are undocumented. Verify request headers and response fields against CodexBar's sources (`Sources/CodexBarCore/Providers/{Claude,Codex}/`, `docs/codex.md`) before implementing.
 
@@ -92,14 +92,14 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 - An extra refresh when the popover opens, throttled to at most once per 60 s per Provider.
 - A manual refresh button (same throttle).
 - Paused while the Mac sleeps or the screen is locked. On wake or unlock, refresh once.
-- Per-Provider backoff when the server asks for it (`Retry-After`, 429).
+- Per-Account backoff when the server asks for it (`Retry-After`, 429).
 - Log ingestion runs on the same poll, and when the popover opens (cheap because it is incremental).
 
 ## 6. Menu bar
 
 - A tiny ring glyph showing how much of the Pinned Limit is **left**, in that Provider's colour (Claude orange, Gemini its spark, Codex and Cursor monochrome): full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage".
-- **Pinned Limit**: chosen by clicking any Limit Window on a Provider page; clicking it again unpins it. Unpinned, the menu bar shows **Auto**: of every Provider's account-wide windows, the one whose Run-out Time comes first before its Reset, else the one with the least left (ties: the earlier Reset). Stale Providers count only when no other is known. A pinned window that disappears falls back to Auto. Settings has "Show the limit closest to running out".
-- If the Pinned Limit's Provider is Stale, the glyph is dimmed.
+- **Pinned Limit**: chosen by clicking any Limit Window on a Provider page, of the Provider's only Account or of one of several; clicking it again unpins it. Unpinned, the menu bar shows **Auto**: of every Pool's windows that aren't model-specific, the one whose Run-out Time comes first before its Reset, else the one with the least left (ties: the earlier Reset). A Pool of several Accounts has no Run-out Time (§15). A Pool counts as Stale when all its Accounts are, and Stale Pools count only when no other is known. A pinned window that disappears falls back to Auto. Settings has "Show the limit closest to running out".
+- If the Pinned Limit's Account is Stale, or every Account of its Pool, the glyph is dimmed.
 - **Incidents**: while any enabled Provider has an Incident that disrupts it (not maintenance), the ring wears a status light at its top right, cut out of the ring: orange when degraded, red for an outage. The tooltip names it. No animation.
 
 ### Status pages
@@ -123,6 +123,11 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
      Model-specific windows are left out. A Stale Provider shows "Login expired" (or the reason) in
      orange; otherwise an Incident shows its status light and title in its colour, ahead of the
      Run-out Time. Clicking a row opens its page.
+   - A Provider with several Accounts shows its Pool on the same row: "3 accounts" in place of the
+     plan, how much the next Reset gives back ("Weekly · 6% back in 2d 7h"), and a bar under the
+     text with one segment per Account, filled to the % left of its tightest window. The Active
+     Account's segment is the brightest and a Stale Account's is dimmed. Pointing at a segment names
+     the Account. No more rows, however many Accounts.
    - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
      by Provider, and top models and Projects, each bar split by Provider.
    - Colours come from each logo: Claude orange, Codex monochrome (black or white), Gemini its
@@ -135,13 +140,22 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
    - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time: in orange if
      it comes before the Reset, faint if after (the headroom). Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
+   - With several Accounts: the rings and % show the Pool, with "3 accounts" for the plan. In place
+     of the Limit Windows, a list with a compact row per Account (small rings, name, plan, "in use" on
+     the Active Account, its 5-hour and weekly % left, or "Login expired"). The Active Account starts
+     open, and clicking another row opens its Limit Windows and Extras in place with a critically
+     damped spring, or a cross-fade with Reduce Motion. One is open at a time. Each Limit Window pins
+     as usual.
+   - While `cswap` is installed and not turned on, one line under the Claude page's limits, "claude-swap
+     is installed. Show its accounts", which turns it on. It goes away for good once used or dismissed.
    - That Provider's usage only: tokens, cost, chart, top models and Projects. Today is provisional.
+     With several Accounts it covers all of them and says so.
 3. **Footer**: last check time (or the update pill, §11), check now (⌘R), Stats (⌘S, §13), how Tinybar counts (⌘I), settings
    (⌘,), quit (⌘Q). "How Tinybar counts" is a page like Settings: where limits, tokens, API
    prices and Stats come from, what stays on the Mac, and how much of the last 30 days' tokens
    Activity was counted from when that is short of all.
 
-**Settings** (replaces the page, back with Esc): Provider toggles, launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), hide percentage, and Auto for the menu bar. The running version sits at the bottom, next to a Report a bug link that opens the GitHub bug form with the version and macOS filled in.
+**Settings** (replaces the page, back with Esc): Provider toggles, a toggle per extra login folder and "Read accounts from claude-swap" (§15), launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), hide percentage, and Auto for the menu bar. The running version sits at the bottom, next to a Report a bug link that opens the GitHub bug form with the version and macOS filled in.
 
 ### Run-out Time
 - Pace = % used ÷ time since the window started (Reset minus duration). Run-out Time = now + % left ÷ pace.
@@ -154,10 +168,11 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 
 ## 8. Limit Alerts
 
-- Scope: the 5h and weekly Limit Windows of every enabled Provider (not model-specific windows).
+- Scope: the 5h and weekly Limit Windows of every enabled Account (not model-specific windows, and not Pools).
 - Notify once when a window crosses **90%**, and once when it crosses **95%**.
 - Notify on **Reset** only if that window crossed 90% before resetting.
-- De-duplicate per (Provider, window, reset time), so a notification never repeats within one window cycle, including across app restarts.
+- With several Accounts the notification names the Account: "Claude (work) Weekly: 10% left".
+- De-duplicate per (Provider, Account, window, reset time), so a notification never repeats within one window cycle, including across app restarts. Switching the Active Account sends nothing by itself.
 - Ask for notification permission once, on first launch.
 
 ## 9. Token history
@@ -165,6 +180,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 ### Sources
 - **Claude**: `~/.claude/projects/**/*.jsonl`. Assistant messages with `usage` (input, output, cache creation, cache read), `model`, `timestamp`, `cwd`. De-duplicate by message id; the same response can appear several times, and the most complete copy wins.
 - **Codex**: `~/.codex/sessions/**` (and archived sessions). Token counts are cumulative per session, so store deltas and handle forked sessions without double counting.
+- **Every Account together**: the same logs of each extra login folder and of `cswap run` profiles (`~/.claude-swap-backup/sessions/*/projects`), where those folders exist, looked for on each ingest. These are read whether or not the Account is toggled on or claude-swap is turned on, because they are only local logs. Folders that resolve to the same place count once. Token history stays per Provider: after `cswap switch`, nothing in a log says which Account made a request.
 
 Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored/CostUsage/` before implementing.
 
@@ -180,8 +196,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - `daily_stat(day, provider, model, key, value)`: Activity counters (§13, ADR 0006), sums except `context.max`. Every counter is kept per model, including `hour.HH` (responses started in that hour) and `tokens.hour.HH` (their tokens), `cmd.*` (Shell Commands: `cmd.prog.<program>`, `cmd.git.<subcommand>` and habit counts) and `ext.added|removed|edits.<extension>`.
 - `claude_event(id, day)`: Claude Prompts, edit results and Compactions already counted, pruned with message ids.
 - `daily_long_context(day, provider, model, project, band, …tokens)`: the part of `daily_usage` from long requests, for Long-context Prices (§10).
-- `limit_reading(provider, window, resets_at, duration, plan, used_bp, read_at, plan_changed)`: the highest share of each weekly Limit Window seen, the newest 8 per window (§14).
-- The schema allows a future `account` column (multi-account later).
+- `limit_reading(provider, account, window, resets_at, duration, plan, used_bp, read_at, plan_changed)`: the highest share of each weekly Limit Window seen per Account, the newest 8 per Account and window (§14). `account` is the hash from §15, empty for readings from before Accounts.
 
 ### Day boundary
 - Local calendar day, midnight to midnight, based on each record's timestamp in the current time zone.
@@ -223,7 +238,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 12. Later (explicitly deferred)
 
-Grok and Kimi providers; token history for other CLIs; multiple accounts; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
+Grok and Kimi providers; token history for other CLIs; a second Account for Cursor and Gemini; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
 
 ## 13. Stats window
 
@@ -372,6 +387,14 @@ and hides.
 - **Per $1**: full week × 4.35 weeks ÷ the plan's list price in US dollars. Every window is assumed
   used in full; Banked Resets and other extra resets aren't counted. A plan with no known price
   drops this figure.
+- **Several Accounts**: the logs can't be split between Accounts, so one column covers the Pool.
+  Its value per 100% of an Account's week = Theoretical Cost ÷ the sum of the shares used × 100, over
+  the time every Account has readings; a window partly inside counts by the part of its time inside,
+  and an Account with no reading in a stretch counts as unused. Nothing is shown before the shares add
+  up to 10%. Full week = that × the number of Accounts. Per $1 uses the sum of their list prices and
+  needs every plan to be known; otherwise the column shows dollars, as for any unknown plan. Readings
+  with an empty `account` are ignored. If an Account is used while Stale, its share goes unmeasured,
+  so the figure reads high until it recovers.
 - **Models**: a table bundled with the app holds each current model's Artificial Analysis
   Intelligence Index score, cost per Benchmark Task and minutes per Benchmark Task, at maximum
   effort, with the date it was copied. Tasks a week = full week ÷ cost per Benchmark Task, which
@@ -390,3 +413,41 @@ and hides.
   marks a figure with use that has no known price.
 - **How this is worked out**: a button at the bottom opens the workings, the assumptions and the
   source in a popover. The copied image leaves it out.
+
+## 15. Accounts (ADR 0009)
+
+A Provider has one or more Accounts, and its own Limit Windows are their Pool. With one Account, everything works as it did before Accounts.
+
+### Where Accounts come from
+1. **The default login**: §4. This is the Active Account. It keeps being fetched directly, so it keeps its plan name, Banked Resets and fallbacks, whatever else is on.
+2. **Extra login folders**: folders directly in the home directory named `.claude*` or `.codex*` that hold a login, looked for on every check, because a GUI app can't see the shell's `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Each has a toggle in Settings, on by default. Strictly read-only, like the default login (ADR 0001).
+   - **Claude**: `<folder>/.credentials.json`, else the Keychain item `Claude Code-credentials-<first 8 hex digits of the SHA-256 of the folder's path>`, read through `/usr/bin/security`. Presence is checked with an attribute-only lookup. Name and identity come from `oauthAccount` in `<folder>/.claude.json`. The fix for an expired login names the folder: run `CLAUDE_CONFIG_DIR=~/.claude_side claude` once.
+   - **Codex**: `<folder>/auth.json`, with the email in its `id_token`. The fix: run `CODEX_HOME=~/.codex_alt codex` once.
+3. **claude-swap**: off by default, turned on in Settings, where its note says it may renew idle logins itself. Display only: Tinybar never switches accounts.
+   - Runs exactly `cswap list --json` on the normal poll: no shell, no other arguments, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`. Terminated after 30 s, and output over 256 KB is rejected.
+   - Requires `schemaVersion` 1. Anything else, a failure or an error object keeps the last good reading and marks those Accounts Stale, says why in Settings, and never touches the default login.
+   - Reads only `number`, `email`, `organizationUuid`, `organizationName`, `alias`, `active`, `disabled`, `usageStatus`, `usage` (`fiveHour`, `sevenDay`, `scoped`, `spend`), `lastGoodUsage` and their fetch times. A reading is dated by its own fetch time, not by when `cswap` ran. Raw output is never logged or kept.
+   - The row marked `active` is the default login when their emails match; the default login's data wins and the row adds only its alias. During a switch they can briefly disagree, until the next check.
+   - Accounts read this way show no plan name and no Banked Resets.
+
+The browser fallback's numbers (§4) aren't filed under the CLI's login, since that browser may be signed in as someone else: the default login then counts as having no readable email.
+
+Cursor and Gemini have only the default login.
+
+### Identity and names
+- An Account's identity is its email and organization, lowercased, and pins, alert state and `limit_reading` store only a SHA-256 hash of them. (Log paths in `file_cursor` can still name one: claude-swap names its `cswap run` profiles after the account.) An Account with no readable email uses a hash of its folder's path. The same identity found twice is one Account; the default login wins, then a folder, then claude-swap.
+- An Account is shown by its claude-swap alias, else its email. Two with the same email add the organization name.
+
+### Which Accounts count
+- API-key accounts are left out entirely: they have no limits.
+- An Account toggled off in Settings leaves the Pool and Limit Alerts, and its logs still count (§9).
+- An Account marked `disabled` in claude-swap stays in: that only skips it for rotation.
+
+### The Pool
+- A Pool's window is the plain average of each Account's window of that kind (5-hour, weekly), over the Accounts reporting it. Model-specific windows stay on their Account.
+- An Account with no weekly quota left counts as 0% in the 5-hour window too, because it can't be used.
+- A Stale Account counts at its last known values. Once one of its windows' known Reset has passed, that window counts as full. If the Account was used elsewhere in the meantime, the Pool reads high until its next good reading.
+- The Pool's next Reset is the soonest among its Accounts that gives anything back, and gives back those Accounts' used shares ÷ the number of Accounts. A 5-hour window blocked by a used-up week comes back as its week and 5 hours allow.
+- Accounts are listed soonest next Reset first, and keep that order in the bar and on the Provider page.
+- A Pool of several Accounts has no Run-out Time, because its windows don't start or end together. Each Account keeps its own on the Provider page.
+- A pin `claude/weekly` means the Pool's window, and `claude@<hash>/weekly` one Account's. An Account that goes away falls back to Auto.

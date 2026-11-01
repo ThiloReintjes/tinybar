@@ -37,7 +37,7 @@ public struct DailyStat: Sendable, Hashable {
 public actor UsageStore {
     private let db: SQLiteDB
     private let projects = ProjectResolver()
-    private static let schemaVersion: Int64 = 7
+    private static let schemaVersion: Int64 = 8
 
     public init(path: URL = Paths.appSupport.appendingPathComponent("usage.sqlite")) throws {
         let db = try SQLiteDB(path: path.path)
@@ -52,6 +52,19 @@ public actor UsageStore {
     private static func migrate(_ db: SQLiteDB) throws {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
+        if version == 7 {
+            // 0.8.0 keeps readings per Account. The ones so far can mix Accounts, so they stay
+            // unclaimed (SPEC §14).
+            try db.exec("""
+            ALTER TABLE limit_reading RENAME TO limit_reading_old;
+            \(limitReadingSchema)
+            INSERT INTO limit_reading (provider, account, window, resets_at, duration, plan, used_bp, read_at, plan_changed)
+            SELECT provider, '', window, resets_at, duration, plan, used_bp, read_at, plan_changed FROM limit_reading_old;
+            DROP TABLE limit_reading_old;
+            PRAGMA user_version = \(schemaVersion);
+            """)
+            return
+        }
         try db.exec(limitReadingSchema)
         if version == 6 {
             try db.exec("PRAGMA user_version = \(schemaVersion);")
@@ -161,11 +174,13 @@ public actor UsageStore {
     ) WITHOUT ROWID;
     """
 
-    /// The latest reading of each weekly Limit Window (SPEC §14). `used_bp` is hundredths of a
-    /// percent, `plan_changed` a plan change during the window.
+    /// The latest reading of each Account's weekly Limit Window (SPEC §14). `used_bp` is hundredths
+    /// of a percent, `plan_changed` a plan change during the window. `account` is empty until one
+    /// claims the reading.
     private static let limitReadingSchema = """
     CREATE TABLE IF NOT EXISTS limit_reading (
         provider TEXT NOT NULL,
+        account TEXT NOT NULL DEFAULT '',
         window TEXT NOT NULL,
         resets_at INTEGER NOT NULL,
         duration INTEGER NOT NULL,
@@ -173,7 +188,7 @@ public actor UsageStore {
         used_bp INTEGER NOT NULL,
         read_at INTEGER NOT NULL,
         plan_changed INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (provider, window, resets_at)
+        PRIMARY KEY (provider, account, window, resets_at)
     ) WITHOUT ROWID;
     """
 
@@ -207,12 +222,10 @@ public actor UsageStore {
         public var recordsAdded: Int
     }
 
-    public static let codexRoots = [
-        Paths.codexHome().appendingPathComponent("sessions"),
-        Paths.codexHome().appendingPathComponent("archived_sessions"),
-    ]
+    /// Looked for each time, since a login folder or `cswap run` profile can appear at any point.
+    public static var codexRoots: [URL] { Paths.codexLogRoots() }
 
-    public static let claudeRoots: [URL] = Paths.claudeConfigDirs().map { $0.appendingPathComponent("projects") }
+    public static var claudeRoots: [URL] { Paths.claudeLogRoots() }
 
     public enum LogSource: String, Sendable, CaseIterable {
         case codex, claude
@@ -814,11 +827,13 @@ public actor UsageStore {
 
     // MARK: Limit readings
 
-    /// How many past windows are kept per Limit Window.
-    private static let keptReadings: Int64 = 8
+    /// How many past windows are kept per Account and Limit Window.
+    static let keptReadings = 8
 
-    /// Keeps the highest share each weekly account-wide Limit Window reached, and when (SPEC §14).
-    public func recordLimitReadings(_ snapshot: ProviderSnapshot) throws {
+    /// Keeps the highest share each weekly account-wide Limit Window of an Account reached, and when
+    /// (SPEC §14). With `claiming`, a reading from before Accounts with the same Reset becomes this
+    /// Account's. Those can mix Accounts, so only a Provider's only Account should claim them.
+    public func recordLimitReadings(_ snapshot: ProviderSnapshot, account: String = "", claiming: Bool = true) throws {
         try db.transaction {
             for w in snapshot.windows where w.kind == .weekly && !w.isModelSpecific {
                 guard let resetsAt = w.resetsAt, let duration = w.durationSeconds else { continue }
@@ -828,32 +843,33 @@ public actor UsageStore {
                 let read = Int64(snapshot.fetchedAt.timeIntervalSince1970)
                 // A provider can restate a reset by a few seconds; that is still the same window.
                 let known = try db.run("""
-                SELECT resets_at, plan, used_bp, plan_changed FROM limit_reading
-                WHERE provider = ? AND window = ? AND abs(resets_at - ?) < 3600
-                ORDER BY resets_at DESC LIMIT 1
-                """, [.text(provider), .text(w.id), .int(reset)]).first
+                SELECT resets_at, plan, used_bp, plan_changed, account FROM limit_reading
+                WHERE provider = ? AND (account = ? OR (? AND account = '')) AND window = ? AND abs(resets_at - ?) < 3600
+                ORDER BY account DESC, resets_at DESC LIMIT 1
+                """, [.text(provider), .text(account), .int(claiming ? 1 : 0), .text(w.id), .int(reset)]).first
                 guard let known else {
                     try db.run("""
-                    INSERT INTO limit_reading (provider, window, resets_at, duration, plan, used_bp, read_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, [.text(provider), .text(w.id), .int(reset), .int(Int64(duration)),
+                    INSERT INTO limit_reading (provider, account, window, resets_at, duration, plan, used_bp, read_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [.text(provider), .text(account), .text(w.id), .int(reset), .int(Int64(duration)),
                           snapshot.plan.map { .text($0) } ?? .null, .int(used), .int(read)])
                     try db.run("""
-                    DELETE FROM limit_reading WHERE provider = ? AND window = ? AND resets_at NOT IN (
-                        SELECT resets_at FROM limit_reading WHERE provider = ? AND window = ?
+                    DELETE FROM limit_reading WHERE provider = ? AND account = ? AND window = ? AND resets_at NOT IN (
+                        SELECT resets_at FROM limit_reading WHERE provider = ? AND account = ? AND window = ?
                         ORDER BY resets_at DESC LIMIT ?)
-                    """, [.text(provider), .text(w.id), .text(provider), .text(w.id), .int(Self.keptReadings)])
+                    """, [.text(provider), .text(account), .text(w.id), .text(provider), .text(account), .text(w.id), .int(Int64(Self.keptReadings))])
                     continue
                 }
                 let plan = snapshot.plan ?? known[1].text
                 let changed = known[3].int != 0 || (known[1].text != nil && plan != known[1].text)
-                guard used > known[2].int || plan != known[1].text || changed != (known[3].int != 0) else { continue }
+                let claim = known[4].text != account
+                guard used > known[2].int || plan != known[1].text || changed != (known[3].int != 0) || claim else { continue }
                 try db.run("""
-                UPDATE limit_reading SET plan = ?, used_bp = max(used_bp, ?), plan_changed = ?,
+                UPDATE OR REPLACE limit_reading SET account = ?, plan = ?, used_bp = max(used_bp, ?), plan_changed = ?,
                     read_at = CASE WHEN ? > used_bp THEN ? ELSE read_at END
-                WHERE provider = ? AND window = ? AND resets_at = ?
-                """, [plan.map { .text($0) } ?? .null, .int(used), .int(changed ? 1 : 0), .int(used), .int(read),
-                      .text(provider), .text(w.id), .int(known[0].int)])
+                WHERE provider = ? AND account = ? AND window = ? AND resets_at = ?
+                """, [.text(account), plan.map { .text($0) } ?? .null, .int(used), .int(changed ? 1 : 0), .int(used), .int(read),
+                      .text(provider), .text(known[4].text ?? ""), .text(w.id), .int(known[0].int)])
             }
         }
     }
@@ -861,7 +877,7 @@ public actor UsageStore {
     /// One Provider's readings, newest first.
     public func limitReadings(provider: ProviderID) throws -> [LimitReading] {
         try db.run("""
-        SELECT window, resets_at, duration, plan, used_bp, read_at, plan_changed FROM limit_reading
+        SELECT window, resets_at, duration, plan, used_bp, read_at, plan_changed, account FROM limit_reading
         WHERE provider = ? ORDER BY resets_at DESC
         """, [.text(provider.rawValue)]).map { r in
             LimitReading(
@@ -871,7 +887,8 @@ public actor UsageStore {
                 plan: r[3].text,
                 usedPercent: Double(r[4].int) / 100,
                 readAt: Date(timeIntervalSince1970: Double(r[5].int)),
-                planChanged: r[6].int != 0)
+                planChanged: r[6].int != 0,
+                account: r[7].text ?? "")
         }
     }
 

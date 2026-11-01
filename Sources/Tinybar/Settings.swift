@@ -8,6 +8,8 @@ import TinybarCore
 @Observable
 final class Settings {
     private let defaults = UserDefaults.standard
+    /// Off for a snapshot, which shows a state without choosing it for the user.
+    var savesChanges = true
 
     var pinnedLimit: String? {
         didSet { defaults.set(pinnedLimit, forKey: "pinnedLimit") }
@@ -19,6 +21,24 @@ final class Settings {
 
     var notificationsEnabled: Bool {
         didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") }
+    }
+
+    /// Whether to read accounts from claude-swap. Off by default, as `cswap list` can renew idle
+    /// logins itself (ADR 0009).
+    var readClaudeSwap: Bool {
+        didSet {
+            if savesChanges { defaults.set(readClaudeSwap, forKey: "readClaudeSwap") }
+            if readClaudeSwap { claudeSwapHintDismissed = true }
+        }
+    }
+
+    var claudeSwapHintDismissed: Bool {
+        didSet { if savesChanges { defaults.set(claudeSwapHintDismissed, forKey: "claudeSwapHintDismissed") } }
+    }
+
+    /// Extra login folders the user turned off, by name.
+    private var loginFoldersOff: Set<String> {
+        didSet { defaults.set(Array(loginFoldersOff), forKey: "loginFoldersOff") }
     }
 
     var launchAtLogin: Bool {
@@ -33,6 +53,9 @@ final class Settings {
         pinnedLimit = defaults.string(forKey: "pinnedLimit")
         hidePercentage = defaults.bool(forKey: "hidePercentage")
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
+        readClaudeSwap = defaults.bool(forKey: "readClaudeSwap")
+        claudeSwapHintDismissed = defaults.bool(forKey: "claudeSwapHintDismissed")
+        loginFoldersOff = Set(defaults.stringArray(forKey: "loginFoldersOff") ?? [])
         launchAtLogin = SMAppService.mainApp.status == .enabled
 
         // Launch at login is on by default: register once on first run.
@@ -62,6 +85,16 @@ final class Settings {
 
     func setEnabled(_ id: ProviderID, _ enabled: Bool) {
         defaults.set(enabled, forKey: "enabled.\(id.rawValue)")
+    }
+
+    // MARK: Accounts
+
+    func isLoginFolderEnabled(_ folder: LoginFolder) -> Bool {
+        !loginFoldersOff.contains(folder.id)
+    }
+
+    func setLoginFolder(_ folder: LoginFolder, enabled: Bool) {
+        if enabled { loginFoldersOff.remove(folder.id) } else { loginFoldersOff.insert(folder.id) }
     }
 
     // MARK: Browser fallback

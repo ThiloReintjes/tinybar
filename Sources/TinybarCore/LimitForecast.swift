@@ -15,7 +15,8 @@ extension LimitWindow {
     /// can't be forecast (no reset time or duration, or too early in the window). `asOf` is when
     /// `usedPercent` was read.
     public func runOutTime(asOf: Date) -> Date? {
-        guard let resetsAt, let duration = durationSeconds, duration > 0 else { return nil }
+        // A Pool's Accounts don't start or end their windows together, so it has no one pace.
+        guard poolRefill == nil, let resetsAt, let duration = durationSeconds, duration > 0 else { return nil }
         let length = TimeInterval(duration)
         let untilReset = resetsAt.timeIntervalSince(asOf)
         guard untilReset > 0, untilReset <= length else { return nil }

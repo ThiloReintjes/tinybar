@@ -2,7 +2,8 @@ import Foundation
 import TinybarCore
 
 // Developer tool: exercises TinybarCore without the UI.
-//   tinybar-cli limits [--browser]  fetch limits (optionally allowing the browser fallback)
+//   tinybar-cli limits [--browser] [--swap]  fetch limits (optionally allowing the browser
+//                               fallback, or reading claude-swap's accounts)
 //   tinybar-cli cookies         check which browser holds session cookies
 //   tinybar-cli ingest [db]     ingest Codex logs into a store
 //   tinybar-cli usage [db]      print usage summaries
@@ -12,7 +13,14 @@ let command = args.first ?? "limits"
 let dbURL = args.dropFirst().first(where: { !$0.hasPrefix("--") }).map { URL(fileURLWithPath: $0) }
     ?? Paths.appSupport.appendingPathComponent("usage.sqlite")
 
-func printLimits(browser: Bool) async {
+func printWindows(_ s: ProviderSnapshot) {
+    for w in s.windows {
+        let runOut = w.runOutTime(asOf: s.fetchedAt).map { "  runs out in \(Format.countdown(to: $0))" } ?? ""
+        print(String(format: "  %-24@ %5.1f%% left  resets in %@%@", w.title as NSString, w.remainingPercent, Format.countdown(to: w.resetsAt) as NSString, runOut as NSString))
+    }
+}
+
+func printLimits(browser: Bool, swap: Bool) async {
     let providers: [any UsageProvider] = [
         ClaudeProvider(allowBrowser: { browser }),
         CodexProvider(allowBrowser: { browser }),
@@ -23,10 +31,7 @@ func printLimits(browser: Bool) async {
         do {
             let s = try await provider.fetch()
             print("\(provider.id.displayName) \(s.plan ?? "") [source: \(s.source.rawValue)]")
-            for w in s.windows {
-                let runOut = w.runOutTime(asOf: s.fetchedAt).map { "  runs out in \(Format.countdown(to: $0))" } ?? ""
-                print(String(format: "  %-24@ %5.1f%% left  resets in %@%@", w.title as NSString, w.remainingPercent, Format.countdown(to: w.resetsAt) as NSString, runOut as NSString))
-            }
+            printWindows(s)
             if let c = s.credits, c.hasCredits { print("  credits: \(c.balance.map { String(format: "%.2f", $0) } ?? "-")") }
             if let e = s.extraUsage { print(String(format: "  extra usage: %.2f / %@ %@", e.used, e.limit.map { String(format: "%.2f", $0) } ?? "∞", e.currency)) }
             for b in s.bankedResets ?? [] where b.isAvailable {
@@ -34,6 +39,25 @@ func printLimits(browser: Bool) async {
             }
         } catch {
             print("\(provider.id.displayName) error: \(error.localizedDescription)")
+        }
+    }
+    for folder in LoginFolders.find() {
+        do {
+            let s = try await folder.source.fetch()
+            print("\(folder.provider.displayName) ~/\(folder.id) \(s.plan ?? "")")
+            printWindows(s)
+        } catch {
+            print("\(folder.provider.displayName) ~/\(folder.id) error: \(error.localizedDescription)")
+        }
+    }
+    if swap, let cswap = ClaudeSwap.locate() {
+        do {
+            for account in try ClaudeSwap.read(executable: cswap) {
+                print("claude-swap \(account.displayName)\(account.isActive ? " [active]" : "")\(account.error.map { " error: \($0.localizedDescription)" } ?? "")")
+                if let s = account.snapshot { printWindows(s) }
+            }
+        } catch {
+            print("claude-swap error: \(error.localizedDescription)")
         }
     }
 }
@@ -120,7 +144,7 @@ func printStatus() async {
 }
 
 switch command {
-case "limits": await printLimits(browser: args.contains("--browser"))
+case "limits": await printLimits(browser: args.contains("--browser"), swap: args.contains("--swap"))
 case "cookies": printCookies()
 case "web": await printWeb()
 case "ingest": try await ingest()

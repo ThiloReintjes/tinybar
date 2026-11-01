@@ -57,6 +57,8 @@ public struct LimitWindow: Codable, Sendable, Hashable, Identifiable {
     public var resetsAt: Date?
     public var durationSeconds: Int?
     public var isModelSpecific: Bool
+    /// Set on a Pool's window: the share of the Pool its next Reset gives back.
+    public var poolRefill: Double?
 
     public init(
         id: String, title: String, usedPercent: Double, resetsAt: Date?,
@@ -204,5 +206,11 @@ public protocol UsageProvider: Sendable {
     var id: ProviderID { get }
     /// Whether the CLI's credentials exist on this Mac. Cheap; used for auto-detection.
     func isConfigured() -> Bool
+    /// Who the login belongs to, where the CLI keeps that.
+    func identity() -> LoginIdentity?
     func fetch() async throws -> ProviderSnapshot
+}
+
+extension UsageProvider {
+    public func identity() -> LoginIdentity? { nil }
 }

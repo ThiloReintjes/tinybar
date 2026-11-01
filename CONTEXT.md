@@ -10,6 +10,18 @@ A macOS menu bar app that shows how much of each AI coding subscription is used 
 A company whose AI subscription Tinybar tracks (e.g. Anthropic via Claude, OpenAI via Codex, Google via Gemini, Anysphere via Cursor).
 _Avoid_: Service, vendor, integration
 
+**Account**:
+One login with a Provider, with its own Limit Windows. A Provider can have several, and the same login found twice is one Account.
+_Avoid_: Profile, slot, seat, subscription (when one login is meant)
+
+**Active Account**:
+The Account that the Provider's CLI uses when run without any account settings. Tools like claude-swap change which one it is.
+_Avoid_: Current account, default account
+
+**Pool**:
+All of a Provider's Accounts taken together. A Pool's Limit Window shows the plain average of what each Account has left in that window. With one Account, the Pool is that Account.
+_Avoid_: Stack, aggregate, total
+
 **Limit Window**:
 A rolling or fixed period in which a Provider caps usage, shown as the percentage left (100% at the start of the window, 0% when the cap is reached) and a Reset time (e.g. the 5-hour session window, the weekly window, a model-specific weekly window).
 _Avoid_: Quota, rate limit, bucket
@@ -27,7 +39,7 @@ A saved reset the user holds (a Codex reset coupon, a Claude "Reset for free" gr
 _Avoid_: Reset credit, rollover
 
 **Pinned Limit**:
-The single Limit Window the user picked in the popover to show in the menu bar. Without one, the menu bar shows Auto: the account-wide window that runs out first.
+The single Limit Window, of a Pool or of one Account, that the user picked in the popover to show in the menu bar. Without one, the menu bar shows Auto: of the Pools' windows that aren't model-specific, the one that runs out first.
 _Avoid_: Primary limit, featured limit
 
 **Incident**:
@@ -35,11 +47,11 @@ A problem a Provider reports on its own public status page that affects the part
 _Avoid_: Outage (it's one severity), downtime, alert
 
 **Limit Alert**:
-A macOS notification sent when a 5-hour or weekly Limit Window crosses 90% or 95% used, or when it Resets after having crossed 90%.
+A macOS notification sent when one Account's 5-hour or weekly Limit Window crosses 90% or 95% used, or when it Resets after having crossed 90%. Pools don't send them.
 _Avoid_: Warning, reminder
 
 **Stale**:
-The state of a Provider whose latest data could not be fetched (e.g. an expired login). Its last known values are shown with the time they were fetched.
+The state of an Account whose latest data could not be fetched (e.g. an expired login). Its last known values are shown with the time they were fetched.
 _Avoid_: Offline, error state
 
 ### Token history
@@ -65,7 +77,7 @@ The higher API price a Provider charges for a whole request whose context is ove
 _Avoid_: Tier pricing, surcharge
 
 **Plan Value**:
-What a subscription's weekly Limit Window would cost at the Provider's API prices, measured from the user's own limits and logs: Theoretical Cost since the window started ÷ share used. It is a floor, because use outside the logged CLIs takes up the limit too.
+What a subscription's weekly Limit Window would cost at the Provider's API prices, measured from the user's own limits and logs: Theoretical Cost since the window started ÷ share used. With several Accounts it covers the whole Pool, because logs don't say which Account made a request: Theoretical Cost ÷ the shares used across Accounts, for one Account's week, times the number of Accounts. It is a floor, because use outside the logged CLIs takes up the limit too.
 _Avoid_: Worth, ROI, savings
 
 **Benchmark Task**:

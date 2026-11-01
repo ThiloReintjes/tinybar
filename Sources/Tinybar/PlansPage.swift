@@ -6,6 +6,8 @@ struct PlanRow: Identifiable {
     var id: ProviderID
     var plan: String?
     var value: PlanValue
+    /// More than one when `value` covers a Pool.
+    var accounts = 1
 
     fileprivate var points: [ModelPoint] {
         value.models.map { ModelPoint(provider: id, model: $0, share: value.recentShares[$0.benchmark.model] ?? 0) }
@@ -55,6 +57,17 @@ private struct PlanColumn: View {
 
     private var cli: String { plan.id == .claude ? "Claude Code" : "Codex" }
 
+    private var noValueYet: String {
+        let minimum = Int(PlanValue.minimumUsedPercent), used = Int(plan.value.usedPercent)
+        if plan.accounts > 1, plan.value.usedPercent < PlanValue.minimumUsedPercent {
+            return "This shows once your accounts have used \(minimum)% of a weekly limit between them. So far they've used \(used)%."
+        }
+        if plan.value.usedPercent < PlanValue.minimumUsedPercent {
+            return "This shows once you've used \(minimum)% of your weekly limit. You've used \(used)%."
+        }
+        return "Tinybar can't work this out yet. Your plan changed this week, or your use this week isn't in your \(cli) logs."
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
@@ -84,9 +97,7 @@ private struct PlanColumn: View {
                     .padding(.top, 8)
                 }
             } else {
-                Text(plan.value.usedPercent < PlanValue.minimumUsedPercent
-                    ? "This shows once you've used \(Int(PlanValue.minimumUsedPercent))% of your weekly limit. You've used \(Int(plan.value.usedPercent))%."
-                    : "Tinybar can't work this out yet. Your plan changed this week, or your use this week isn't in your \(cli) logs.")
+                Text(noValueYet)
                     .font(.system(size: 13))
                     .foregroundStyle(palette.ink2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -457,6 +468,9 @@ struct PlansWorkings: View {
                 return "\(name) is the middle of your last \(v.windows) weeks, \(Format.roughCost(low)) to \(Format.roughCost(high))."
             }
             guard let cost = v.measuredCost, let percent = v.measuredPercent else { return nil }
+            if plan.accounts > 1 {
+                return "\(name): \(Format.roughCost(cost)) took \(Int(percent))% of a weekly limit across its \(plan.accounts) accounts, which is multiplied up to all of them."
+            }
             return "\(name): \(Format.roughCost(cost)) took \(Int(percent))% of the limit."
         }
         return (["Your logged cost at API prices, divided by the share of your weekly limit it took."] + parts).joined(separator: " ")

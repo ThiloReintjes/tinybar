@@ -1,11 +1,12 @@
 import Foundation
 
 enum HTTP {
-    /// Each optional endpoint keeps its own deadline without hiding fresh primary usage.
+    /// Each optional endpoint keeps its own deadline without hiding fresh primary usage, and per
+    /// login where it can have several.
     actor Backoff {
-        private var until = Date.distantPast
-        func permitsRequest(at now: Date) -> Bool { now >= until }
-        func deferRequests(until date: Date) { until = max(until, date) }
+        private var until: [String: Date] = [:]
+        func permitsRequest(at now: Date, for login: String = "") -> Bool { now >= until[login, default: .distantPast] }
+        func deferRequests(until date: Date, for login: String = "") { until[login] = max(until[login, default: .distantPast], date) }
     }
 
     /// Explicit Cookie headers survive URLSession redirects, even with its cookie jar disabled.

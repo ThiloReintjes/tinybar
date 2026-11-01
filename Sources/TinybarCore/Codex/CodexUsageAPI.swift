@@ -127,7 +127,9 @@ enum CodexUsageAPI {
         _ creds: CodexCredentials, session: URLSession, backoff: HTTP.Backoff = resetBackoff,
         now: @Sendable () -> Date = { Date() }) async throws -> [BankedReset]?
     {
-        guard await backoff.permitsRequest(at: now()) else { return nil }
+        // Each login waits for itself: one Account's 429 says nothing of another's.
+        let login = creds.accountId ?? ""
+        guard await backoff.permitsRequest(at: now(), for: login) else { return nil }
         do {
             let data = try await get("wham/rate-limit-reset-credits", creds: creds, session: session, timeout: 8)
             let decoded = try JSONDecoder().decode(ResetCreditsResponse.self, from: data)
@@ -135,7 +137,7 @@ enum CodexUsageAPI {
                 BankedReset(id: $0.id, title: $0.title, status: $0.status, expiresAt: $0.expiresAt.flatMap(parseISODate))
             }
         } catch ProviderError.rateLimited(let delay) {
-            await backoff.deferRequests(until: now().addingTimeInterval(delay ?? 300))
+            await backoff.deferRequests(until: now().addingTimeInterval(delay ?? 300), for: login)
             return nil
         }
     }

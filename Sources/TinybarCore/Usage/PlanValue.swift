@@ -10,8 +10,10 @@ public struct LimitReading: Sendable, Hashable {
     /// When `usedPercent` was first seen, the end of the usage it covers.
     public var readAt: Date
     public var planChanged: Bool
+    /// The Account it belongs to. Empty for readings from before Accounts.
+    public var account: String
 
-    public init(windowID: String, resetsAt: Date, duration: TimeInterval, plan: String?, usedPercent: Double, readAt: Date, planChanged: Bool = false) {
+    public init(windowID: String, resetsAt: Date, duration: TimeInterval, plan: String?, usedPercent: Double, readAt: Date, planChanged: Bool = false, account: String = "") {
         self.windowID = windowID
         self.resetsAt = resetsAt
         self.duration = duration
@@ -19,9 +21,25 @@ public struct LimitReading: Sendable, Hashable {
         self.usedPercent = usedPercent
         self.readAt = readAt
         self.planChanged = planChanged
+        self.account = account
     }
 
     public var start: Date { resetsAt.addingTimeInterval(-duration) }
+}
+
+extension LimitReading {
+    /// What one Account has to go on: its own readings, and those from before Accounts for windows
+    /// it has none of. A window can have both after it was part of a Pool, which doesn't claim them.
+    public static func forOnly(account: String, in readings: [LimitReading]) -> [LimitReading] {
+        let own = readings.filter { $0.account == account }
+        let old = readings.filter { old in
+            old.account.isEmpty && !own.contains { $0.windowID == old.windowID && abs($0.resetsAt.timeIntervalSince(old.resetsAt)) < 3600 }
+        }
+        // Old ones aren't pruned any more, so the same limit on past windows is held here.
+        return Dictionary(grouping: own + old, by: \.windowID).values.flatMap { window in
+            window.sorted { $0.resetsAt > $1.resetsAt }.prefix(UsageStore.keptReadings)
+        }.sorted { $0.resetsAt > $1.resetsAt }
+    }
 }
 
 /// List prices of individual plans, in US dollars a month (ADR 0008). A plan that isn't here shows
@@ -156,46 +174,124 @@ public struct PlanValue: Sendable, Equatable {
         let values = measured.map { $0.cost / $0.reading.usedPercent * 100 }
         let full = median(values)
         let price = PlanPrice.monthly(provider: provider, plan: tier)
-        var perDollar: Double?
-        if let full, let price { perDollar = full * weeksPerMonth / price }
-        let models: [Model] = full.map { full in
-            ModelBenchmark.all(for: provider)
-                .sorted { $0.score > $1.score }
-                .map { Model(benchmark: $0, tasksPerWeek: full / $0.cost) }
-        } ?? []
-
-        let recentFrom = DayKey.daysAgo(6, from: now, calendar: calendar)
-        let today = DayKey.string(for: now, calendar: calendar)
-        var recent: [String: Double] = [:]
-        var recentHasUnpriced = false
-        for row in usage where row.day >= recentFrom && row.day <= today {
-            if let c = prices.cost(row) {
-                recent[ModelName.undated(row.model), default: 0] += c
-            } else {
-                recentHasUnpriced = true
-            }
-        }
-        let recentCost = recent.values.reduce(0, +)
+        let recent = recentUse(usage: usage, prices: prices, now: now, calendar: calendar)
 
         return PlanValue(
             usedPercent: current?.usedPercent ?? 0,
             fullWindow: full,
             fullHasUnpriced: measured.contains { m in
-                let first = DayKey.string(for: m.reading.start, calendar: calendar)
-                let last = DayKey.string(for: end(m.reading), calendar: calendar)
-                return usage.contains {
-                    $0.day >= first && $0.day <= last && prices.cost($0) == nil
-                        && tokens.share(day: $0.day, model: $0.model, from: m.reading.start, to: end(m.reading), calendar: calendar) > 0
-                }
+                hasUnpricedUse(from: m.reading.start, to: end(m.reading), usage: usage, hours: tokens, prices: prices, calendar: calendar)
             },
             low: values.min(), high: values.max(), windows: values.count,
             measuredCost: measured.first?.cost, measuredPercent: measured.first?.reading.usedPercent,
             measuredIsCurrent: measured.first.map { isOpen($0.reading) } ?? false,
-            monthlyPrice: price, perDollar: perDollar,
-            models: models,
-            recentCost: recentCost,
-            recentHasUnpriced: recentHasUnpriced,
-            recentShares: recentCost > 0 ? recent.mapValues { $0 / recentCost } : [:])
+            monthlyPrice: price, perDollar: perDollar(full: full, price: price),
+            models: models(provider, full: full),
+            recentCost: recent.total,
+            recentHasUnpriced: recent.hasUnpriced,
+            recentShares: recent.shares)
+    }
+
+    /// What a Pool buys (SPEC §14). Logs can't be split between Accounts, so this is the Theoretical
+    /// Cost of the time every Account has readings ÷ the shares used in it, for one Account's full
+    /// week, times the number of Accounts. `plans` holds each Account's plan, nil when unknown.
+    public static func buildPool(
+        provider: ProviderID, plans: [String?], readings: [LimitReading],
+        usage: [DailyUsage], hours: [DailyStat],
+        prices: PriceTable, now: Date = Date(), calendar: Calendar = .current) -> PlanValue?
+    {
+        guard !usage.isEmpty, !plans.isEmpty else { return nil }
+        let recent = recentUse(usage: usage, prices: prices, now: now, calendar: calendar)
+        let theirs = readings.filter { !$0.account.isEmpty }
+        let owned = theirs.filter { !$0.planChanged }
+        let starts = Dictionary(owned.map { ($0.account, $0.start) }, uniquingKeysWith: min)
+        var full: Double?
+        var hasUnpriced = false
+        var used = 0.0
+        var measuredCost: Double?
+        if let from = starts.values.max() {
+            // Tokens up to the current hour count, as they do for one Account's open window.
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
+            let nextHour = calendar.dateInterval(of: .hour, for: now)?.end ?? now
+            // An early reset starts a new window before the old one's stated reset, which ends it.
+            let newest = Dictionary(theirs.map { ("\($0.account)/\($0.windowID)", $0.resetsAt) }, uniquingKeysWith: max)
+            let isOpen = { (r: LimitReading) in r.resetsAt > now && r.resetsAt == newest["\(r.account)/\(r.windowID)"] }
+            let to = owned.contains(where: isOpen) ? min(nextHour, tomorrow) : (owned.map(\.readAt).max() ?? now)
+            for r in owned {
+                // The share reached by a window's last reading is spread evenly over its time so far.
+                let end = isOpen(r) ? now : r.readAt
+                let length = end.timeIntervalSince(r.start)
+                guard length > 0 else { continue }
+                let inside = min(end, to).timeIntervalSince(max(r.start, from))
+                used += r.usedPercent * min(max(inside, 0) / length, 1)
+            }
+            if used >= minimumUsedPercent, to > from {
+                let tokens = HourlyTokens(hours)
+                let cost = windowCost(from: from, to: to, usage: usage, hours: tokens, prices: prices, calendar: calendar)
+                if cost > 0 {
+                    measuredCost = cost
+                    full = cost / used * 100 * Double(plans.count)
+                }
+                hasUnpriced = hasUnpricedUse(from: from, to: to, usage: usage, hours: tokens, prices: prices, calendar: calendar)
+            }
+        }
+        // Without every plan's price, a per-dollar figure would divide by too little.
+        let listed = plans.map { PlanPrice.monthly(provider: provider, plan: $0) }
+        let price = listed.contains { $0 == nil } ? nil : listed.compactMap { $0 }.reduce(0, +)
+        return PlanValue(
+            usedPercent: used, fullWindow: full, fullHasUnpriced: hasUnpriced,
+            low: nil, high: nil, windows: full == nil ? 0 : 1,
+            measuredCost: measuredCost, measuredPercent: measuredCost == nil ? nil : used,
+            measuredIsCurrent: true,
+            monthlyPrice: price, perDollar: perDollar(full: full, price: price),
+            models: models(provider, full: full),
+            recentCost: recent.total,
+            recentHasUnpriced: recent.hasUnpriced,
+            recentShares: recent.shares)
+    }
+
+    private static func perDollar(full: Double?, price: Double?) -> Double? {
+        guard let full, let price else { return nil }
+        return full * weeksPerMonth / price
+    }
+
+    private static func models(_ provider: ProviderID, full: Double?) -> [Model] {
+        guard let full else { return [] }
+        return ModelBenchmark.all(for: provider)
+            .sorted { $0.score > $1.score }
+            .map { Model(benchmark: $0, tasksPerWeek: full / $0.cost) }
+    }
+
+    /// The last 7 days' Theoretical Cost, today included, with each undated model's share of it.
+    private static func recentUse(
+        usage: [DailyUsage], prices: PriceTable, now: Date, calendar: Calendar) -> (total: Double, shares: [String: Double], hasUnpriced: Bool)
+    {
+        let from = DayKey.daysAgo(6, from: now, calendar: calendar)
+        let today = DayKey.string(for: now, calendar: calendar)
+        var recent: [String: Double] = [:]
+        var hasUnpriced = false
+        for row in usage where row.day >= from && row.day <= today {
+            if let c = prices.cost(row) {
+                recent[ModelName.undated(row.model), default: 0] += c
+            } else {
+                hasUnpriced = true
+            }
+        }
+        let total = recent.values.reduce(0, +)
+        return (total, total > 0 ? recent.mapValues { $0 / total } : [:], hasUnpriced)
+    }
+
+    /// Whether any use between two moments has no known price.
+    private static func hasUnpricedUse(
+        from start: Date, to end: Date, usage: [DailyUsage], hours: HourlyTokens,
+        prices: PriceTable, calendar: Calendar) -> Bool
+    {
+        let first = DayKey.string(for: start, calendar: calendar)
+        let last = DayKey.string(for: end, calendar: calendar)
+        return usage.contains {
+            $0.day >= first && $0.day <= last && prices.cost($0) == nil
+                && hours.share(day: $0.day, model: $0.model, from: start, to: end, calendar: calendar) > 0
+        }
     }
 
     /// Theoretical Cost between two moments. Days are priced whole; the share of a day inside the

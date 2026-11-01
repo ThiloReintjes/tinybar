@@ -37,6 +37,18 @@ private final class ResetCreditsFixture: URLProtocol, @unchecked Sendable {
     #expect(try await CodexUsageAPI.fetchBankedResets(normal, session: session, backoff: backoff, now: { now.addingTimeInterval(3600) }) == [])
 }
 
+@Test func oneAccountsBankedResetBackoffLeavesAnotherAlone() async throws {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [ResetCreditsFixture.self]
+    let session = URLSession(configuration: config)
+    defer { session.invalidateAndCancel() }
+    let backoff = HTTP.Backoff()
+    let limited = CodexCredentials(accessToken: "limited", accountId: "a")
+    let other = CodexCredentials(accessToken: "normal", accountId: "b")
+    #expect(try await CodexUsageAPI.fetchBankedResets(limited, session: session, backoff: backoff) == nil)
+    #expect(try await CodexUsageAPI.fetchBankedResets(other, session: session, backoff: backoff) == [])
+}
+
 @Test func cookieReadsDropExpiredRowsButKeepSessionCookies() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
