@@ -53,7 +53,7 @@ public actor UsageStore {
         let version = try db.run("PRAGMA user_version").first?.first?.int ?? 0
         guard version < schemaVersion else { return }
         if version == 7 || version == 8 {
-            // 0.8.0 keeps readings per Account. The ones so far can mix Accounts, so they stay
+            // 0.9.0 keeps readings per Account. The ones so far can mix Accounts, so they stay
             // unclaimed (SPEC §14).
             try db.exec("""
             ALTER TABLE limit_reading RENAME TO limit_reading_old;
