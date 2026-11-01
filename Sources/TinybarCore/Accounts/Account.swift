@@ -96,6 +96,12 @@ public enum AccountRoster {
             if let i = merged.firstIndex(where: { $0.id == account.id }) {
                 merged[i].alias = merged[i].alias ?? account.alias
                 merged[i].organizationName = merged[i].organizationName ?? account.organizationName
+                // A preferred source with no numbers doesn't hide another's for the same login.
+                if merged[i].snapshot == nil, account.snapshot != nil {
+                    merged[i].snapshot = account.snapshot
+                    merged[i].error = account.error
+                    merged[i].loginHint = account.loginHint
+                }
             } else {
                 merged.append(account)
             }

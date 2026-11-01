@@ -209,7 +209,8 @@ public struct PlanValue: Sendable, Equatable {
         var hasUnpriced = false
         var used = 0.0
         var measuredCost: Double?
-        if let from = starts.values.max() {
+        // Without a reading from every Account there's no time they were all measured.
+        if let from = starts.values.max(), Set(theirs.map(\.account)).count >= plans.count {
             // Tokens up to the current hour count, as they do for one Account's open window.
             let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
             let nextHour = calendar.dateInterval(of: .hour, for: now)?.end ?? now

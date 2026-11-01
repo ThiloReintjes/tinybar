@@ -93,6 +93,15 @@ private func account(
     #expect(merged[0].displayName == "work")
 }
 
+@Test func aPreferredSourceWithNoNumbersDoesntHideAnothers() {
+    let missing = Account(id: "a", name: "me@example.com", isActive: true, error: .notConfigured)
+    let merged = AccountRoster.merge([missing], [account("a", weekly: 30)], [account("b")])
+    #expect(merged.map(\.id) == ["a", "b"])
+    #expect(merged[0].snapshot?.windows.last?.usedPercent == 30)
+    #expect(merged[0].error == nil)
+    #expect(merged[0].isActive)
+}
+
 @Test func aDefaultLoginThatIsntThereGoesAwayOnceAnotherExists() {
     let missing = Account(id: "default", name: "Claude", isActive: true, error: .notConfigured)
     #expect(AccountRoster.merge([missing]).count == 1)
@@ -681,6 +690,13 @@ private func finished(_ account: String, from: Int, used: Double, plan: String? 
         provider: .claude, plans: ["Max 20x", nil], readings: readings, usage: usage, hours: [], prices: priced, now: later, calendar: utc))
     #expect(mixed.perDollar == nil)
     #expect(mixed.fullWindow != nil)
+}
+
+@Test func aPoolWaitsForAReadingFromEveryAccount() throws {
+    let v = try #require(PlanValue.buildPool(
+        provider: .claude, plans: [nil, nil], readings: [finished("a", from: 0, used: 50)], usage: [daySpend(0, 100)], hours: [], prices: priced,
+        now: dayOne.addingTimeInterval(20 * 86400), calendar: utc))
+    #expect(v.fullWindow == nil)
 }
 
 @Test func aPoolStartsWhereEveryAccountHasReadings() throws {

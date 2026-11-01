@@ -406,8 +406,8 @@ and hides.
 - **Several Accounts**: the logs can't be split between Accounts, so one column covers the Pool.
   Its value per 100% of an Account's week = Theoretical Cost ÷ the sum of the shares used × 100, over
   the time every Account has readings; a window partly inside counts by the part of its time inside,
-  and an Account with no reading in a stretch counts as unused. Nothing is shown before the shares add
-  up to 10%. Full week = that × the number of Accounts. Per $1 uses the sum of their list prices and
+  and an Account with no reading in a stretch counts as unused. Nothing is shown before every Account
+  has a reading and the shares add up to 10%. Full week = that × the number of Accounts. Per $1 uses the sum of their list prices and
   needs every plan to be known; otherwise the column shows dollars, as for any unknown plan. Readings
   with an empty `account` are ignored. If an Account is used while Stale, its share goes unmeasured,
   so the figure reads high until it recovers.
