@@ -36,19 +36,20 @@ write code. Docs-only fixes are the exception.
 Developer tools:
 
 ```sh
-swift run tinybar-cli limits [--browser] [--provider=<id>]   # limits and run-out times
+swift run tinybar-cli limits [--browser] [--swap] [--provider=<id>]   # limits and run-out times, with any other accounts
 swift run tinybar-cli cookies              # which browser holds session cookies
 swift run tinybar-cli ingest [db]          # ingest Claude + Codex logs and OpenCode's database
 swift run tinybar-cli usage [db]           # print usage summaries
 swift run tinybar-cli stats [db]           # raw Activity counters, to check against the logs
 python3 -I Scripts/verify-opencode.py [--out DIR]   # OpenCode Go against the real CLIs and a mock (no subscription needed)
 swift Scripts/make-icon.swift              # redraw Resources/AppIcon.icns and docs/icon.png
-.build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--backdrop] [--redact-projects]
+.build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--accounts one|stack|many] [--backdrop] [--redact-projects]
 .build/debug/Tinybar --snapshot out.png --stats [--page commands|models|languages|plans] [--range week|month|all] [--model <id>] [--hover x,y]   # a Stats card
 ```
 
-`--snapshot` renders the popover to PNG in light and dark. `--backdrop` puts a worst-case window
-behind it, and `--redact-projects` hides your project names.
+`--snapshot` renders the popover to PNG in light and dark. `--accounts` stands in for several logins
+with made-up names and limits, `--backdrop` puts a worst-case window behind it, and
+`--redact-projects` hides your project names.
 
 ## Before submitting
 
@@ -83,7 +84,8 @@ Open an issue first and say which plan you're on. For the PR:
 - Take the data from where the provider's own CLI or app already keeps it, and call the endpoints
   that client itself calls. Show the request headers and response shape in the PR.
 - Implement `UsageProvider` in `Sources/TinybarCore/<Provider>/`, mapping to `LimitWindow`s with
-  `id`s that stay stable across fetches (pinning and alerts depend on them).
+  `id`s that stay stable across fetches (pinning and alerts depend on them). Windows of one kind
+  need the same `id` on every Account, as the Pool averages by it.
 - Map every error to `ProviderError`, so an expired login shows as stale with a hint.
 - Test the mapping with a response fixture. Never commit real tokens, emails or account IDs.
 - No subscription to test with? Run the real client against a local mock, as

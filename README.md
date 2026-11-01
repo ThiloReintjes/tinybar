@@ -52,6 +52,10 @@ and add `--zap` to also delete your history and settings.
 - **When you'll run out.** At your pace so far, the time each window hits 0%. It turns orange if
   that comes before the reset.
 - **One ring in the menu bar** for the limit closest to running out, or the one you pin.
+- **Several accounts.** Other Claude and Codex logins in your home folder are picked up by themselves
+  (`~/.claude_personal`, `~/.codex_alt`), and accounts from
+  [claude-swap](https://github.com/realiti4/claude-swap) if you turn that on in Settings. A subscription's
+  number becomes the average of what they have left, with a bar showing each one. Its page lists them all.
 - **Outages.** When Claude Code, Codex, Cursor or OpenCode Go report trouble on their status page, the ring gets
   an orange or red light, and the subscription's page links to the incident.
 - **Token history and cost.** Today, 7 days and 30 days from your Claude Code and Codex logs and

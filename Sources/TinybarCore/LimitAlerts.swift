@@ -18,16 +18,29 @@ public struct LimitAlertPlanner: Codable, Sendable, Equatable {
         var notified: Set<Int>
     }
 
-    /// Keyed by "provider/windowID".
+    /// Keyed by "provider@account/windowID". Before Accounts: "provider/windowID".
     var cycles: [String: CycleState] = [:]
 
     public init() {}
 
-    public mutating func evaluate(_ snapshot: ProviderSnapshot, now: Date = Date()) -> [Alert] {
+    /// One Account's snapshot. Tracked per Account, so switching to another isn't a Reset. Before
+    /// Accounts there was only the default login, so only that one `inheritsOldState`.
+    public mutating func evaluate(
+        _ snapshot: ProviderSnapshot, account: String? = nil, inheritsOldState: Bool = true, now: Date = Date()) -> [Alert]
+    {
         var alerts: [Alert] = []
         for w in snapshot.windows where !w.isModelSpecific && (w.kind == .session || w.kind == .weekly) {
-            let key = "\(snapshot.provider.rawValue)/\(w.id)"
-            var state = cycles[key] ?? CycleState(resetsAt: w.resetsAt, notified: [])
+            let bare = "\(snapshot.provider.rawValue)/\(w.id)"
+            let key = account.map { "\(snapshot.provider.rawValue)@\($0)/\(w.id)" } ?? bare
+            // A cycle counted before Accounts carries over, or updating would repeat its alerts.
+            let old = cycles[bare]
+            let carried = !inheritsOldState ? nil : old.flatMap { old in
+                !Self.isNewCycle(previous: old.resetsAt, current: w.resetsAt, now: now)
+                    && !Self.isNewCycle(previous: w.resetsAt, current: old.resetsAt, now: now) ? old : nil
+            }
+            var state = cycles[key] ?? carried ?? CycleState(resetsAt: w.resetsAt, notified: [])
+            // It stays for the Account it belongs to, which may come later in the list, until its Reset.
+            if account != nil, carried != nil || old?.resetsAt.map({ $0 <= now }) == true { cycles[bare] = nil }
 
             let observedReset = !state.notified.isEmpty && w.usedPercent == 0
             if observedReset || Self.isNewCycle(previous: state.resetsAt, current: w.resetsAt, now: now) {

@@ -26,6 +26,11 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   in memory only, for the duration of a fetch. Anything
   that writes, caches, logs or transmits a token anywhere other than the provider's own API host
   is high severity.
+- **Extra logins.** Other `~/.claude*` and `~/.codex*` folders are read the same way: their
+  `.credentials.json` or the `Claude Code-credentials-<hash>` Keychain item, and `auth.json`. The emails
+  beside those logins are shown in the popover; pins, alert state and limit readings store a hash of
+  them. The log paths in the local database can name one, since claude-swap names its `cswap run`
+  profiles after the account.
 - **Browser cookies.** Off by default. When enabled, Tinybar reads session cookies for `claude.ai`,
   `chatgpt.com` and (with the Cursor provider on) `cursor.com` only, decrypting Chromium cookies with the browser's "Safe Storage" Keychain key
   (cached in memory for the app's lifetime). Reading cookies for any other domain, or sending
@@ -36,6 +41,8 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   changes account state, is a bug.
 - **Child processes.** `codex -s read-only -a never app-server` for the Codex fallback,
   `agy -p /usage --output-format json` (in an empty temporary directory) for Gemini,
+  `cswap list --json` for claude-swap's accounts (only if turned on in Settings; it holds its own
+  tokens and may renew idle logins itself),
   `/usr/bin/security` for the Keychain, and a copy of Tinybar itself for the first history import.
   Anything that lets an attacker influence those arguments or the executable path is in scope.
 - **Local data.** `~/Library/Application Support/Tinybar/usage.sqlite` stores daily token totals, file

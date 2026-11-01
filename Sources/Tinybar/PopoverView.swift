@@ -293,8 +293,13 @@ private struct OverviewRow: View {
                 subtitle(state: state, snapshot: snapshot, binding: binding)
                     .font(.system(size: 12))
                     .lineLimit(1)
+                if let state, state.hasSeveralAccounts {
+                    AccountBar(accounts: state.accounts, provider: id)
+                        .padding(.top, 4)
+                }
             }
-            Spacer(minLength: 8)
+            // Takes what the figure beside it leaves, so the bar can't crowd that out.
+            .frame(maxWidth: .infinity, alignment: .leading)
             if let binding {
                 PercentText(percent: binding.remainingPercent, size: 20)
                     .opacity(stale ? 0.5 : 1)
@@ -374,14 +379,49 @@ enum StaleText {
         }
     }
 
-    static func long(id: ProviderID, error: ProviderError) -> String {
+    /// `hint` is what renews this login, when it isn't the Provider's own default login.
+    static func long(id: ProviderID, error: ProviderError, hint: String? = nil) -> String {
         switch error {
         case .loginExpired, .notConfigured:
-            "Login expired. To refresh it, \(id.loginHint.replacingOccurrences(of: " once to refresh", with: " once"))."
+            "Login expired. To refresh it, \((hint ?? id.loginHint).replacingOccurrences(of: " once to refresh", with: " once"))."
         case .rateLimited: "\(id.displayName) asked Tinybar to slow down. It tries again on the next check."
         case let .network(message): "Couldn't reach \(id.displayName): \(message)"
         case let .unexpected(message): message
         }
+    }
+}
+
+/// One segment per Account, filled to what its tightest window has left. The Pool's number sits
+/// beside it; this shows how that's shared out.
+private struct AccountBar: View {
+    let accounts: [Account]
+    let provider: ProviderID
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(accounts) { account in
+                let left = account.snapshot?.bindingWindow?.remainingPercent ?? 0
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(provider.color.opacity(0.18))
+                        Capsule()
+                            .fill(provider.color)
+                            .opacity(account.isActive ? 1 : 0.6)
+                            .frame(width: left > 0 ? max(g.size.width * left / 100, 5) : 0)
+                    }
+                }
+                .frame(height: 5)
+                .opacity(account.isStale ? 0.45 : 1)
+                .contentShape(Rectangle())
+                .help(AccountBar.tip(account, left: left))
+                .accessibilityElement()
+                .accessibilityLabel(AccountBar.tip(account, left: left))
+            }
+        }
+    }
+
+    private static func tip(_ account: Account, left: Double) -> String {
+        "\(account.displayName): \(Int(left.rounded()))% left" + (account.isStale ? ", login expired" : "")
     }
 }
 
@@ -402,10 +442,13 @@ private struct ProviderPage: View {
             ForEach(model.incidents[id] ?? [], id: \.self) { IncidentBanner(incident: $0) }
 
             if let error = state?.error {
-                StaleBanner(id: id, error: error, since: snapshot?.fetchedAt)
+                // The only Account may be a login folder, which `claude` alone wouldn't renew.
+                StaleBanner(id: id, error: error, since: snapshot?.fetchedAt, hint: state?.hasSeveralAccounts == true ? nil : state?.accounts.first?.loginHint)
             }
 
-            if let windows = snapshot?.windows, !windows.isEmpty {
+            if state?.hasSeveralAccounts == true, let state {
+                AccountList(model: model, id: id, accounts: state.accounts)
+            } else if let windows = snapshot?.windows, !windows.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(windows) { window in
                         WindowRow(
@@ -425,10 +468,171 @@ private struct ProviderPage: View {
                 Extras(snapshot: snapshot)
             }
 
+            if id == .claude, model.offersClaudeSwap {
+                ClaudeSwapOffer(model: model)
+            }
+
             if let summaries = model.providerUsage[id] {
-                UsagePanel(model: model, summaries: summaries)
+                UsagePanel(model: model, summaries: summaries, allAccounts: state?.hasSeveralAccounts == true)
             }
         }
+    }
+}
+
+/// A Provider's Accounts, each opening in place to its Limit Windows. One is open at a time, the
+/// Active Account to begin with, so the page stays short however many there are.
+private struct AccountList: View {
+    let model: AppModel
+    let id: ProviderID
+    let accounts: [Account]
+    /// Which one the user opened. Until they choose, it's the Active Account.
+    @State private var chosen: String??
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(accounts) { account in
+                let isOpen = (chosen ?? accounts.first(where: \.isActive)?.id) == account.id
+                Button {
+                    withAnimation(reduceMotion ? Motion.reduced : Motion.page) { chosen = .some(isOpen ? nil : account.id) }
+                } label: {
+                    AccountRow(account: account, provider: id, isOpen: isOpen)
+                }
+                .buttonStyle(RowButtonStyle())
+                .accessibilityAddTraits(isOpen ? .isSelected : [])
+                if isOpen {
+                    details(account)
+                        .transition(.opacity)
+                }
+                if account.id != accounts.last?.id {
+                    Divider().padding(.horizontal, 14).opacity(0.5)
+                }
+            }
+        }
+        .platter(cornerRadius: 16)
+    }
+
+    private func details(_ account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let error = account.error {
+                StaleBanner(id: id, error: error, since: account.snapshot?.fetchedAt, hint: account.loginHint)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 4)
+            }
+            if let snapshot = account.snapshot {
+                ForEach(snapshot.windows) { window in
+                    WindowRow(
+                        window: window, provider: id,
+                        runOut: account.isStale ? nil : window.runOutTime(asOf: snapshot.fetchedAt),
+                        pinned: model.isPinned(id, window, account: account), auto: false, dimmed: account.isStale
+                    ) { model.pin(id, window, account: account) }
+                }
+                if snapshot.hasExtras {
+                    Extras(snapshot: snapshot, onPlatter: false)
+                }
+            }
+        }
+    }
+}
+
+/// An Account at a glance: small rings, its name, and what its 5-hour and weekly windows have left.
+private struct AccountRow: View {
+    let account: Account
+    let provider: ProviderID
+    let isOpen: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            LimitRings(windows: account.snapshot?.ringWindows ?? [], provider: provider, lineWidth: 3, gap: 1, dimmed: account.isStale)
+                .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(account.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if account.isActive || account.snapshot?.plan != nil {
+                    HStack(spacing: 5) {
+                        if account.isActive {
+                            Text("in use")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(provider.color)
+                        }
+                        if let plan = account.snapshot?.plan {
+                            Text(plan).foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let error = account.error {
+                Text(StaleText.short(id: provider, error: error))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .fixedSize()
+            } else {
+                Text(figures)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.quaternary)
+                .rotationEffect(.degrees(isOpen ? 90 : 0))
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+    }
+
+    private var figures: String {
+        let windows = account.snapshot?.windows.filter { !$0.isModelSpecific } ?? []
+        return windows.compactMap { w -> String? in
+            let left = Int(w.remainingPercent.rounded())
+            return switch w.kind {
+            case .session: "5h \(left)"
+            case .weekly: "wk \(left)"
+            case .other: nil
+            }
+        }.joined(separator: " · ")
+    }
+}
+
+/// claude-swap is installed and not turned on: one quiet line, gone once used or dismissed.
+private struct ClaudeSwapOffer: View {
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { model.setReadClaudeSwap(true) } label: {
+                HStack(spacing: 4) {
+                    Text("claude-swap is installed.").foregroundStyle(.secondary)
+                    Text("Show its accounts").fontWeight(.medium).foregroundStyle(ProviderID.claude.color)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Reads the accounts it manages with `cswap list`, which may renew idle logins itself. You can turn this off in Settings.")
+            Spacer(minLength: 4)
+            Button { model.settings.claudeSwapHintDismissed = true } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressScale())
+            .foregroundStyle(.tertiary)
+            .accessibilityLabel("Dismiss")
+        }
+        .font(.system(size: 12))
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
+        .platter(cornerRadius: 12)
     }
 }
 
@@ -511,13 +715,14 @@ private struct StaleBanner: View {
     let id: ProviderID
     let error: ProviderError
     let since: Date?
+    var hint: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text(StaleText.long(id: id, error: error))
+                Text(StaleText.long(id: id, error: error, hint: hint))
                     .fixedSize(horizontal: false, vertical: true)
                 if let since {
                     Text("Showing the numbers from \(since.formatted(date: Calendar.current.isDateInToday(since) ? .omitted : .abbreviated, time: .shortened)).")
@@ -606,9 +811,11 @@ extension ProviderSnapshot {
 /// Everything beyond the windows: credits, banked resets, pay-as-you-go spend.
 private struct Extras: View {
     let snapshot: ProviderSnapshot
+    /// Inside an Account's row there's a platter already.
+    var onPlatter = true
 
     var body: some View {
-        VStack(spacing: 0) {
+        let lines = VStack(spacing: 0) {
             if let credits = snapshot.credits, credits.hasCredits {
                 line("Credits", icon: "circle.hexagongrid", value: credits.unlimited
                     ? "Unlimited"
@@ -626,7 +833,7 @@ private struct Extras: View {
             }
         }
         .padding(.vertical, 4)
-        .platter(cornerRadius: 16)
+        if onPlatter { lines.platter(cornerRadius: 16) } else { lines }
     }
 
     private func line(_ title: String, icon: String, value: String) -> some View {
@@ -652,6 +859,8 @@ private struct Extras: View {
 private struct UsagePanel: View {
     let model: AppModel
     let summaries: [UsageRange: UsageSummary]
+    /// A Provider's page with several Accounts: logs can't be split between them.
+    var allAccounts = false
     @AppStorage("usageRange") private var rangeRaw = UsageRange.week.rawValue
 
     var body: some View {
@@ -686,7 +895,7 @@ private struct UsagePanel: View {
                                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                                 .tracking(-0.5)
                                 .monospacedDigit()
-                            Text("tokens").font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text(allAccounts ? "tokens, all accounts" : "tokens").font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 1) {
@@ -887,6 +1096,37 @@ private struct SettingsPage: View {
                         HStack(spacing: 8) {
                             ProviderDot(id: id, size: 7)
                             Text(id.displayName)
+                        }
+                    }
+                }
+            }
+            if !model.loginFolders.isEmpty || model.isClaudeSwapInstalled {
+                SettingsSection(
+                    "Accounts",
+                    footer: model.claudeSwapError.map { "claude-swap: \($0)." }
+                        ?? (model.isClaudeSwapInstalled
+                            ? "Login folders are read like your main login. claude-swap may renew idle logins itself when Tinybar asks for their limits."
+                            : "Other logins found in your home folder, read like your main login."))
+                {
+                    ForEach(model.loginFolders) { folder in
+                        SettingsToggle(isOn: Binding(
+                            get: { settings.isLoginFolderEnabled(folder) },
+                            set: { model.setLoginFolder(folder, enabled: $0) }),
+                            first: folder == model.loginFolders.first)
+                        {
+                            HStack(spacing: 8) {
+                                ProviderDot(id: folder.provider, size: 7)
+                                Text("~/\(folder.id)")
+                            }
+                        }
+                    }
+                    if model.isClaudeSwapInstalled {
+                        SettingsToggle(isOn: Binding(
+                            get: { settings.readClaudeSwap },
+                            set: { model.setReadClaudeSwap($0) }),
+                            first: model.loginFolders.isEmpty)
+                        {
+                            Text("Read accounts from claude-swap")
                         }
                     }
                 }

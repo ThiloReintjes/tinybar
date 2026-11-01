@@ -61,7 +61,15 @@ enum PopoverSnapshot {
                 }
                 exit(0)
             }
-            await model.refresh(force: true)
+            // `--accounts one|stack|many` stands in for several logins, with made-up names and limits.
+            // It needs no limits from anyone, so it doesn't spend a Provider's rate limit.
+            if let a = args.firstIndex(of: "--accounts") {
+                await model.refreshUsageForSnapshot()
+                let kind = a + 1 < args.count ? args[a + 1] : "stack"
+                AccountsDemo.show(in: model, kind: kind)
+            } else {
+                await model.refresh(force: true)
+            }
             // `--update 0.5.0[:preparing|:failed]` shows the update pill.
             if let u = args.firstIndex(of: "--update"), u + 1 < args.count {
                 let parts = args[u + 1].split(separator: ":").map(String.init)
@@ -154,5 +162,77 @@ enum PopoverSnapshot {
     private static func fail(_ message: String) -> Never {
         FileHandle.standardError.write(Data("Snapshot failed: \(message)\n".utf8))
         exit(1)
+    }
+}
+
+/// Made-up Accounts for `--snapshot --accounts`, so several can be seen without several logins.
+@MainActor
+private enum AccountsDemo {
+    static func show(in model: AppModel, kind: String) {
+        func account(
+            _ provider: ProviderID, _ name: String, plan: String? = nil, active: Bool = false,
+            session: Double?, sessionIn: Double = 2, weekly: Double, weeklyIn: Double = 72, fable: Double? = nil,
+            error: ProviderError? = nil, hint: String? = nil) -> Account
+        {
+            let now = Date()
+            var windows: [LimitWindow] = []
+            if let session {
+                windows.append(LimitWindow(id: "session", title: "5-hour", usedPercent: session,
+                                           resetsAt: now.addingTimeInterval(sessionIn * 3600), durationSeconds: 5 * 3600))
+            }
+            windows.append(LimitWindow(id: "weekly", title: "Weekly", usedPercent: weekly,
+                                       resetsAt: now.addingTimeInterval(weeklyIn * 3600), durationSeconds: 7 * 86400))
+            if let fable {
+                windows.append(LimitWindow(id: "fable-weekly", title: "Fable Weekly", usedPercent: fable,
+                                           resetsAt: now.addingTimeInterval(weeklyIn * 3600), durationSeconds: 7 * 86400, isModelSpecific: true))
+            }
+            return Account(
+                id: LoginIdentity(email: name).accountID, name: name, isActive: active,
+                snapshot: ProviderSnapshot(provider: provider, plan: plan, windows: windows, fetchedAt: now.addingTimeInterval(-60)),
+                error: error, loginHint: hint)
+        }
+        var cursor = account(.cursor, "me@example.com", plan: "Pro", active: true, session: nil, weekly: 36, weeklyIn: 288)
+        cursor.snapshot?.windows = [LimitWindow(
+            id: "plan", title: "Total usage", usedPercent: 36, resetsAt: Date().addingTimeInterval(288 * 3600), durationSeconds: 30 * 86400)]
+        let work = account(.claude, "work@example.com", plan: "Max 20x", active: true, session: 38, sessionIn: 1.3, weekly: 52, weeklyIn: 98, fable: 29)
+        let main = account(.codex, "me@example.com", plan: "Pro", active: true, session: 24, sessionIn: 3.1, weekly: 42, weeklyIn: 76)
+        var defaults: [ProviderID: Account] = [.claude: work, .codex: main, .cursor: cursor]
+        var folders: [LoginFolder: Account] = [:]
+        var swap: [Account] = []
+        var readings: [LimitReading] = []
+        func folder(_ provider: ProviderID, _ name: String) -> LoginFolder {
+            LoginFolder(provider: provider, url: Paths.home.appendingPathComponent(name, isDirectory: true))
+        }
+        if kind != "one" {
+            folders[folder(.claude, ".claude_personal")] = account(.claude, "personal@example.com", plan: "Max 5x", session: 0, weekly: 19, weeklyIn: 55)
+            folders[folder(.codex, ".codex_alt")] = account(.codex, "alt@example.com", plan: "Plus", session: 0, weekly: 77, weeklyIn: 129)
+        }
+        let side = folder(.claude, ".claude_side")
+        switch kind {
+        case "one":
+            defaults[.claude] = account(.claude, "work@example.com", plan: "Max 5x", active: true, session: 12, weekly: 19)
+        case "many":
+            folders[side] = account(.claude, "side@example.com", session: 92, sessionIn: 3.7, weekly: 88, weeklyIn: 145,
+                                    error: .loginExpired, hint: side.loginHint)
+            swap = [
+                account(.claude, "client-a@example.com", session: 0, weekly: 10, weeklyIn: 27),
+                account(.claude, "client-b@example.com", session: 26, sessionIn: 4, weekly: 35, weeklyIn: 122),
+                account(.claude, "research@example.com", session: 59, sessionIn: 2.5, weekly: 67, weeklyIn: 80),
+            ]
+        default:
+            folders[side] = account(.claude, "side@example.com", plan: "Pro", session: 92, sessionIn: 3.7, weekly: 88, weeklyIn: 145)
+            // Three weeks, for the Plans page: the logs' cost against made-up shares of each limit.
+            let start = Date().addingTimeInterval(-21 * 86400)
+            for (i, name) in ["work@example.com", "personal@example.com", "side@example.com"].enumerated() {
+                for week in 0..<3 {
+                    let begins = start.addingTimeInterval(Double(week) * 7 * 86400)
+                    readings.append(LimitReading(
+                        windowID: "weekly", resetsAt: begins.addingTimeInterval(7 * 86400), duration: 7 * 86400, plan: nil,
+                        usedPercent: [55, 20, 45][i], readAt: begins.addingTimeInterval(7 * 86400 - 60),
+                        account: LoginIdentity(email: name).accountID))
+                }
+            }
+        }
+        model.showForSnapshot(defaults: defaults, folders: folders, swap: swap, readings: readings)
     }
 }

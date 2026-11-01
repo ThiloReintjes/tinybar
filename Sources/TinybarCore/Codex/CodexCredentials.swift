@@ -29,20 +29,41 @@ public struct CodexCredentials: Sendable {
         return CodexCredentials(accessToken: access, accountId: accountId)
     }
 
+    /// Who is signed in, from the email in the login's `id_token`. The workspace tells apart two
+    /// accounts under one email.
+    public static func identity(from url: URL = authFileURL()) -> LoginIdentity? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return identity(fromAuth: data)
+    }
+
+    static func identity(fromAuth data: Data) -> LoginIdentity? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = json["tokens"] as? [String: Any],
+              let jwt = nonEmpty(tokens["id_token"] ?? tokens["idToken"]),
+              let payload = jwtPayload(jwt),
+              let email = nonEmpty(payload["email"])
+        else { return nil }
+        // The account requests are made for, so limits are filed under whose they are.
+        return LoginIdentity(email: email, organization: (try? parse(data))?.accountId)
+    }
+
     private static func nonEmpty(_ value: Any?) -> String? {
         guard let s = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty
         else { return nil }
         return s
     }
 
-    private static func accountIdFromJWT(_ jwt: String) -> String? {
+    private static func jwtPayload(_ jwt: String) -> [String: Any]? {
         let parts = jwt.split(separator: ".")
         guard parts.count >= 2 else { return nil }
         var b64 = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         b64 += String(repeating: "=", count: (4 - b64.count % 4) % 4)
-        guard let data = Data(base64Encoded: b64),
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
+        guard let data = Data(base64Encoded: b64) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private static func accountIdFromJWT(_ jwt: String) -> String? {
+        guard let payload = jwtPayload(jwt) else { return nil }
         let auth = payload["https://api.openai.com/auth"] as? [String: Any]
         return nonEmpty(auth?["chatgpt_account_id"]) ?? nonEmpty(payload["chatgpt_account_id"])
     }

@@ -155,6 +155,12 @@ enum ResetText {
     /// "Resets in 4h 7m" for the compact overview.
     static func short(_ window: LimitWindow, now: Date = Date()) -> String {
         guard let resetsAt = window.resetsAt else { return window.title }
+        // A Pool's next Reset only refills part of it, so say how much.
+        if let refill = window.poolRefill {
+            let back = Int(refill.rounded())
+            if back > 0 { return "\(window.title) · \(back)% back in \(Format.countdown(to: resetsAt, now: now))" }
+            return "\(window.title) · next reset in \(Format.countdown(to: resetsAt, now: now))"
+        }
         return "\(window.title) resets in \(Format.countdown(to: resetsAt, now: now))"
     }
 

@@ -1,22 +1,33 @@
 import Foundation
 
 /// Codex limits. Source order (SPEC §4): CLI OAuth → `codex app-server` → chatgpt.com
-/// browser session (opt-in).
+/// browser session (opt-in). With `home`, only the login in that `CODEX_HOME` (SPEC §15).
 public struct CodexProvider: UsageProvider {
     public let id = ProviderID.codex
     private let session: URLSession
     private let allowBrowser: @Sendable () -> Bool
+    private let home: URL?
 
-    public init(session: URLSession = .tinybar, allowBrowser: @escaping @Sendable () -> Bool = { false }) {
+    public init(session: URLSession = .tinybar, home: URL? = nil, allowBrowser: @escaping @Sendable () -> Bool = { false }) {
         self.session = session
+        self.home = home
         self.allowBrowser = allowBrowser
     }
 
+    private var authFile: URL {
+        home?.appendingPathComponent("auth.json") ?? CodexCredentials.authFileURL()
+    }
+
     public func isConfigured() -> Bool {
-        FileManager.default.fileExists(atPath: CodexCredentials.authFileURL().path)
+        FileManager.default.fileExists(atPath: authFile.path)
+    }
+
+    public func identity() -> LoginIdentity? {
+        CodexCredentials.identity(from: authFile)
     }
 
     public func fetch() async throws -> ProviderSnapshot {
+        if home != nil { return try await fetch(with: CodexCredentials.load(from: authFile), source: .cli) }
         var lastError: ProviderError
         do {
             return try await fetch(with: CodexCredentials.load(), source: .cli)

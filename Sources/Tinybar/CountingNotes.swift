@@ -15,7 +15,8 @@ struct CountingNotes: View {
                 Each provider reports your limits using the login its CLI already has, or your \
                 browser session if you turned that on in Settings. Tinybar only reads those logins \
                 and never changes them. A run-out time assumes you keep the average pace of the \
-                window so far.
+                window so far. With several accounts, a provider's number is the plain average of \
+                what each has left, and each account's own limits are on its page.
                 """)
             note("Tokens", """
                 Counted from the Claude Code and Codex logs and OpenCode's database on this Mac, and \
@@ -30,6 +31,8 @@ struct CountingNotes: View {
             note("Plans", """
                 The Plans page in Stats divides what your logged use this week would cost at API \
                 prices by the share of your weekly limit it took. That gives a full week in dollars. \
+                Logs don't say which account made a request, so several accounts count as one, by \
+                the shares they used between them. \
                 Your pace is the last 7 days at the same prices. Per $1 uses the plan's US list price. \
                 Scores, task costs and minutes come from the Artificial Analysis Intelligence Index \
                 at maximum effort, not your work.

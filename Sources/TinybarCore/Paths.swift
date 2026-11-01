@@ -39,4 +39,84 @@ public enum Paths {
         let existing = candidates.filter { FileManager.default.fileExists(atPath: $0.path) }
         return existing.isEmpty ? [candidates[0]] : existing
     }
+
+    /// Folders directly in the home directory that look like another login's config: `.claude*` or
+    /// `.codex*`, other than the default ones (SPEC §15). Whether one holds a login is up to the caller.
+    static func extraConfigDirs(
+        _ provider: ProviderID, home: URL = Paths.home,
+        env: [String: String] = ProcessInfo.processInfo.environment) -> [URL]
+    {
+        let prefix: String
+        var defaults: [URL]
+        // Only the one in use is the default: with the variable set, `~/.codex` is a login like any other.
+        func isSet(_ name: String) -> Bool { env[name]?.trimmingCharacters(in: .whitespaces).isEmpty == false }
+        switch provider {
+        case .claude:
+            prefix = ".claude"
+            defaults = isSet("CLAUDE_CONFIG_DIR") ? claudeConfigDirs(env: env) : [home.appendingPathComponent(".claude", isDirectory: true)]
+        case .codex:
+            prefix = ".codex"
+            defaults = isSet("CODEX_HOME") ? [codexHome(env: env)] : [home.appendingPathComponent(".codex", isDirectory: true)]
+        case .gemini, .cursor, .opencode:
+            return []
+        }
+        // claude-swap's own store isn't a login, though its name looks like one.
+        defaults.append(home.appendingPathComponent(".claude-swap-backup", isDirectory: true))
+        let taken = Set(defaults.map { $0.resolvingSymlinksInPath().path })
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: home.path)) ?? []
+        return names.filter { $0.hasPrefix(prefix) }.sorted().compactMap { name in
+            let url = home.appendingPathComponent(name, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue,
+                  !taken.contains(url.resolvingSymlinksInPath().path)
+            else { return nil }
+            return url
+        }
+    }
+
+    /// Where the CLIs log by default: all that versions before Accounts read.
+    static func defaultLogRoots(env: [String: String] = ProcessInfo.processInfo.environment) -> [URL] {
+        claudeConfigDirs(env: env).map { $0.appendingPathComponent("projects", isDirectory: true) }
+            + ["sessions", "archived_sessions"].map { codexHome(env: env).appendingPathComponent($0, isDirectory: true) }
+    }
+
+    /// Every place Claude Code logs, the default first. Folders that resolve to the same place, like
+    /// a `cswap run --share-history` profile, count once. Others are returned resolved, since the log
+    /// walk doesn't follow a link at its root; the default stays as it was, as saved cursors name it.
+    public static func claudeLogRoots(home: URL = Paths.home, env: [String: String] = ProcessInfo.processInfo.environment) -> [URL] {
+        let others = (extraConfigDirs(.claude, home: home, env: env) + ClaudeSwap.sessionFolders(home: home))
+            .map { $0.appendingPathComponent("projects", isDirectory: true) }
+        return unique(claudeConfigDirs(env: env).map { $0.appendingPathComponent("projects", isDirectory: true) } + others.filter(exists).map { $0.resolvingSymlinksInPath() })
+    }
+
+    /// Every place the Codex CLI logs, the default first.
+    public static func codexLogRoots(home: URL = Paths.home, env: [String: String] = ProcessInfo.processInfo.environment) -> [URL] {
+        func logs(_ home: URL) -> [URL] {
+            [home.appendingPathComponent("sessions", isDirectory: true), home.appendingPathComponent("archived_sessions", isDirectory: true)]
+        }
+        return unique(logs(codexHome(env: env)) + extraConfigDirs(.codex, home: home, env: env).flatMap(logs).filter(exists).map { $0.resolvingSymlinksInPath() })
+    }
+
+    /// Only folders that really log are watched: `~/.claude-worktrees` looks like one and is busy.
+    private static func exists(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// One of each place, keeping the order. A link gives way to the folder it points at, since the
+    /// log walk doesn't follow a link at its root.
+    static func unique(_ urls: [URL]) -> [URL] {
+        var kept: [String: Int] = [:]
+        var result: [URL] = []
+        for url in urls {
+            let place = url.resolvingSymlinksInPath().path
+            if let i = kept[place] {
+                let isLink = (try? result[i].resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true
+                if isLink { result[i] = url }
+            } else {
+                kept[place] = result.count
+                result.append(url)
+            }
+        }
+        return result
+    }
 }
