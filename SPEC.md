@@ -436,7 +436,7 @@ A Provider has one or more Accounts, and its own Limit Windows are their Pool. W
 
 ### Where Accounts come from
 1. **The default login**: §4. This is the Active Account. It keeps being fetched directly, so it keeps its plan name, Banked Resets and fallbacks, whatever else is on.
-2. **Extra login folders**: folders directly in the home directory named `.claude*` or `.codex*` that hold a login, looked for on every check, because a GUI app can't see the shell's `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Each has a toggle in Settings, on by default. Strictly read-only, like the default login (ADR 0001).
+2. **Extra login folders**: folders directly in the home directory named `.claude*` or `.codex*` that hold a login, looked for on every check, because a GUI app can't see the shell's `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Each has a toggle in Settings, on by default, and one found after launch can enable its Provider, unless the user turned that off. Strictly read-only, like the default login (ADR 0001).
    - **Claude**: `<folder>/.credentials.json`, else the Keychain item `Claude Code-credentials-<first 8 hex digits of the SHA-256 of the folder's path>`, read through `/usr/bin/security`. Presence is checked with an attribute-only lookup. Name and identity come from `oauthAccount` in `<folder>/.claude.json`. The fix for an expired login names the folder: run `CLAUDE_CONFIG_DIR=~/.claude_side claude` once.
    - **Codex**: `<folder>/auth.json`, with the email in its `id_token`. The fix: run `CODEX_HOME=~/.codex_alt codex` once.
 3. **claude-swap**: off by default, turned on in Settings, where its note says it may renew idle logins itself. Display only: Tinybar never switches accounts.

@@ -185,6 +185,10 @@ final class AppModel {
         (loginFolders, isClaudeSwapInstalled) = await Task.detached(priority: .utility) {
             (LoginFolders.find(), ClaudeSwap.locate() != nil)
         }.value
+        // A folder found since launch can be a Provider's first login. One the user turned off stays off.
+        for id in Set(loginFolders.map(\.provider)) where providers[id] == nil && settings.isEnabled(id, detected: true) {
+            providers[id] = disabledProviders.removeValue(forKey: id) ?? ProviderState()
+        }
         let folders = loginFolders.filter { settings.isLoginFolderEnabled($0) }
         folderAccounts = folderAccounts.filter { folders.contains($0.key) }
         if swap == nil {
