@@ -133,8 +133,8 @@ enum RingIcon {
             NSColor(srgbRed: 0.96, green: 0.77, blue: 0.12, alpha: 1),
             NSColor(srgbRed: 0.97, green: 0.38, blue: 0.35, alpha: 1),
         ])
-        // Codex (OpenAI's mark) and Cursor are monochrome, like the menu bar itself.
-        case .codex, .cursor: nil
+        // Codex (OpenAI's mark), Cursor and OpenCode are monochrome, like the menu bar itself.
+        case .codex, .cursor, .opencode: nil
         }
     }
 

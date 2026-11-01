@@ -19,7 +19,9 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
 
 - **CLI credentials.** Claude Code's OAuth token (`~/.claude/.credentials.json` or the
   `Claude Code-credentials` Keychain item, read through `/usr/bin/security`) and the Codex CLI's
-  `~/.codex/auth.json`, and Cursor.app's login in its `state.vscdb` (opened read-only). Gemini
+  `~/.codex/auth.json`, Cursor.app's login in its `state.vscdb` and OpenCode's in its `opencode.db` or
+  `auth.json` (opened read-only). OpenCode's is sent to opencode.ai, or to a Console on this Mac if the
+  login names one, never anywhere else. Gemini
   limits come from the Antigravity CLI itself, so Tinybar never sees a Google token. Tinybar holds tokens
   in memory only, for the duration of a fetch. Anything
   that writes, caches, logs or transmits a token anywhere other than the provider's own API host
@@ -28,8 +30,8 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   `chatgpt.com` and (with the Cursor provider on) `cursor.com` only, decrypting Chromium cookies with the browser's "Safe Storage" Keychain key
   (cached in memory for the app's lifetime). Reading cookies for any other domain, or sending
   cookies to any host other than the one they belong to, is high severity.
-- **Network.** Tinybar talks to exactly four places: `api.anthropic.com` / `claude.ai`,
-  `chatgpt.com`, `cursor.com`, and `models.dev` (unauthenticated). The `agy` child process talks to
+- **Network.** Tinybar talks to exactly five places: `api.anthropic.com` / `claude.ai`,
+  `chatgpt.com`, `cursor.com`, `opencode.ai`, and `models.dev` (unauthenticated). The `agy` child process talks to
   Google on its own. Any other destination, or any request that
   changes account state, is a bug.
 - **Child processes.** `codex -s read-only -a never app-server` for the Codex fallback,
