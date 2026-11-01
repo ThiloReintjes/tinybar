@@ -425,6 +425,17 @@ private func folder(_ path: String, in home: URL) throws -> URL {
     #expect(try await store.unreadLogRoots(defaults + [extra, another]).isEmpty)
 }
 
+@Test func aLinkGivesWayToTheFolderItPointsAt() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let real = try folder(".config/claude/projects", in: home)
+    _ = try folder(".claude", in: home)
+    let link = home.appendingPathComponent(".claude/projects")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+    #expect(Paths.unique([link, real]).map(\.path) == [real.path])
+    #expect(Paths.unique([real, link]).map(\.path) == [real.path])
+}
+
 @Test func theSameMessageInTwoFoldersCountsOnce() async throws {
     let home = try tempHome()
     defer { try? FileManager.default.removeItem(at: home) }

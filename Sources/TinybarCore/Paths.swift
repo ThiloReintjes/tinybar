@@ -102,8 +102,21 @@ public enum Paths {
         FileManager.default.fileExists(atPath: url.path)
     }
 
-    private static func unique(_ urls: [URL]) -> [URL] {
-        var seen = Set<String>()
-        return urls.filter { seen.insert($0.resolvingSymlinksInPath().path).inserted }
+    /// One of each place, keeping the order. A link gives way to the folder it points at, since the
+    /// log walk doesn't follow a link at its root.
+    static func unique(_ urls: [URL]) -> [URL] {
+        var kept: [String: Int] = [:]
+        var result: [URL] = []
+        for url in urls {
+            let place = url.resolvingSymlinksInPath().path
+            if let i = kept[place] {
+                let isLink = (try? result[i].resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true
+                if isLink { result[i] = url }
+            } else {
+                kept[place] = result.count
+                result.append(url)
+            }
+        }
+        return result
     }
 }
