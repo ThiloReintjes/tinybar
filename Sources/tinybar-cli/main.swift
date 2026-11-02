@@ -16,7 +16,13 @@ let dbURL = args.dropFirst().first(where: { !$0.hasPrefix("--") }).map { URL(fil
 
 func printWindows(_ s: ProviderSnapshot) {
     for w in s.windows {
-        let runOut = w.runOutTime(asOf: s.fetchedAt).map { "  runs out in \(Format.countdown(to: $0))" } ?? ""
+        let runOut = if let reserve = w.reservePercent(asOf: s.fetchedAt) {
+            "  lasts until reset" + (Format.reserve(reserve).map { ", \($0)" } ?? "")
+        } else if let at = w.runOutTime(asOf: s.fetchedAt) {
+            "  runs out in \(Format.countdown(to: at))"
+        } else {
+            ""
+        }
         print(String(format: "  %-24@ %5.1f%% left  resets in %@%@", w.title as NSString, w.remainingPercent, Format.countdown(to: w.resetsAt) as NSString, runOut as NSString))
     }
 }

@@ -31,8 +31,12 @@ The moment a Limit Window's usage returns to zero.
 _Avoid_: Renewal, refresh
 
 **Run-out Time**:
-When a Limit Window will reach 0% left if usage continues at its average pace since the window started. It can fall after the Reset; then the limit doesn't bind and the gap shows the headroom.
+When a Limit Window will reach 0% left if usage continues at its average pace since the window started. It can fall after the Reset; then the limit doesn't bind, and the window "lasts until reset" instead of showing the time.
 _Avoid_: ETA, prediction, burn rate
+
+**Reserve**:
+How much less of a Limit Window is used than an even pace would have used by now: the share of the window passed minus the share used. Only a window that lasts until its Reset has one.
+_Avoid_: Headroom, buffer, spare
 
 **Banked Reset**:
 A saved reset the user holds (a Codex reset coupon, a Claude "Reset for free" grant), which can be redeemed to reset a Limit Window early. Tinybar only displays it and never redeems it.

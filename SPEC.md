@@ -156,8 +156,9 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
    - A banner per Incident: status light, title, severity and affected components, when it was
      last updated and on which status page. Clicking it opens the incident.
    - A banner when Stale: what went wrong and what the user runs to fix it.
-   - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time: in orange if
-     it comes before the Reset, faint if after (the headroom). Click to pin; the pinned one is marked.
+   - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time in orange if
+     it comes before the Reset, else a faint "Lasts until reset" with its Reserve in the tooltip.
+     Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
    - With several Accounts: the rings and % show the Pool, with "3 accounts" for the plan. In place
      of the Limit Windows, a list with a compact row per Account (small rings, name, plan, "in use" on
@@ -178,8 +179,10 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 
 ### Run-out Time
 - Pace = % used ÷ time since the window started (Reset minus duration). Run-out Time = now + % left ÷ pace.
-- Always shown on the Provider page; only a Run-out Time before the Reset warns (orange, and on the
-  Overview).
+- Only a Run-out Time before the Reset is shown as a time, and it warns (orange, and on the Overview).
+  One after the Reset reads "Lasts until reset": a date past the Reset looks like a wrong Reset.
+- Reserve = share of the window passed − % used, the same figure CodexBar shows. Next to the row's
+  % left it reads as a second, conflicting number, so it stays in the tooltip, and in the CLI.
 - The window's own average needs no stored history and already includes the idle hours and nights
   that recur before the Reset.
 - No forecast before 5% of the window has passed (1% steps make early readings noise), for an
