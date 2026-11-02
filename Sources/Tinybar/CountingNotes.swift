@@ -33,9 +33,10 @@ struct CountingNotes: View {
                 prices by the share of your weekly limit it took. That gives a full week in dollars. \
                 Logs don't say which account made a request, so several accounts count as one, by \
                 the shares they used between them. \
-                Your pace is the last 7 days at the same prices. Per $1 uses the plan's US list price. \
+                Per $1 uses the plan's US list price and assumes you use your whole limit. \
                 Scores, task costs and minutes come from the Artificial Analysis Intelligence Index \
-                at maximum effort, not your work.
+                at maximum effort, not your work. Each plan's headline uses its best value: the \
+                most tasks among models within \(Int(PlanValue.bestValuePoints)) points of the top score.
                 """)
             note("Stats", activity)
             note("Your data", """

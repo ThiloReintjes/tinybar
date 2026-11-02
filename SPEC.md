@@ -434,17 +434,23 @@ and hides.
   so the figure reads high until it recovers.
 - **Models**: a table bundled with the app holds each current model's Artificial Analysis
   Intelligence Index score, cost per Benchmark Task and minutes per Benchmark Task, at maximum
-  effort, with the date it was copied. Tasks a week = full week ÷ cost per Benchmark Task, which
-  assumes the limit counts every model at its API price. Models are listed by score.
+  effort, with the date it was copied. Tasks a week = full week ÷ cost per Benchmark Task, and tasks
+  per $1 = per $1 ÷ the same cost; both assume the limit counts every model at its API price. Models
+  are listed by score.
+- **Best value**: the plan's model with the most tasks among those within 5 points of the highest
+  score in the table, across Providers, so every plan meets one bar. A model within 10% of the most
+  tasks ties, and the smarter one wins. With no model near the top, the plan's smartest. What the
+  user runs doesn't count, so it can be a model they don't use.
 - **Your use**: the last 7 days' Theoretical Cost, today included, as Usage's 7d shows it, and each
-  model's share of it. Per $1 at your pace = that × 4.35 ÷ the list price. A meter shows it against a
-  full week, full at or above one; going over can follow an early reset.
+  model's share of it. A meter shows it against a full week. Going over can follow an early reset:
+  the bar is then full, with a notch where a full week ends. It counts as over only when the two
+  differ once rounded and the full week has no use without a known price.
 - **Display**: a column per plan, then one comparison of every model. Each column has two large
-  numbers of equal weight, API usage per $1 at your pace and if you use it all (without a known
-  price, the last 7 days' and a full week's dollars); the meter; and, with a known price, the total
-  dollars of both. Below, the heading links to the index, with a plain list of each model's score and
-  tasks per week beside a chart of one against the other. The chart has score 20 to 60 up and tasks
-  across on a log scale fitted to the models. Marks are circles for Claude and squares for Codex,
+  numbers, tasks per $1 on its best value and API usage per $1 (without a known price, tasks per week
+  and a full week's dollars); the meter; and, under it, the last 7 days' dollars of a full week's, or
+  over them. Below, the heading links to the index, with a plain list of each model's score and tasks
+  per $1 beside a chart of one against the other, both in tasks per week if the plan of any model
+  listed has no known price. The chart has score 20 to 60 up and tasks across on a log scale fitted to the models. Marks are circles for Claude and squares for Codex,
   filled when used in the last 7 days (5% or more) and outlined otherwise. Pointing at a row or a
   mark shows the full figures and dims the rest. Estimates keep two significant figures, and a +
   marks a figure with use that has no known price.
