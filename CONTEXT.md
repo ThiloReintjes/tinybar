@@ -88,6 +88,10 @@ _Avoid_: Worth, ROI, savings
 One job from the Artificial Analysis Intelligence Index, which that benchmark prices and times per model. It describes the benchmark, not the user's work.
 _Avoid_: Task (alone), job
 
+**Best Value**:
+The model a plan's headline counts Benchmark Tasks on: the most tasks among its models near the top benchmark score of any Provider. It says what the plan can buy, so it can be a model the user doesn't run.
+_Avoid_: Main model, recommended model
+
 ### Activity
 
 **Activity**:

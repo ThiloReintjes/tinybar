@@ -100,10 +100,17 @@ public struct PlanValue: Sendable, Equatable {
     /// Average weeks in a month.
     public static let weeksPerMonth = 365.25 / 12 / 7
 
+    /// How far below the top benchmark score a model can be and still count as best value.
+    public static let bestValuePoints = 5.0
+    /// Task rates within this share of the highest count as tied, and the smarter model wins.
+    static let bestValueTie = 0.9
+
     /// A model's benchmark results, and how many Benchmark Tasks a full week covers on it alone.
     public struct Model: Sendable, Equatable {
         public var benchmark: ModelBenchmark
         public var tasksPerWeek: Double
+        /// Benchmark Tasks a dollar of plan buys. nil when the plan's price isn't known.
+        public var tasksPerDollar: Double?
     }
 
     /// The share of the current window used so far.
@@ -139,9 +146,17 @@ public struct PlanValue: Sendable, Equatable {
         fullWindow.flatMap { $0 > 0 ? recentCost / $0 : nil }
     }
 
-    /// Theoretical Cost per dollar of plan if every week went like the last 7 days.
-    public var perDollarAtPace: Double? {
-        monthlyPrice.flatMap { $0 > 0 ? recentCost * Self.weeksPerMonth / $0 : nil }
+    /// The model that shows what this plan buys (SPEC §14). Doesn't depend on what the user runs.
+    public var bestValue: Model? { Self.bestValue(in: models) }
+
+    /// The most Benchmark Tasks among models near the top score of any Provider, so plans are held
+    /// to one bar. A plan with nothing near the top falls back on its smartest model.
+    static func bestValue(in models: [Model]) -> Model? {
+        let top = ProviderID.allCases.flatMap(ModelBenchmark.all(for:)).map(\.score).max() ?? 0
+        let smartestFirst = models.sorted { $0.benchmark.score > $1.benchmark.score }
+        let near = smartestFirst.filter { $0.benchmark.score >= top - bestValuePoints }
+        guard let most = near.map(\.tasksPerWeek).max() else { return smartestFirst.first }
+        return near.first { $0.tasksPerWeek >= most * bestValueTie }
     }
 
     public static func build(
@@ -186,7 +201,7 @@ public struct PlanValue: Sendable, Equatable {
             measuredCost: measured.first?.cost, measuredPercent: measured.first?.reading.usedPercent,
             measuredIsCurrent: measured.first.map { isOpen($0.reading) } ?? false,
             monthlyPrice: price, perDollar: perDollar(full: full, price: price),
-            models: models(provider, full: full),
+            models: models(provider, full: full, price: price),
             recentCost: recent.total,
             recentHasUnpriced: recent.hasUnpriced,
             recentShares: recent.shares)
@@ -245,7 +260,7 @@ public struct PlanValue: Sendable, Equatable {
             measuredCost: measuredCost, measuredPercent: measuredCost == nil ? nil : used,
             measuredIsCurrent: true,
             monthlyPrice: price, perDollar: perDollar(full: full, price: price),
-            models: models(provider, full: full),
+            models: models(provider, full: full, price: price),
             recentCost: recent.total,
             recentHasUnpriced: recent.hasUnpriced,
             recentShares: recent.shares)
@@ -256,11 +271,14 @@ public struct PlanValue: Sendable, Equatable {
         return full * weeksPerMonth / price
     }
 
-    private static func models(_ provider: ProviderID, full: Double?) -> [Model] {
+    static func models(_ provider: ProviderID, full: Double?, price: Double?) -> [Model] {
         guard let full else { return [] }
+        let dollars = perDollar(full: full, price: price)
         return ModelBenchmark.all(for: provider)
             .sorted { $0.score > $1.score }
-            .map { Model(benchmark: $0, tasksPerWeek: full / $0.cost) }
+            .map { benchmark in
+                Model(benchmark: benchmark, tasksPerWeek: full / benchmark.cost, tasksPerDollar: dollars.map { $0 / benchmark.cost })
+            }
     }
 
     /// The last 7 days' Theoretical Cost, today included, with each undated model's share of it.

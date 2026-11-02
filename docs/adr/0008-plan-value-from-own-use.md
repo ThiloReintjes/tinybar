@@ -14,9 +14,10 @@ Plan prices are bundled too: no feed lists them, they change rarely, and a plan 
 
 ## Consequences
 
-- **Before any public release, get Artificial Analysis's permission.** Its terms say no part of the site may be copied, republished or distributed except as they state, and its API docs direct redistribution requests to its team. Attribution alone doesn't settle this. If permission doesn't come, delete `ModelBenchmark`, the model list and the chart; the dollar figures don't depend on them.
+- **Before any public release, get Artificial Analysis's permission.** Its terms say no part of the site may be copied, republished or distributed except as they state, and its API docs direct redistribution requests to its team. Attribution alone doesn't settle this. If permission doesn't come, delete `ModelBenchmark`, the model list, the chart and each plan's headline task figure; the dollar figures don't depend on them.
 - The table goes stale, which ADR 0004 avoids for prices. The page shows its date, and a new model doesn't appear until someone copies it in.
-- Tasks a week assume the limit counts every model at its API price, which providers don't confirm. Adam Holter's published estimates suggest Claude Fable 5.1 takes far more of a limit than its price implies, so its row may be too high.
+- Task figures assume the limit counts every model at its API price, which providers don't confirm. Adam Holter's published estimates suggest Claude Fable 5.1 takes far more of a limit than its price implies, so its row may be too high.
+- A plan's headline uses the model with the most tasks near the top score, not the one the user runs. An average of their models would swing on small shares: a tenth of the spend on Claude Haiku 5.5 would roughly triple it.
 - The dollars are a floor. Use outside the logged CLIs (claude.ai, ChatGPT) takes up the limit without showing in the logs, and Banked Resets aren't counted.
 - With several Accounts (ADR 0010) the logs can't be split between them, so the figure covers the whole Pool: Theoretical Cost ÷ the shares used across Accounts. It blends different plans into one estimate, and shows per-dollar figures only when every plan is known. Readings from before Accounts existed can mix Accounts, so a Provider with several ignores them and starts again.
 - History starts with this version. Codex logs carry `rate_limits` on each `token_count` line and could provide past windows, but only for logs not yet compressed; left for later.
