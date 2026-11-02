@@ -9,7 +9,7 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), 
 **Goals**
 - A one-command install that runs with zero configuration.
 - Near-zero resource use (see §2).
-- Accurate Limit Windows, Resets and Banked Resets for Claude, Codex, Gemini, Cursor, OpenCode Go, Copilot and Grok.
+- Accurate Limit Windows and Resets for Claude, Codex, Gemini, Cursor, OpenCode Go, Copilot and Grok, and Banked Resets for Claude and Codex.
 - Daily token history and Theoretical Cost from local CLI logs.
 - Publishable: MIT license, notarized, auto-updating.
 

@@ -47,7 +47,7 @@ and add `--zap` to also delete your history and settings.
 ## What it shows
 
 - **Every limit.** The 5-hour and weekly windows for Claude, Codex and Gemini, Cursor's billing
-  cycle, OpenCode Go's 5-hour, weekly and monthly windows, Copilot's monthly quotas and Grok's weekly pool, with reset countdowns. Model-specific limits, Claude and Grok extra usage, Cursor on-demand spend,
+  cycle, OpenCode Go's 5-hour, weekly and monthly windows, Copilot's monthly quotas and Grok's weekly or monthly pool, with reset countdowns. Model-specific limits, Claude and Grok extra usage, Cursor on-demand spend,
   Codex credits and banked resets, and Copilot AI credits are included.
 - **When you'll run out.** At your pace so far, the time each window hits 0%, in orange, if that
   comes before the reset. Otherwise it says "Lasts until reset", and hovering shows your reserve.
