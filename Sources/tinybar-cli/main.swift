@@ -35,6 +35,7 @@ func printLimits(browser: Bool, swap: Bool, optedIn: Bool) async {
         CursorProvider(),
         OpenCodeProvider(),
         CopilotProvider(isOptedIn: { optedIn }),
+        GrokProvider(),
     ]
     let only = args.first { $0.hasPrefix("--provider=") }.map { String($0.dropFirst(11)) }
     for provider in providers where only == nil || provider.id.rawValue == only {

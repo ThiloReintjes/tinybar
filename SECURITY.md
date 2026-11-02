@@ -24,7 +24,8 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   login names one, never anywhere else. Copilot's comes from `~/.copilot/config.json`,
   `~/.config/github-copilot`, `gh auth token` or, only if the user turned Copilot on themselves, the
   `copilot-cli` Keychain item, and goes only to GitHub's API (`api.github.com`, `api.<name>.ghe.com`) or
-  this Mac. A `gh` token can do far more than read Copilot's limits, so sending it anywhere else, or keeping it, is
+  this Mac. Grok's comes from `~/.grok/auth.json` and goes only to `cli-chat-proxy.grok.com` or this Mac,
+  and its refresh token, which can be used only once, is never used. A `gh` token can do far more than read Copilot's limits, so sending it anywhere else, or keeping it, is
   high severity. Gemini
   limits come from the Antigravity CLI itself, so Tinybar never sees a Google token. Tinybar holds tokens
   in memory only, for the duration of a fetch. Anything
@@ -39,8 +40,8 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   `chatgpt.com` and (with the Cursor provider on) `cursor.com` only, decrypting Chromium cookies with the browser's "Safe Storage" Keychain key
   (cached in memory for the app's lifetime). Reading cookies for any other domain, or sending
   cookies to any host other than the one they belong to, is high severity.
-- **Network.** Tinybar talks to exactly six places: `api.anthropic.com` / `claude.ai`,
-  `chatgpt.com`, `cursor.com`, `opencode.ai`, `api.github.com` (or a `*.ghe.com` API), and `models.dev`
+- **Network.** Tinybar talks to exactly seven places: `api.anthropic.com` / `claude.ai`,
+  `chatgpt.com`, `cursor.com`, `opencode.ai`, `api.github.com` (or a `*.ghe.com` API), `cli-chat-proxy.grok.com`, and `models.dev`
   (unauthenticated), plus status pages and release checks without a login. The `agy` child process talks to
   Google on its own. Any other destination, or any request that
   changes account state, is a bug.

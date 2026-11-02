@@ -43,7 +43,7 @@ public struct Incident: Sendable, Hashable, Codable {
     public var page: String {
         guard let source = StatusFeed.source(provider) else { return url.host ?? "" }
         switch source {
-        case let .statuspage(base, _), let .incidentIO(base, _), let .openCode(base): return base.host ?? ""
+        case let .statuspage(base, _), let .incidentIO(base, _), let .openCode(base), let .xAI(base): return base.host ?? ""
         }
     }
 }
@@ -59,6 +59,8 @@ public enum StatusFeed {
         case incidentIO(URL, group: String)
         /// OpenCode's own page, counting its Go service.
         case openCode(URL)
+        /// xAI's own page, counting grok.com.
+        case xAI(URL)
     }
 
     static func source(_ id: ProviderID) -> Source? {
@@ -71,6 +73,7 @@ public enum StatusFeed {
         case .opencode: .openCode(URL(string: "https://status.opencode.ai")!)
         // Also counts "Copilot AI Model Providers". Git, Actions and the rest say nothing about it.
         case .copilot: .statuspage(URL(string: "https://www.githubstatus.com")!, components: ["Copilot"])
+        case .grok: .xAI(URL(string: "https://status.x.ai")!)
         }
     }
 
@@ -94,6 +97,8 @@ public enum StatusFeed {
             return incidentIO(affected: affected, summary: summary, provider: id, base: base, group: group)
         case let .openCode(base):
             return try openCode(try await get(base.appendingPathComponent("api/status"), session), base: base)
+        case let .xAI(base):
+            return try xAI(try await get(base.appendingPathComponent("api/status"), session), base: base)
         }
     }
 
@@ -201,6 +206,38 @@ public enum StatusFeed {
         return [Incident(
             provider: .opencode, title: title, severity: severity, components: [name], url: base,
             updatedAt: (go["since"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) })]
+    }
+
+    // MARK: xAI
+
+    /// `api/status`, what the page reads. Only grok.com counts: the page lists nothing for the CLI,
+    /// and Imagine, Voice and the mobile apps being down says nothing about coding.
+    static func xAI(_ data: Data, base: URL) throws -> [Incident] {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let products = root["products"] as? [[String: Any]],
+              let components = products.first(where: { $0["id"] as? String == "grok" })?["components"] as? [[String: Any]],
+              let site = components.first(where: { $0["id"] as? String == "grok-com" }),
+              let status = site["status"] as? String
+        else { throw ProviderError.unexpected("Unexpected status page response") }
+        if status == "available" || status == "operational" { return [] }
+        // Only `available` has been seen, so this takes the words other pages use.
+        let word = status.lowercased()
+        let severity: Incident.Severity
+        if word.contains("maintenance") {
+            severity = .maintenance
+        } else if word.contains("partial") {
+            severity = .partialOutage
+        } else if word.contains("outage") || word.contains("unavailable") || word.contains("down") {
+            severity = .majorOutage
+        } else if word.contains("degraded") {
+            severity = .degraded
+        } else {
+            throw ProviderError.unexpected("Unexpected status page component")
+        }
+        let name = site["name"] as? String ?? "grok.com"
+        return [Incident(
+            provider: .grok, title: "\(name): \(severity.label.lowercased())", severity: severity, components: [name],
+            url: base, updatedAt: (root["updated_at"] as? String).flatMap(parseISODate))]
     }
 
     // MARK: incident.io
