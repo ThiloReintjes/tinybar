@@ -184,6 +184,9 @@ private func build(_ readings: [LimitReading], usage rows: [DailyUsage], stats: 
     let v = try #require(build([reading(reset: at(10), used: 50, read: at(5))], usage: [usage(4, 502)], now: at(5)))
     let perDollar = try #require(v.perDollar)
     #expect(abs(v.models[0].tasksPerDollar! - perDollar / 10.04) < 1e-9)
+    for model in v.models {
+        #expect(abs(model.tasksPerDollar! - perDollar / model.benchmark.cost) < 1e-9)
+    }
     let unlisted = try #require(build([reading(reset: at(10), used: 50, read: at(5), plan: "Team")], usage: [usage(4, 502)], plan: "Team", now: at(5)))
     #expect(unlisted.models.allSatisfy { $0.tasksPerDollar == nil })
 }
@@ -206,6 +209,11 @@ private func build(_ readings: [LimitReading], usage rows: [DailyUsage], stats: 
     let onTheBar = model(top - PlanValue.bestValuePoints, tasks: 50)
     let below = model(top - PlanValue.bestValuePoints - 0.1, tasks: 1000)
     #expect(PlanValue.bestValue(in: [model(top, tasks: 10), onTheBar, below]) == onTheBar)
+    // Tasks within 10% of the most tie, and the smarter model wins. Further off, they don't.
+    let most = model(top - 1, tasks: 100)
+    let close = model(top, tasks: 95), far = model(top, tasks: 85)
+    #expect(PlanValue.bestValue(in: [close, most]) == close)
+    #expect(PlanValue.bestValue(in: [far, most]) == most)
     // Nothing near the top: the smartest model, not the one with the most tasks.
     let low = model(top - 20, tasks: 1), lower = model(top - 30, tasks: 1000)
     #expect(PlanValue.bestValue(in: [lower, low]) == low)
