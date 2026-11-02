@@ -42,6 +42,11 @@ public enum Paths {
         cliHome("COPILOT_HOME", default: ".copilot", env: env)
     }
 
+    /// The Grok CLI's directory: `GROK_HOME` or `~/.grok`.
+    static func grokHome(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        cliHome("GROK_HOME", default: ".grok", env: env)
+    }
+
     /// An XDG variable if absolute, as those CLIs read it, else its default in the home folder.
     private static func xdgDir(_ variable: String, default folder: String, env: [String: String]) -> URL {
         env[variable].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
@@ -91,7 +96,7 @@ public enum Paths {
         case .codex:
             prefix = ".codex"
             defaults = isSet("CODEX_HOME") ? [codexHome(env: env)] : [home.appendingPathComponent(".codex", isDirectory: true)]
-        case .gemini, .cursor, .opencode, .copilot:
+        case .gemini, .cursor, .opencode, .copilot, .grok:
             return []
         }
         // claude-swap's own store isn't a login, though its name looks like one.

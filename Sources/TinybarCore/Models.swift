@@ -7,6 +7,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
     case cursor
     case opencode
     case copilot
+    case grok
 
     public var displayName: String {
         switch self {
@@ -16,6 +17,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .cursor: "Cursor"
         case .opencode: "OpenCode Go"
         case .copilot: "Copilot"
+        case .grok: "Grok"
         }
     }
 
@@ -28,6 +30,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .cursor: nil
         case .opencode: "opencode"
         case .copilot: "copilot"
+        case .grok: "grok"
         }
     }
 
@@ -38,6 +41,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .cursor: "open Cursor or sign in at cursor.com"
         case .opencode: "run `opencode auth login`"
         case .copilot: "run `copilot login` or `gh auth login`"
+        case .grok: "run `grok` once to refresh, or `grok login`"
         }
     }
 

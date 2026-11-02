@@ -620,7 +620,7 @@ private func fetch(token: String, host: String = "https://github.com") async thr
 // MARK: Status page
 
 @Test func copilotIsAProvider() {
-    #expect(ProviderID.allCases.suffix(2) == [.opencode, .copilot], "new Providers go last, keeping tab shortcuts")
+    #expect(ProviderID.allCases.suffix(3) == [.opencode, .copilot, .grok], "new Providers go last, keeping tab shortcuts")
     #expect(StatusFeed.hasFeed(.copilot) && !ProviderID.copilot.hasBrowserFallback && !ProviderID.copilot.hasActivity)
     #expect(ProviderID.copilot.loginHint == "run `copilot login` or `gh auth login`")
 }

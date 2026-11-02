@@ -9,12 +9,12 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), 
 **Goals**
 - A one-command install that runs with zero configuration.
 - Near-zero resource use (see §2).
-- Accurate Limit Windows, Resets and Banked Resets for Claude, Codex, Gemini, Cursor, OpenCode Go and Copilot.
+- Accurate Limit Windows and Resets for Claude, Codex, Gemini, Cursor, OpenCode Go, Copilot and Grok, and Banked Resets for Claude and Codex.
 - Daily token history and Theoretical Cost from local CLI logs.
 - Publishable: MIT license, notarized, auto-updating.
 
 **Non-goals (v1)**
-- Providers other than Claude, Codex, Gemini, Cursor, OpenCode Go and Copilot. Grok and Kimi come later, one at a time.
+- Providers other than Claude, Codex, Gemini, Cursor, OpenCode Go, Copilot and Grok. Kimi comes later.
 - Token history for Gemini and Cursor (neither keeps usable local logs; limits only).
 - Refreshing tokens or writing to CLI credential files (ADR 0001).
 - Token usage from web/desktop chat apps (no local logs).
@@ -96,6 +96,13 @@ Enabled automatically only with an `opencode-go` credential, as a Console login 
 Displayed: plan, and a monthly window for each finite quota: Premium (AI Credits under token billing), Chat and Completions, reset at `quota_reset_at`, else `quota_reset_date_utc`, `quota_reset_date` or `limited_user_reset_date`. Older Free accounts report `limited_user_quotas` out of `monthly_quotas`. On an unlimited plan, `credits_used` as "AI credits used". An ended subscription or an account with no plan says so.
 Enabled automatically with a CLI user whose token is in its file or held by `gh`, or an editor plugin's login. No Limit Alerts for the monthly windows. No token history (ADR 0011).
 
+### Grok
+1. **The Grok CLI's login**: `auth.json` in `$GROK_HOME` or `~/.grok`, the entry `https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828`, else `https://accounts.x.ai/sign-in`, whichever comes first with a `key`, as the token. No other entry is ever used. An API key and the old web logins (`auth_mode` `api_key`, `web_login`, `grok`) aren't logins here, as the CLI itself ignores the latter and the former bills elsewhere. A custom deployment is left to the CLI: `[auth]`, `[grok_com_config]` or `[endpoints]` in `config.toml`, `managed_config.toml` or `requirements.toml` there or in `/etc/grok`, or a variable that selects another account or server. A login past its `expires_at` is expired with no request sent, and only the CLI renews it (ADR 0012).
+   → `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`, and `/v1/settings` for the plan's name, as the CLI does, with `Authorization: Bearer` and `X-XAI-Token-Auth: xai-grok-cli`. A login is sent only to that host or this Mac.
+
+Displayed: plan (`subscription_tier_display`), and one window, as Chat, Build and the rest are shares of one pool: `creditUsagePercent` over `currentPeriod`, else over `billingPeriodStart` and `billingPeriodEnd`. Weekly or Monthly from the period's type, else its length, and Credits for any other period. A left-out percentage is 0 within a whole `currentPeriod` typed weekly or monthly, since proto3 omits zeros. `onDemandUsed` out of `onDemandCap` (US cents) as "Extra usage" when either isn't zero. A team account that's turned away, a report with no percentage to read, and a period that has already ended say so.
+Enabled automatically with a usable login. Limit Alerts for the weekly window only. No token history (ADR 0012).
+
 ### Detection and staleness
 - On launch, a Provider is enabled automatically if its CLI credentials exist. It can be toggled in Settings.
 - If a fetch fails (expired token, network, 401), the Account becomes **Stale**. It keeps its last values and says how to fix it: run `claude` once (or `codex`, `agy`, "open Cursor or sign in at cursor.com", or `opencode auth login`).
@@ -126,13 +133,14 @@ Read on every poll and popover refresh (same throttle), without credentials, onl
 - **Cursor**: `status.cursor.com/api/v2/summary.json`, all components.
 - **OpenCode Go**: `status.opencode.ai/api/status`, its `go` service only: Zen's free models are often degraded, which says nothing about the subscription. A page reporting its own data as stale is no answer.
 - **Copilot**: `www.githubstatus.com/api/v2/summary.json`, the components `Copilot` and `Copilot AI Model Providers`.
+- **Grok**: `status.x.ai/api/status`, `grok.com` in the `grok` product only: Imagine, Voice and the mobile apps say nothing about coding, and the page lists nothing for the CLI. A status word it doesn't recognise is no answer.
 - **Gemini**: none. Antigravity has no status page, and Google's Workspace feed (about 350 KB) covers the Gemini app instead.
 An unresolved incident counts when it names a counted component, or names none and has an impact. Its severity is the worst status among counted components (degraded, partial outage, major outage), else its impact. Maintenance in progress counts as maintenance. A page that can't be read keeps its last answer.
 
 ## 7. Popover (344 × 540 pt, fixed; long pages scroll inside)
 
 Two levels, one click apart. A tab bar at the top always shows Overview plus one tab per enabled
-Provider (keys 0–5). With all five on, a Provider page shows only its own name and the other tabs a dot, with the name on hover. The popover keeps one fixed size; pages sit side by side and slide into
+Provider (keys 0–7). With five or more on, a Provider page shows only its own name and the other tabs a dot, with the name on hover. The popover keeps one fixed size; pages sit side by side and slide into
 view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 
 1. **Overview**:
@@ -150,7 +158,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
    - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
      by Provider, and top models and Projects, each bar split by Provider.
    - Colours come from each logo: Claude orange, Codex monochrome (black or white), Gemini its
-     four-colour spark, Cursor grey, and OpenCode teal and Copilot purple, as their marks are monochrome too.
+     four-colour spark, Cursor grey, and OpenCode teal, Copilot purple and Grok blue, as their marks are monochrome too.
 2. **Provider page**:
    - Large rings with the tightest % left, name and plan.
    - A banner per Incident: status light, title, severity and affected components, when it was
@@ -264,7 +272,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 12. Later (explicitly deferred)
 
-Grok and Kimi providers; token history for other CLIs; OpenCode usage routed to other subscriptions; Activity for OpenCode; a second Account for Cursor, Gemini, OpenCode Go and Copilot; token history for Copilot; Copilot budgets from github.com; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
+Kimi provider; token history for other CLIs; OpenCode usage routed to other subscriptions; Activity for OpenCode; a second Account for Cursor, Gemini, OpenCode Go, Copilot and Grok; token history for Copilot and Grok; Copilot budgets from github.com; Grok's shares per product, prepaid balance and reset coupons; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
 
 ## 13. Stats window
 
@@ -461,7 +469,7 @@ A Provider has one or more Accounts, and its own Limit Windows are their Pool. W
 
 The browser fallback's numbers (§4) aren't filed under the CLI's login, since that browser may be signed in as someone else: the default login then counts as having no readable email.
 
-Cursor, Gemini, OpenCode Go and Copilot have only the default login.
+Cursor, Gemini, OpenCode Go, Copilot and Grok have only the default login.
 
 ### Identity and names
 - An Account's identity is its email and organization, lowercased, and pins, alert state and `limit_reading` store only a SHA-256 hash of them. (Log paths in `file_cursor` can still name one: claude-swap names its `cswap run` profiles after the account.) An Account with no readable email uses a hash of its folder's path. The same identity found twice is one Account; the default login wins, then a folder, then claude-swap.
