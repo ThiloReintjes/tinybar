@@ -11,7 +11,8 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    # A retry may be because GitHub had no arm64 runner, so it asks another pool with the same Xcode.
+    runs-on: ${{ github.run_attempt > 1 && 'macos-15-intel' || 'macos-15' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

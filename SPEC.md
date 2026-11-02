@@ -259,7 +259,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - Pushing a `v*` tag publishes a GitHub Release with a zipped app and bumps the cask in the
   `ThiloReintjes/homebrew-tinybar` tap. `Scripts/install.sh` installs it and opens it.
 - Releases are signed with Developer ID and notarized, so Gatekeeper opens them without asking.
-  The release workflow stops if signing or notarization fails, after retrying Apple's ticket server, which sometimes drops the connection. CI and release runs that GitHub gave no runner are re-run, up to four tries. Next: the official cask
+  The release workflow stops if signing or notarization fails, after retrying Apple's ticket server, which sometimes drops the connection. CI and release runs that GitHub gave no runner are re-run, up to four tries, and any re-run uses `macos-15-intel`, which has the same Xcode as `macos-15`. Next: the official cask
   (`brew install --cask tinybar`).
 - **Updates** (ADR 0007): once a day, `GET api.github.com/repos/ThiloReintjes/tinybar/releases/latest`;
   an hour after a check that got no answer, and right away when Tinybar's own version changes.
