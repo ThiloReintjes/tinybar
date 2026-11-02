@@ -114,7 +114,8 @@ struct CopilotLogins: Sendable {
             guard let entries = Self.json(editorConfig.appendingPathComponent(file)) else { continue }
             for key in entries.keys.sorted() {
                 guard let entry = entries[key] as? [String: Any], let token = Self.text(entry["oauth_token"]),
-                      let host = key.split(separator: ":").first
+                      let host = key.split(separator: ":").first,
+                      CopilotUsageAPI.origin(host: "https://\(host)") != nil
                 else { continue }
                 return Login(source: .editor, host: "https://\(host)", name: Self.text(entry["user"]), storedToken: token)
             }
@@ -194,22 +195,22 @@ extension CopilotLogins {
         }
     }
 
-    /// A prompt that was refused or left unanswered isn't shown again until the next launch, rather
-    /// than every 5 minutes.
+    /// A prompt that was refused or left unanswered isn't shown again for that account until the next
+    /// launch, rather than every 5 minutes.
     static func untilRefused(_ read: @escaping @Sendable (String) -> String?) -> @Sendable (String) -> String? {
-        let refused = RefusedFlag()
+        let refused = RefusedAccounts()
         return { account in
-            guard !refused.isSet else { return nil }
+            guard !refused.contains(account) else { return nil }
             let token = read(account)
-            if token == nil { refused.set() }
+            if token == nil { refused.insert(account) }
             return token
         }
     }
 
-    private final class RefusedFlag: @unchecked Sendable {
+    private final class RefusedAccounts: @unchecked Sendable {
         private let lock = NSLock()
-        private var value = false
-        var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
-        func set() { lock.lock(); value = true; lock.unlock() }
+        private var accounts = Set<String>()
+        func contains(_ account: String) -> Bool { lock.lock(); defer { lock.unlock() }; return accounts.contains(account) }
+        func insert(_ account: String) { lock.lock(); accounts.insert(account); lock.unlock() }
     }
 }

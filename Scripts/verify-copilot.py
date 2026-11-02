@@ -246,7 +246,10 @@ def install_gh(root):
 
 def gh_token(gh):
     """Without renewing it, where this `gh` could. Goes to GitHub alone."""
-    renews = "--no-refresh" in subprocess.run([gh, "auth", "token", "--help"], capture_output=True, text=True).stdout
+    help_text = subprocess.run([gh, "auth", "token", "--help"], capture_output=True, text=True)
+    if help_text.returncode != 0:
+        return ""
+    renews = "--no-refresh" in help_text.stdout
     arguments = ["auth", "token", "--hostname", "github.com", *(["--no-refresh"] if renews else [])]
     return subprocess.run([gh, *arguments], capture_output=True, text=True).stdout.strip()
 

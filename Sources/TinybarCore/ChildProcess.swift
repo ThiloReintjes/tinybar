@@ -1,7 +1,14 @@
 import Foundation
 
 enum ChildProcess {
-    /// What a short-lived program printed, trimmed, or nil if it failed or ran out of time.
+    private static let maxOutput = 256 * 1024
+
+    private final class Output: @unchecked Sendable {
+        var data = Data()
+    }
+
+    /// What a short-lived program printed, trimmed, or nil if it failed, ran out of time or printed
+    /// more than any answer would. A descendant left holding stdout can't outlast the timeout.
     static func output(of executable: String, _ arguments: [String], timeout: TimeInterval) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -13,10 +20,25 @@ enum ChildProcess {
         do { try process.run() } catch { return nil }
         let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        defer { watchdog.cancel() }
+
+        let output = Output()
+        let finished = DispatchSemaphore(value: 0)
+        let handle = stdout.fileHandleForReading
+        DispatchQueue.global(qos: .utility).async {
+            while output.data.count <= maxOutput {
+                let chunk = handle.availableData
+                if chunk.isEmpty { break }
+                output.data.append(chunk)
+            }
+            finished.signal()
+        }
+        guard finished.wait(timeout: .now() + timeout) == .success, output.data.count <= maxOutput else {
+            if process.isRunning { process.terminate() }
+            return nil
+        }
         process.waitUntilExit()
-        watchdog.cancel()
         guard process.terminationStatus == 0 else { return nil }
-        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(decoding: output.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

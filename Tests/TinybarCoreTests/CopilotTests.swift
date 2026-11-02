@@ -358,6 +358,38 @@ private final class Answers: @unchecked Sendable {
     #expect(keychain("a") == nil)
     #expect(keychain("a") == nil)
     #expect(calls.all.count == 2)
+    // Another account still gets asked.
+    #expect(keychain("b") == "gho_later")
+    #expect(calls.all == ["a", "a", "b"])
+}
+
+@Test func anEditorLoginForAnUnsupportedHostDoesntHideAGoodOne() throws {
+    let f = try Fixture()
+    defer { f.remove() }
+    try f.write(#"""
+    {"a-server.example:Iv1.x":{"user":"elsewhere","oauth_token":"ghu_elsewhere"},
+     "github.com:Iv1.x":{"user":"editor-user","oauth_token":"ghu_good"}}
+    """#, f.editor, "apps.json")
+    #expect(f.logins().find(optedIn: false)?.storedToken == "ghu_good")
+    try f.write(#"{"a-server.example:Iv1.x":{"user":"elsewhere","oauth_token":"ghu_elsewhere"}}"#, f.editor, "apps.json")
+    #expect(f.logins().find(optedIn: true) == nil)
+}
+
+@Test func aChildProcessAnswersOrGivesUp() {
+    func run(_ script: String, timeout: TimeInterval = 5) -> String? {
+        ChildProcess.output(of: "/bin/sh", ["-c", script], timeout: timeout)
+    }
+    #expect(run("echo '  token  '") == "token")
+    #expect(run("echo token; exit 3") == nil)
+    // More than any answer would be.
+    #expect(run("head -c 300000 /dev/zero | tr '\\0' x") == nil)
+    #expect(run("head -c 200000 /dev/zero | tr '\\0' x")?.count == 200_000)
+    // Gone, but something it left behind keeps stdout open, past the timeout.
+    let start = Date()
+    #expect(run("sleep 20 & exit 0", timeout: 0.5) == nil)
+    #expect(Date().timeIntervalSince(start) < 5)
+    // Hanging itself.
+    #expect(run("exec sleep 20", timeout: 0.5) == nil)
 }
 
 @Test func aCLIUserGhDoesntHoldCostsNoGhProcess() throws {

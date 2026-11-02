@@ -1092,7 +1092,7 @@ private struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 18) {
             SettingsSection(
                 "Subscriptions",
-                footer: "Copilot reads your Copilot CLI or gh login. If only the Copilot CLI has it, macOS asks once for Keychain access.")
+                footer: "Copilot reads your Copilot CLI or gh login. If only the Copilot CLI has it, macOS asks for Keychain access: choose Always Allow.")
             {
                 ForEach(ProviderID.allCases, id: \.self) { id in
                     SettingsToggle(isOn: Binding(

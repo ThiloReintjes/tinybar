@@ -99,7 +99,7 @@ Notifications are requested once, for alerts. Tinybar reads Claude's Keychain it
 `/usr/bin/security`, the tool Claude Code itself uses, so there is no prompt. Copilot is picked up by
 itself if the Copilot CLI's user is also in `gh`, or from an editor plugin's login. VS Code keeps its
 login to itself, so with VS Code alone, sign in to `gh` and turn Copilot on in Settings. If only the Copilot CLI
-has your login, turning Copilot on makes macOS ask once for that Keychain item. If a CLI login is
+has your login, turning Copilot on makes macOS ask for that Keychain item. Choose Always Allow, or it asks again at every poll. If a CLI login is
 missing or expired, Tinybar can read your browser session instead. This fallback is off by default, and a
 Chromium browser asks once for its "Safe Storage" key. Firefox needs nothing, and Safari isn't
 supported.
