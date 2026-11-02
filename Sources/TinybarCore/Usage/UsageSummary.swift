@@ -158,4 +158,10 @@ public enum Format {
         if h > 0 { return "\(h)h \(m)m" }
         return "\(max(m, 1))m"
     }
+
+    /// "33% in reserve", or nil when it rounds to nothing.
+    public static func reserve(_ percent: Double) -> String? {
+        let rounded = Int(percent.rounded())
+        return rounded >= 1 ? "\(rounded)% in reserve" : nil
+    }
 }

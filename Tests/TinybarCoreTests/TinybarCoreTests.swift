@@ -222,6 +222,10 @@ private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWi
     #expect(fiveHour(used: 50, elapsedHours: 2, asOf: now).reservePercent(asOf: now) == nil)
     #expect(fiveHour(used: 0, elapsedHours: 2, asOf: now).reservePercent(asOf: now) == nil)
     #expect(fiveHour(used: 1, elapsedHours: 10.0 / 60, asOf: now).reservePercent(asOf: now) == nil)
+    // Only a reserve that rounds to at least 1% is worth naming.
+    #expect(Format.reserve(33.07) == "33% in reserve")
+    #expect(Format.reserve(0.5) == "1% in reserve")
+    #expect(Format.reserve(0.4) == nil)
 }
 
 @Test func noRunOutWhenItCantBeForecast() {

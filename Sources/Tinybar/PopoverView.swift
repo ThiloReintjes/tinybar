@@ -801,8 +801,8 @@ private struct WindowRow: View {
         case (true, false): "Pinned to the menu bar. Click to show whichever limit is closest to running out."
         default: "Click to pin to the menu bar"
         }
-        guard let reserve, reserve.rounded() >= 1 else { return pin }
-        return "\(Int(reserve.rounded()))% in reserve: you've used that much less than an even pace by now. \(pin)"
+        guard let reserve = reserve.flatMap(Format.reserve) else { return pin }
+        return "\(reserve): you've used that much less than an even pace by now. \(pin)"
     }
 }
 

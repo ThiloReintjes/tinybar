@@ -49,8 +49,8 @@ and add `--zap` to also delete your history and settings.
 - **Every limit.** The 5-hour and weekly windows for Claude, Codex and Gemini, Cursor's billing
   cycle, OpenCode Go's 5-hour, weekly and monthly windows, and Copilot's monthly quotas, with reset countdowns. Model-specific limits, Claude extra usage, Cursor on-demand spend,
   Codex credits and banked resets, and Copilot AI credits are included.
-- **When you'll run out.** At your pace so far, the time each window hits 0%. It turns orange if
-  that comes before the reset.
+- **When you'll run out.** At your pace so far, the time each window hits 0%, in orange, if that
+  comes before the reset. Otherwise it says "Lasts until reset", and hovering shows your reserve.
 - **One ring in the menu bar** for the limit closest to running out, or the one you pin.
 - **Several accounts.** Other Claude and Codex logins in your home folder are picked up by themselves
   (`~/.claude_personal`, `~/.codex_alt`), and accounts from
