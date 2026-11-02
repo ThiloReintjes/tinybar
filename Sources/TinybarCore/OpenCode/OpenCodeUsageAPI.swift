@@ -67,7 +67,7 @@ enum OpenCodeUsageAPI {
                 id: id, title: title ?? WindowKind.title(durationSeconds: seconds),
                 // Go refuses requests until a rate-limited window resets, whatever its share says.
                 usedPercent: meter.status == "rate-limited" ? 100 : min(max(percent, 0), 100),
-                resetsAt: reset, durationSeconds: seconds ?? monthSeconds(endingAt: reset))
+                resetsAt: reset, durationSeconds: seconds ?? LimitWindow.monthSeconds(endingAt: reset))
         }
         let windows = [
             window(usage.rolling, id: "session", seconds: 5 * 3600),
@@ -76,13 +76,5 @@ enum OpenCodeUsageAPI {
         ].compactMap { $0 }
         guard !windows.isEmpty else { throw ProviderError.unexpected("Unexpected OpenCode usage response") }
         return ProviderSnapshot(provider: .opencode, plan: nil, windows: windows, source: .cli, fetchedAt: now)
-    }
-
-    /// The calendar month ending at the Reset, since months differ in length.
-    private static func monthSeconds(endingAt reset: Date?) -> Int? {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        guard let reset, let start = calendar.date(byAdding: .month, value: -1, to: reset) else { return nil }
-        return Int(reset.timeIntervalSince(start))
     }
 }

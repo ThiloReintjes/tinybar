@@ -29,12 +29,7 @@ enum AntigravityCLI {
     static var stateDir: URL { Paths.home.appendingPathComponent(".gemini/antigravity-cli", isDirectory: true) }
 
     static func locate() -> String? {
-        let candidates = [
-            Paths.home.appendingPathComponent(".local/bin/agy").path,
-            "/opt/homebrew/bin/agy",
-            "/usr/local/bin/agy",
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        Paths.locateCLI("agy")
     }
 
     // MARK: Report

@@ -21,7 +21,11 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   `Claude Code-credentials` Keychain item, read through `/usr/bin/security`) and the Codex CLI's
   `~/.codex/auth.json`, Cursor.app's login in its `state.vscdb` and OpenCode's in its `opencode.db` or
   `auth.json` (opened read-only). OpenCode's is sent to opencode.ai, or to a Console on this Mac if the
-  login names one, never anywhere else. Gemini
+  login names one, never anywhere else. Copilot's comes from `~/.copilot/config.json`,
+  `~/.config/github-copilot`, `gh auth token` or, only if the user turned Copilot on themselves, the
+  `copilot-cli` Keychain item, and goes only to GitHub's API (`api.github.com`, `api.<name>.ghe.com`) or
+  this Mac. A `gh` token can do far more than read Copilot's limits, so sending it anywhere else, or keeping it, is
+  high severity. Gemini
   limits come from the Antigravity CLI itself, so Tinybar never sees a Google token. Tinybar holds tokens
   in memory only, for the duration of a fetch. Anything
   that writes, caches, logs or transmits a token anywhere other than the provider's own API host
@@ -35,14 +39,16 @@ Tinybar handles credentials it doesn't own, so these are the areas of particular
   `chatgpt.com` and (with the Cursor provider on) `cursor.com` only, decrypting Chromium cookies with the browser's "Safe Storage" Keychain key
   (cached in memory for the app's lifetime). Reading cookies for any other domain, or sending
   cookies to any host other than the one they belong to, is high severity.
-- **Network.** Tinybar talks to exactly five places: `api.anthropic.com` / `claude.ai`,
-  `chatgpt.com`, `cursor.com`, `opencode.ai`, and `models.dev` (unauthenticated). The `agy` child process talks to
+- **Network.** Tinybar talks to exactly six places: `api.anthropic.com` / `claude.ai`,
+  `chatgpt.com`, `cursor.com`, `opencode.ai`, `api.github.com` (or a `*.ghe.com` API), and `models.dev`
+  (unauthenticated), plus status pages and release checks without a login. The `agy` child process talks to
   Google on its own. Any other destination, or any request that
   changes account state, is a bug.
 - **Child processes.** `codex -s read-only -a never app-server` for the Codex fallback,
   `agy -p /usage --output-format json` (in an empty temporary directory) for Gemini,
   `cswap list --json` for claude-swap's accounts (only if turned on in Settings; it holds its own
   tokens and may renew idle logins itself),
+  `gh auth token` for a Copilot login (and its `--help`, to see if that `gh` could renew it),
   `/usr/bin/security` for the Keychain, and a copy of Tinybar itself for the first history import.
   Anything that lets an attacker influence those arguments or the executable path is in scope.
 - **Local data.** `~/Library/Application Support/Tinybar/usage.sqlite` stores daily token totals, file

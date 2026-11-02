@@ -10,18 +10,52 @@ public enum Paths {
         return dir
     }
 
-    public static func codexHome(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        if let custom = env["CODEX_HOME"]?.trimmingCharacters(in: .whitespaces), !custom.isEmpty {
+    /// A folder a CLI lets a variable override, else one in the home folder.
+    private static func cliHome(_ variable: String, default folder: String, env: [String: String]) -> URL {
+        if let custom = env[variable]?.trimmingCharacters(in: .whitespaces), !custom.isEmpty {
             return URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
         }
-        return home.appendingPathComponent(".codex", isDirectory: true)
+        return home.appendingPathComponent(folder, isDirectory: true)
+    }
+
+    public static func codexHome(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        cliHome("CODEX_HOME", default: ".codex", env: env)
+    }
+
+    /// Where a CLI is usually installed. GUI apps get a minimal PATH, so it can't be searched.
+    static func locateCLI(_ name: String, home: URL = Paths.home) -> String? {
+        let candidates = [
+            home.appendingPathComponent(".local/bin/\(name)").path,
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     /// OpenCode's data directory: `XDG_DATA_HOME` if absolute, as OpenCode reads it, else `~/.local/share`.
     public static func openCodeData(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        let base = env["XDG_DATA_HOME"].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
-            ?? home.appendingPathComponent(".local/share", isDirectory: true)
-        return base.appendingPathComponent("opencode", isDirectory: true)
+        xdgDir("XDG_DATA_HOME", default: ".local/share", env: env).appendingPathComponent("opencode", isDirectory: true)
+    }
+
+    /// The Copilot CLI's directory: `COPILOT_HOME` or `~/.copilot`.
+    static func copilotHome(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        cliHome("COPILOT_HOME", default: ".copilot", env: env)
+    }
+
+    /// An XDG variable if absolute, as those CLIs read it, else its default in the home folder.
+    private static func xdgDir(_ variable: String, default folder: String, env: [String: String]) -> URL {
+        env[variable].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
+            ?? home.appendingPathComponent(folder, isDirectory: true)
+    }
+
+    static func xdgConfig(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        xdgDir("XDG_CONFIG_HOME", default: ".config", env: env)
+    }
+
+    /// `gh`'s config: `GH_CONFIG_DIR`, else `gh` in the XDG config directory.
+    static func ghConfig(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        if let custom = env["GH_CONFIG_DIR"], !custom.isEmpty { return URL(fileURLWithPath: custom, isDirectory: true) }
+        return xdgConfig(env: env).appendingPathComponent("gh", isDirectory: true)
     }
 
     /// Claude Code config dirs: `CLAUDE_CONFIG_DIR` (comma-separated) or `~/.claude` and
@@ -57,7 +91,7 @@ public enum Paths {
         case .codex:
             prefix = ".codex"
             defaults = isSet("CODEX_HOME") ? [codexHome(env: env)] : [home.appendingPathComponent(".codex", isDirectory: true)]
-        case .gemini, .cursor, .opencode:
+        case .gemini, .cursor, .opencode, .copilot:
             return []
         }
         // claude-swap's own store isn't a login, though its name looks like one.

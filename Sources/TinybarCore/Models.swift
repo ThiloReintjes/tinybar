@@ -6,6 +6,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
     case gemini
     case cursor
     case opencode
+    case copilot
 
     public var displayName: String {
         switch self {
@@ -14,6 +15,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .gemini: "Gemini"
         case .cursor: "Cursor"
         case .opencode: "OpenCode Go"
+        case .copilot: "Copilot"
         }
     }
 
@@ -25,6 +27,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .gemini: "agy"
         case .cursor: nil
         case .opencode: "opencode"
+        case .copilot: "copilot"
         }
     }
 
@@ -34,6 +37,7 @@ public enum ProviderID: String, Codable, Sendable, CaseIterable, Comparable {
         case .claude, .codex, .gemini: "run `\(cliCommand!)` once to refresh"
         case .cursor: "open Cursor or sign in at cursor.com"
         case .opencode: "run `opencode auth login`"
+        case .copilot: "run `copilot login` or `gh auth login`"
         }
     }
 
@@ -80,6 +84,14 @@ public struct LimitWindow: Codable, Sendable, Hashable, Identifiable {
     }
 
     public var kind: WindowKind { WindowKind(durationSeconds: durationSeconds) }
+
+    /// The calendar month ending at a Reset, since months differ in length.
+    static func monthSeconds(endingAt reset: Date?) -> Int? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        guard let reset, let start = calendar.date(byAdding: .month, value: -1, to: reset) else { return nil }
+        return Int(reset.timeIntervalSince(start))
+    }
 
     /// What the UI shows: the share of the window still available, 100 → 0.
     public var remainingPercent: Double { min(max(100 - usedPercent, 0), 100) }
@@ -171,13 +183,15 @@ public struct ProviderSnapshot: Codable, Sendable, Hashable {
     public var credits: Credits?
     public var bankedResets: [BankedReset]?
     public var extraUsage: ExtraUsageSpend?
+    /// Copilot's AI credits on a plan with no allowance to measure them against.
+    public var creditsUsed: Double?
     public var source: DataSource
     public var fetchedAt: Date
 
     public init(
         provider: ProviderID, plan: String?, windows: [LimitWindow],
         credits: Credits? = nil, bankedResets: [BankedReset]? = nil, extraUsage: ExtraUsageSpend? = nil,
-        source: DataSource = .cli, fetchedAt: Date = Date())
+        creditsUsed: Double? = nil, source: DataSource = .cli, fetchedAt: Date = Date())
     {
         self.provider = provider
         self.plan = plan
@@ -185,6 +199,7 @@ public struct ProviderSnapshot: Codable, Sendable, Hashable {
         self.credits = credits
         self.bankedResets = bankedResets
         self.extraUsage = extraUsage
+        self.creditsUsed = creditsUsed
         self.source = source
         self.fetchedAt = fetchedAt
     }
