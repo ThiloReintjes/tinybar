@@ -792,17 +792,23 @@ private struct WindowRow: View {
         .buttonStyle(RowButtonStyle())
         .opacity(dimmed ? 0.55 : 1)
         .help(help)
-        .accessibilityHint(help)
+        .accessibilityValue(reserveText ?? "")
+        .accessibilityHint(pinHelp)
     }
 
+    private var reserveText: String? { reserve.flatMap(Format.reserve) }
+
     private var help: String {
-        let pin = switch (pinned, auto) {
+        guard let reserveText else { return pinHelp }
+        return "\(reserveText): you've used that much less than an even pace by now. \(pinHelp)"
+    }
+
+    private var pinHelp: String {
+        switch (pinned, auto) {
         case (true, true): "In the menu bar because it's the closest to running out. Click to keep it there."
         case (true, false): "Pinned to the menu bar. Click to show whichever limit is closest to running out."
         default: "Click to pin to the menu bar"
         }
-        guard let reserve = reserve.flatMap(Format.reserve) else { return pin }
-        return "\(reserve): you've used that much less than an even pace by now. \(pin)"
     }
 }
 
