@@ -1,0 +1,36 @@
+name: Re-run jobs that got no runner
+
+# When GitHub has no macOS runner free, it gives up after 15 minutes: "The job was not acquired by
+# Runner of type hosted". Nothing ran, so nothing can be wrong with the code. A re-run asks for
+# macos-15-intel, as CI and Release choose their runner by attempt. That run ends as a failure with
+# a job cancelled before its first step, unlike a run cancelled by a newer push, which ends as
+# cancelled and is left alone.
+on:
+  workflow_run:
+    workflows: [CI, Release]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  rerun:
+    # Four tries in all, about an hour of waiting, then it stays failed for someone to look at.
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          stuck=$(gh api "repos/$GH_REPO/actions/runs/$RUN/attempts/$ATTEMPT/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "cancelled" and (.steps | length) == 0 and (.runner_name // "") == "")] | length')
+          if [[ "$stuck" -gt 0 ]]; then
+            echo "$stuck job(s) got no runner: re-running."
+            gh run rerun "$RUN" --failed
+          else
+            echo "Every job got a runner, so this is a real failure."
+          fi

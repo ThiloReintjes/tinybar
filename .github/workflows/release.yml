@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-15
+    # A retry may be because GitHub had no arm64 runner, so it asks another pool with the same Xcode.
+    # The app is universal on either.
+    runs-on: ${{ github.run_attempt > 1 && 'macos-15-intel' || 'macos-15' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +64,13 @@ jobs:
           check="$RUNNER_TEMP/check"
           mkdir "$check" && ditto -x -k "build/Tinybar-${VERSION}.zip" "$check"
           codesign --verify --strict --deep "$check/Tinybar.app"
-          xcrun stapler validate "$check/Tinybar.app"
+          # Apple's ticket server sometimes drops the connection (-1005, then error 68), as when stapling.
+          # A ticket that's really missing still fails all five.
+          for attempt in 1 2 3 4 5; do
+            xcrun stapler validate "$check/Tinybar.app" && break
+            [[ $attempt == 5 ]] && exit 1
+            sleep 15
+          done
           spctl --assess --type execute -vv "$check/Tinybar.app"
       - name: Publish
         env:
