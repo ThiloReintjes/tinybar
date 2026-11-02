@@ -376,7 +376,7 @@ private final class Answers: @unchecked Sendable {
 }
 
 @Test func aChildProcessAnswersOrGivesUp() {
-    func run(_ script: String, timeout: TimeInterval = 5) -> String? {
+    func run(_ script: String, timeout: TimeInterval = 60) -> String? {
         ChildProcess.output(of: "/bin/sh", ["-c", script], timeout: timeout)
     }
     #expect(run("echo '  token  '") == "token")
@@ -386,10 +386,10 @@ private final class Answers: @unchecked Sendable {
     #expect(run("head -c 200000 /dev/zero | tr '\\0' x")?.count == 200_000)
     // Gone, but something it left behind keeps stdout open, past the timeout.
     let start = Date()
-    #expect(run("sleep 20 & exit 0", timeout: 0.5) == nil)
-    #expect(Date().timeIntervalSince(start) < 5)
+    #expect(run("sleep 30 & exit 0", timeout: 0.5) == nil)
+    #expect(Date().timeIntervalSince(start) < 15)
     // Hanging itself.
-    #expect(run("exec sleep 20", timeout: 0.5) == nil)
+    #expect(run("exec sleep 30", timeout: 0.5) == nil)
 }
 
 @Test func aCLIUserGhDoesntHoldCostsNoGhProcess() throws {

@@ -25,7 +25,8 @@ enum ChildProcess {
         let output = Output()
         let finished = DispatchSemaphore(value: 0)
         let handle = stdout.fileHandleForReading
-        DispatchQueue.global(qos: .utility).async {
+        // Its own thread, as a busy Dispatch pool could otherwise use up the timeout before it starts.
+        Thread.detachNewThread {
             while output.data.count <= maxOutput {
                 let chunk = handle.availableData
                 if chunk.isEmpty { break }
