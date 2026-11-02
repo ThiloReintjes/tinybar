@@ -18,10 +18,10 @@ tokens you used and what they would have cost at API prices.**
          src="https://img.shields.io/badge/License-MIT-3DA639?style=flat"></a>
 </p>
 
-Tinybar is native AppKit and SwiftUI. It uses about 20 MB of memory and 0% CPU while the popover is
-closed, and has no dependencies, no WebViews and no telemetry. It reads the logins your CLIs
-already have and never changes anything on your account. It's a from-scratch alternative to
-[CodexBar](https://github.com/steipete/CodexBar).
+Tinybar is a lighter, from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar).
+It uses about 20 MB of memory and 0% CPU while the popover is closed, and has no dependencies, no
+WebKit and no telemetry. It reads the logins your CLIs already have and never changes anything on
+your account.
 
 <p align="center">
   <picture>

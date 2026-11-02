@@ -1,6 +1,6 @@
 # Tinybar — v1 Specification
 
-A lightweight, native macOS menu bar app showing AI subscription limits, local token usage over time, and the Theoretical Cost of that usage. It is a from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar) (about 309k LOC, 87 providers), built around performance and a small scope.
+A macOS menu bar app showing AI subscription limits, local token usage over time, and the Theoretical Cost of that usage. It is a lighter, from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar) (about 309k LOC, 87 providers), with no WebKit, read-only logins and a small scope.
 
 Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), above all [ADR 0001](./docs/adr/0001-read-only-credentials.md) (read-only credentials).
 
