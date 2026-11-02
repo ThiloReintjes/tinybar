@@ -206,11 +206,22 @@ private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWi
     let fast = fiveHour(used: 50, elapsedHours: 2, asOf: now)
     #expect(fast.runOutTime(asOf: now) == now.addingTimeInterval(2 * 3600))
     #expect(fast.runsOutBeforeReset(now.addingTimeInterval(2 * 3600)))
-    // 30% in 2h: 70% left needs 4h 40m, after the reset in 3h. Still forecast, it shows the headroom.
+    // 30% in 2h: 70% left needs 4h 40m, after the reset in 3h. Still forecast, so it's known to last.
     let slow = fiveHour(used: 30, elapsedHours: 2, asOf: now)
     let slowRunOut = now.addingTimeInterval(70.0 / 15 * 3600)
     #expect(slow.runOutTime(asOf: now) == slowRunOut)
     #expect(!slow.runsOutBeforeReset(slowRunOut))
+}
+
+@Test func reserveIsTheShareOfTheWindowPassedMinusTheShareUsed() throws {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    // 30% used with 40% of the window gone.
+    let slow = try #require(fiveHour(used: 30, elapsedHours: 2, asOf: now).reservePercent(asOf: now))
+    #expect(abs(slow - 10) < 0.001)
+    // Runs out before the reset, or can't be forecast: nothing in reserve.
+    #expect(fiveHour(used: 50, elapsedHours: 2, asOf: now).reservePercent(asOf: now) == nil)
+    #expect(fiveHour(used: 0, elapsedHours: 2, asOf: now).reservePercent(asOf: now) == nil)
+    #expect(fiveHour(used: 1, elapsedHours: 10.0 / 60, asOf: now).reservePercent(asOf: now) == nil)
 }
 
 @Test func noRunOutWhenItCantBeForecast() {

@@ -11,7 +11,7 @@ extension LimitWindow {
     public static let forecastMinimumElapsed = 0.05
 
     /// When the window reaches 0% left at its average pace so far, even if that comes after its
-    /// Reset (which shows how much headroom is left). nil when it's untouched, already used up, or
+    /// Reset (then it lasts until the Reset). nil when it's untouched, already used up, or
     /// can't be forecast (no reset time or duration, or too early in the window). `asOf` is when
     /// `usedPercent` was read.
     public func runOutTime(asOf: Date) -> Date? {
@@ -31,6 +31,15 @@ extension LimitWindow {
     /// Whether a Run-out Time comes before this window's Reset, so the limit actually binds.
     public func runsOutBeforeReset(_ runOut: Date) -> Bool {
         resetsAt.map { runOut < $0 } ?? false
+    }
+
+    /// How much less is used than an even pace would have used by now: the share of the window
+    /// passed minus the share used. nil unless the window lasts until its Reset.
+    public func reservePercent(asOf: Date) -> Double? {
+        guard let runOut = runOutTime(asOf: asOf), !runsOutBeforeReset(runOut),
+            let resetsAt, let duration = durationSeconds else { return nil }
+        let length = TimeInterval(duration)
+        return (length - resetsAt.timeIntervalSince(asOf)) / length * 100 - usedPercent
     }
 }
 

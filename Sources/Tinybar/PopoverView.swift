@@ -454,6 +454,7 @@ private struct ProviderPage: View {
                         WindowRow(
                             window: window, provider: id,
                             runOut: stale ? nil : snapshot.flatMap { window.runOutTime(asOf: $0.fetchedAt) },
+                            reserve: stale ? nil : snapshot.flatMap { window.reservePercent(asOf: $0.fetchedAt) },
                             pinned: model.isPinned(id, window), auto: model.isAuto, dimmed: stale
                         ) { model.pin(id, window) }
                         if window.id != windows.last?.id {
@@ -524,6 +525,7 @@ private struct AccountList: View {
                     WindowRow(
                         window: window, provider: id,
                         runOut: account.isStale ? nil : window.runOutTime(asOf: snapshot.fetchedAt),
+                        reserve: account.isStale ? nil : window.reservePercent(asOf: snapshot.fetchedAt),
                         pinned: model.isPinned(id, window, account: account), auto: false, dimmed: account.isStale
                     ) { model.pin(id, window, account: account) }
                 }
@@ -743,6 +745,8 @@ private struct WindowRow: View {
     let provider: ProviderID
     /// When the window runs out at its pace so far, before or after its reset.
     let runOut: Date?
+    /// How far under an even pace the window is, when it lasts until its reset.
+    let reserve: Double?
     let pinned: Bool
     /// Shown because it's the closest to running out, not because the user pinned it.
     let auto: Bool
@@ -772,7 +776,7 @@ private struct WindowRow: View {
                                     .fontWeight(.medium)
                                     .foregroundStyle(.orange)
                             } else {
-                                Text("Runs out in \(Format.countdown(to: runOut))")
+                                Text("Lasts until reset")
                                     .foregroundStyle(.tertiary)
                             }
                         }
@@ -792,11 +796,13 @@ private struct WindowRow: View {
     }
 
     private var help: String {
-        switch (pinned, auto) {
+        let pin = switch (pinned, auto) {
         case (true, true): "In the menu bar because it's the closest to running out. Click to keep it there."
         case (true, false): "Pinned to the menu bar. Click to show whichever limit is closest to running out."
         default: "Click to pin to the menu bar"
         }
+        guard let reserve, reserve.rounded() >= 1 else { return pin }
+        return "\(Int(reserve.rounded()))% in reserve: you've used that much less than an even pace by now. \(pin)"
     }
 }
 
