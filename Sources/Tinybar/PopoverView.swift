@@ -803,6 +803,7 @@ private struct WindowRow: View {
 extension ProviderSnapshot {
     var hasExtras: Bool {
         extraUsage != nil
+            || creditsUsed != nil
             || credits?.hasCredits == true
             || bankedResets?.contains(where: \.isAvailable) == true
     }
@@ -827,6 +828,9 @@ private struct Extras: View {
                     "\(banked.count) banked reset\(banked.count == 1 ? "" : "s")",
                     icon: "arrow.counterclockwise",
                     value: next.map { "next expires in \(Format.countdown(to: $0))" } ?? "")
+            }
+            if let used = snapshot.creditsUsed {
+                line("AI credits used", icon: "circle.hexagongrid", value: used.formatted(.number.precision(.fractionLength(0...2))))
             }
             if let extra = snapshot.extraUsage {
                 line(snapshot.provider == .cursor ? "On-demand spend" : "Extra usage", icon: "creditcard", value: extra.formatted)
@@ -1086,7 +1090,10 @@ private struct SettingsPage: View {
     var body: some View {
         @Bindable var settings = model.settings
         VStack(alignment: .leading, spacing: 18) {
-            SettingsSection("Subscriptions") {
+            SettingsSection(
+                "Subscriptions",
+                footer: "Copilot reads your Copilot CLI or gh login. If only the Copilot CLI has it, macOS asks for Keychain access: choose Always Allow.")
+            {
                 ForEach(ProviderID.allCases, id: \.self) { id in
                     SettingsToggle(isOn: Binding(
                         get: { model.providers[id] != nil },

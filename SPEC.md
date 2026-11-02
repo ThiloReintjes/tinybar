@@ -9,12 +9,12 @@ Vocabulary: see [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr/](./docs/adr), 
 **Goals**
 - A one-command install that runs with zero configuration.
 - Near-zero resource use (see §2).
-- Accurate Limit Windows, Resets and Banked Resets for Claude, Codex, Gemini, Cursor and OpenCode Go.
+- Accurate Limit Windows, Resets and Banked Resets for Claude, Codex, Gemini, Cursor, OpenCode Go and Copilot.
 - Daily token history and Theoretical Cost from local CLI logs.
 - Publishable: MIT license, notarized, auto-updating.
 
 **Non-goals (v1)**
-- Providers other than Claude, Codex, Gemini, Cursor and OpenCode Go. Grok and Kimi come later, one at a time.
+- Providers other than Claude, Codex, Gemini, Cursor, OpenCode Go and Copilot. Grok and Kimi come later, one at a time.
 - Token history for Gemini and Cursor (neither keeps usable local logs; limits only).
 - Refreshing tokens or writing to CLI credential files (ADR 0001).
 - Token usage from web/desktop chat apps (no local logs).
@@ -87,6 +87,15 @@ Only the subscription: Zen's balance and Console budgets have no Limit Window (A
 Displayed: the 5-hour, weekly and monthly windows. A `rate-limited` window shows nothing left, whatever its share. No plan name (the report has none), and no model-specific windows: Go's limits are per model but it reports one share per window.
 Enabled automatically only with an `opencode-go` credential, as a Console login may have no Go plan. No Limit Alerts for the monthly window.
 
+### Copilot
+1. **The Copilot CLI's current user**: `lastLoggedInUser` (`last_logged_in_user` before 1.x) from `config.json` in `$COPILOT_HOME` or `~/.copilot`. Its token comes from `copilotTokens`/`copilot_tokens` in that file, else `gh auth token --hostname <host> --user <login>` (with `--no-refresh` on a `gh` that has it, as newer ones renew tokens otherwise), else, only if the user turned Copilot on themselves, the `copilot-cli` Keychain item (account `host:login`), which makes macOS ask (ADR 0011).
+2. **An editor plugin's login**: `oauth_token` from `apps.json`, then `hosts.json`, in `$XDG_CONFIG_HOME/github-copilot` or `~/.config/github-copilot`.
+3. **`gh`'s active user**, on github.com or else the first `*.ghe.com` host it holds, only if the user turned Copilot on themselves.
+   → `GET https://api.github.com/copilot_internal/user` (`api.<name>.ghe.com` for GitHub Enterprise Cloud) with `Authorization: Bearer`. A login is sent only to GitHub, `*.ghe.com` or this Mac.
+
+Displayed: plan, and a monthly window for each finite quota: Premium (AI Credits under token billing), Chat and Completions, reset at `quota_reset_at`, else `quota_reset_date_utc`, `quota_reset_date` or `limited_user_reset_date`. Older Free accounts report `limited_user_quotas` out of `monthly_quotas`. On an unlimited plan, `credits_used` as "AI credits used". An ended subscription or an account with no plan says so.
+Enabled automatically with a CLI user whose token is in its file or held by `gh`, or an editor plugin's login. No Limit Alerts for the monthly windows. No token history (ADR 0011).
+
 ### Detection and staleness
 - On launch, a Provider is enabled automatically if its CLI credentials exist. It can be toggled in Settings.
 - If a fetch fails (expired token, network, 401), the Account becomes **Stale**. It keeps its last values and says how to fix it: run `claude` once (or `codex`, `agy`, "open Cursor or sign in at cursor.com", or `opencode auth login`).
@@ -116,6 +125,7 @@ Read on every poll and popover refresh (same throttle), without credentials, onl
 - **Codex**: `status.openai.com/proxy/status.openai.com` (incident.io), counting the components of the "Codex" group; when any is affected, `status.openai.com/api/v2/summary.json` supplies the incident's title (the open incident naming Codex, else the first open one with an impact).
 - **Cursor**: `status.cursor.com/api/v2/summary.json`, all components.
 - **OpenCode Go**: `status.opencode.ai/api/status`, its `go` service only: Zen's free models are often degraded, which says nothing about the subscription. A page reporting its own data as stale is no answer.
+- **Copilot**: `www.githubstatus.com/api/v2/summary.json`, the components `Copilot` and `Copilot AI Model Providers`.
 - **Gemini**: none. Antigravity has no status page, and Google's Workspace feed (about 350 KB) covers the Gemini app instead.
 An unresolved incident counts when it names a counted component, or names none and has an impact. Its severity is the worst status among counted components (degraded, partial outage, major outage), else its impact. Maintenance in progress counts as maintenance. A page that can't be read keeps its last answer.
 
@@ -140,7 +150,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
    - Usage for all Providers (Today, 7d, 30d): total tokens, Theoretical Cost, a daily chart stacked
      by Provider, and top models and Projects, each bar split by Provider.
    - Colours come from each logo: Claude orange, Codex monochrome (black or white), Gemini its
-     four-colour spark, Cursor grey, and OpenCode teal, as its mark is monochrome too.
+     four-colour spark, Cursor grey, and OpenCode teal and Copilot purple, as their marks are monochrome too.
 2. **Provider page**:
    - Large rings with the tightest % left, name and plan.
    - A banner per Incident: status light, title, severity and affected components, when it was
@@ -251,7 +261,7 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 
 ## 12. Later (explicitly deferred)
 
-Grok and Kimi providers; token history for other CLIs; OpenCode usage routed to other subscriptions; Activity for OpenCode; a second Account for Cursor, Gemini and OpenCode Go; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
+Grok and Kimi providers; token history for other CLIs; OpenCode usage routed to other subscriptions; Activity for OpenCode; a second Account for Cursor, Gemini, OpenCode Go and Copilot; token history for Copilot; Copilot budgets from github.com; token refresh (would need a new ADR); historical pricing; Activity for Gemini and Cursor (no local logs).
 
 ## 13. Stats window
 
@@ -448,7 +458,7 @@ A Provider has one or more Accounts, and its own Limit Windows are their Pool. W
 
 The browser fallback's numbers (§4) aren't filed under the CLI's login, since that browser may be signed in as someone else: the default login then counts as having no readable email.
 
-Cursor, Gemini and OpenCode Go have only the default login.
+Cursor, Gemini, OpenCode Go and Copilot have only the default login.
 
 ### Identity and names
 - An Account's identity is its email and organization, lowercased, and pins, alert state and `limit_reading` store only a SHA-256 hash of them. (Log paths in `file_cursor` can still name one: claude-swap names its `cswap run` profiles after the account.) An Account with no readable email uses a hash of its folder's path. The same identity found twice is one Account; the default login wins, then a folder, then claude-swap.

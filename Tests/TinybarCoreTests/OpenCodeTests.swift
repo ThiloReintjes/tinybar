@@ -768,7 +768,6 @@ private func openCodeStatus(go: String, reason: String = "none", free: String = 
 }
 
 @Test func openCodeSubscriptionIsAProvider() {
-    #expect(ProviderID.allCases.last == .opencode, "new Providers go last, keeping tab shortcuts")
     #expect(StatusFeed.hasFeed(.opencode) && !ProviderID.opencode.hasBrowserFallback && !ProviderID.opencode.hasActivity)
     #expect(ProviderID.opencode.loginHint == "run `opencode auth login`")
 }

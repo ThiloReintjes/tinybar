@@ -2,7 +2,7 @@
 
 # Tinybar
 
-**See what's left of your Claude, Codex, Gemini, Cursor and OpenCode Go limits from the macOS menu bar, plus the
+**See what's left of your Claude, Codex, Gemini, Cursor, OpenCode Go and Copilot limits from the macOS menu bar, plus the
 tokens you used and what they would have cost at API prices.**
 
 <p align="center">
@@ -47,8 +47,8 @@ and add `--zap` to also delete your history and settings.
 ## What it shows
 
 - **Every limit.** The 5-hour and weekly windows for Claude, Codex and Gemini, Cursor's billing
-  cycle, and OpenCode Go's 5-hour, weekly and monthly windows, with reset countdowns. Model-specific limits, Claude extra usage, Cursor on-demand spend,
-  Codex credits and banked resets are included.
+  cycle, OpenCode Go's 5-hour, weekly and monthly windows, and Copilot's monthly quotas, with reset countdowns. Model-specific limits, Claude extra usage, Cursor on-demand spend,
+  Codex credits and banked resets, and Copilot AI credits are included.
 - **When you'll run out.** At your pace so far, the time each window hits 0%. It turns orange if
   that comes before the reset.
 - **One ring in the menu bar** for the limit closest to running out, or the one you pin.
@@ -56,12 +56,12 @@ and add `--zap` to also delete your history and settings.
   (`~/.claude_personal`, `~/.codex_alt`), and accounts from
   [claude-swap](https://github.com/realiti4/claude-swap) if you turn that on in Settings. A subscription's
   number becomes the average of what they have left, with a bar showing each one. Its page lists them all.
-- **Outages.** When Claude Code, Codex, Cursor or OpenCode Go report trouble on their status page, the ring gets
+- **Outages.** When Claude Code, Codex, Cursor, OpenCode Go or Copilot report trouble on their status page, the ring gets
   an orange or red light, and the subscription's page links to the incident.
 - **Token history and cost.** Today, 7 days and 30 days from your Claude Code and Codex logs and
   your OpenCode Go use, by model and project, priced at [models.dev](https://models.dev) API rates. Tinybar keeps daily totals
-  in a local database, so they survive Claude Code deleting transcripts after 30 days. Gemini and
-  Cursor show limits only.
+  in a local database, so they survive Claude Code deleting transcripts after 30 days. Gemini,
+  Cursor and Copilot show limits only.
 - **Stats.** A separate window with every token you used, agent hours, tool calls, lines added, the
   commands your agents run and the languages they write. **Plans** compares what each subscription
   gets you at API prices, measured from your limits and logs, and how its models score on
@@ -80,7 +80,7 @@ and add `--zap` to also delete your history and settings.
 Tinybar uses the logins your official CLIs already store and calls the same endpoints they call for
 `/usage`. It never refreshes a token, sends a prompt or redeems a banked reset. When a login
 expires, the card turns stale until you run `claude`, `codex` or `agy` once, open Cursor, or run
-`opencode auth login`.
+`opencode auth login`, `copilot login` or `gh auth login`.
 [ADR 0001](docs/adr/0001-read-only-credentials.md) explains why.
 
 | Provider | Login | Limits from | Token history |
@@ -90,12 +90,16 @@ expires, the card turns stale until you run `claude`, `codex` or `agy` once, ope
 | Gemini | none | `agy -p /usage`, Antigravity CLI's own report | none |
 | Cursor | Cursor.app's `state.vscdb`, else your browser's `cursor.com` cookie | `cursor.com/api/usage-summary` | none |
 | OpenCode Go | OpenCode's `~/.local/share/opencode/opencode.db` or `auth.json` | `opencode.ai/zen/go/v1/usage` | `opencode.db`, Go subscription only |
+| Copilot | The Copilot CLI's user through `gh` or `~/.copilot/config.json`, or `~/.config/github-copilot` | `api.github.com/copilot_internal/user` | none |
 
 The only other requests carry no login. Prices come from `models.dev` and the latest release from
-GitHub, once a day each. The Claude, OpenAI, Cursor and OpenCode status pages are checked with every poll.
+GitHub, once a day each. The Claude, OpenAI, Cursor, OpenCode and GitHub status pages are checked with every poll.
 
 Notifications are requested once, for alerts. Tinybar reads Claude's Keychain item through
-`/usr/bin/security`, the tool Claude Code itself uses, so there is no prompt. If a CLI login is
+`/usr/bin/security`, the tool Claude Code itself uses, so there is no prompt. Copilot is picked up by
+itself if the Copilot CLI's user is also in `gh`, or from an editor plugin's login. VS Code keeps its
+login to itself, so with VS Code alone, sign in to `gh` and turn Copilot on in Settings. If only the Copilot CLI
+has your login, turning Copilot on makes macOS ask for that Keychain item. Choose Always Allow, or it asks again at every poll. If a CLI login is
 missing or expired, Tinybar can read your browser session instead. This fallback is off by default, and a
 Chromium browser asks once for its "Safe Storage" key. Firefox needs nothing, and Safari isn't
 supported.

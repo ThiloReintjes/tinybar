@@ -107,7 +107,7 @@ struct OpenCodeLogin {
     init(_ stored: OpenCodeData.StoredLogin, now: Date = Date()) throws {
         guard let value = try? JSONSerialization.jsonObject(with: stored.value) as? [String: Any],
               let secret = Self.secret(value, now: now),
-              Self.isHeaderSafe(secret)
+              HTTP.isHeaderSafe(secret)
         else { throw ProviderError.loginExpired }
         let metadata = value["metadata"] as? [String: Any]
         guard let origin = Self.origin(server: metadata?["server"]) else {
@@ -115,7 +115,7 @@ struct OpenCodeLogin {
         }
         token = secret
         self.origin = origin
-        workspaceID = (metadata?["orgID"] as? String).flatMap { Self.isHeaderSafe($0) ? $0 : nil }
+        workspaceID = (metadata?["orgID"] as? String).flatMap { HTTP.isHeaderSafe($0) ? $0 : nil }
     }
 
     private static func secret(_ value: [String: Any], now: Date) -> String? {
@@ -133,10 +133,6 @@ struct OpenCodeLogin {
         }
     }
 
-    private static func isHeaderSafe(_ s: String) -> Bool {
-        !s.isEmpty && s.unicodeScalars.allSatisfy { $0.isASCII && $0.value > 0x20 && $0.value != 0x7F }
-    }
-
     /// OpenCode sends a credential to the Console it signed in to. Tinybar does the same for
     /// opencode.ai and a Console on this Mac (development, `Scripts/verify-opencode.py`), and
     /// nowhere else (SECURITY.md).
@@ -147,7 +143,7 @@ struct OpenCodeLogin {
               let host = c.host?.lowercased()
         else { return nil }
         if host == "console.opencode.ai" { return fallback }  // retired, maps onto opencode.ai
-        let isLocal = ["127.0.0.1", "localhost", "::1"].contains(host) && (scheme == "http" || scheme == "https")
+        let isLocal = HTTP.isLoopback(scheme: scheme, host: host)
         let isOpenCode = scheme == "https" && (host == "opencode.ai" || host.hasSuffix(".opencode.ai"))
         guard isLocal || isOpenCode else { return nil }
         var origin = URLComponents()

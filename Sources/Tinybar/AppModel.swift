@@ -86,6 +86,7 @@ final class AppModel {
             .gemini: GeminiProvider(),
             .cursor: CursorProvider(),
             .opencode: OpenCodeProvider(),
+            .copilot: CopilotProvider(isOptedIn: { Settings.isTurnedOn(.copilot) }),
         ]
         // `TINYBAR_DB` points development runs (snapshots) at a scratch database.
         store = try? ProcessInfo.processInfo.environment["TINYBAR_DB"].map { try UsageStore(path: URL(fileURLWithPath: $0)) }

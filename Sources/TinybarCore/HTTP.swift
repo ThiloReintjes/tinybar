@@ -33,6 +33,16 @@ enum HTTP {
         var body = Data()
     }
 
+    /// Whether a credential read from a file can go in a header as it is.
+    static func isHeaderSafe(_ s: String) -> Bool {
+        !s.isEmpty && s.unicodeScalars.allSatisfy { $0.isASCII && $0.value > 0x20 && $0.value != 0x7F }
+    }
+
+    /// A server on this Mac: where a login may go for development and `Scripts/verify-*.py`.
+    static func isLoopback(scheme: String, host: String) -> Bool {
+        ["127.0.0.1", "localhost", "::1"].contains(host) && (scheme == "http" || scheme == "https")
+    }
+
     static func retryAfter(_ value: String, now: Date = Date()) -> TimeInterval? {
         if let seconds = TimeInterval(value), seconds.isFinite { return max(0, seconds) }
         let formatter = DateFormatter()

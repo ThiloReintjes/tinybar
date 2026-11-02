@@ -80,11 +80,18 @@ final class Settings {
 
     /// Auto-detected Providers are on unless the user turned them off.
     func isEnabled(_ id: ProviderID, detected: @autoclosure () -> Bool) -> Bool {
-        (defaults.object(forKey: "enabled.\(id.rawValue)") as? Bool) ?? detected()
+        (defaults.object(forKey: Self.enabledKey(id)) as? Bool) ?? detected()
     }
 
+    /// Whether the user turned a Provider on themselves. For fetches, off the main actor.
+    nonisolated static func isTurnedOn(_ id: ProviderID) -> Bool {
+        UserDefaults.standard.bool(forKey: enabledKey(id))
+    }
+
+    private nonisolated static func enabledKey(_ id: ProviderID) -> String { "enabled.\(id.rawValue)" }
+
     func setEnabled(_ id: ProviderID, _ enabled: Bool) {
-        defaults.set(enabled, forKey: "enabled.\(id.rawValue)")
+        defaults.set(enabled, forKey: Self.enabledKey(id))
     }
 
     // MARK: Accounts

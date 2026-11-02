@@ -69,6 +69,8 @@ public enum StatusFeed {
         // Antigravity has no status page; Google's Workspace feed covers the Gemini app instead.
         case .gemini: nil
         case .opencode: .openCode(URL(string: "https://status.opencode.ai")!)
+        // Also counts "Copilot AI Model Providers". Git, Actions and the rest say nothing about it.
+        case .copilot: .statuspage(URL(string: "https://www.githubstatus.com")!, components: ["Copilot"])
         }
     }
 

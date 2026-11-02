@@ -12,12 +12,7 @@ public enum ClaudeSwap {
     static let loginHint = "log in with that account in `claude`, then run `cswap add`"
 
     public static func locate(home: URL = Paths.home) -> String? {
-        let candidates = [
-            home.appendingPathComponent(".local/bin/cswap").path,
-            "/opt/homebrew/bin/cswap",
-            "/usr/local/bin/cswap",
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        Paths.locateCLI("cswap", home: home)
     }
 
     /// The `cswap run` profiles, whose logs Tinybar reads with or without this turned on (SPEC §9).

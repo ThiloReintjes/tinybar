@@ -2,8 +2,9 @@ import Foundation
 import TinybarCore
 
 // Developer tool: exercises TinybarCore without the UI.
-//   tinybar-cli limits [--browser] [--swap] [--provider=<id>]  fetch limits (optionally allowing the
-//                               browser fallback, or reading claude-swap's accounts)
+//   tinybar-cli limits [--browser] [--swap] [--opted-in] [--provider=<id>]  fetch limits (optionally allowing the
+//                               browser fallback, reading claude-swap's accounts, or what Copilot only
+//                               reads if turned on in Settings)
 //   tinybar-cli cookies         check which browser holds session cookies
 //   tinybar-cli ingest [db]     ingest Codex logs into a store
 //   tinybar-cli usage [db]      print usage summaries
@@ -20,13 +21,14 @@ func printWindows(_ s: ProviderSnapshot) {
     }
 }
 
-func printLimits(browser: Bool, swap: Bool) async {
+func printLimits(browser: Bool, swap: Bool, optedIn: Bool) async {
     let providers: [any UsageProvider] = [
         ClaudeProvider(allowBrowser: { browser }),
         CodexProvider(allowBrowser: { browser }),
         GeminiProvider(),
         CursorProvider(),
         OpenCodeProvider(),
+        CopilotProvider(isOptedIn: { optedIn }),
     ]
     let only = args.first { $0.hasPrefix("--provider=") }.map { String($0.dropFirst(11)) }
     for provider in providers where only == nil || provider.id.rawValue == only {
@@ -35,6 +37,7 @@ func printLimits(browser: Bool, swap: Bool) async {
             print("\(provider.id.displayName) \(s.plan ?? "") [source: \(s.source.rawValue)]")
             printWindows(s)
             if let c = s.credits, c.hasCredits { print("  credits: \(c.balance.map { String(format: "%.2f", $0) } ?? "-")") }
+            if let used = s.creditsUsed { print("  AI credits used: \(used)") }
             if let e = s.extraUsage { print(String(format: "  extra usage: %.2f / %@ %@", e.used, e.limit.map { String(format: "%.2f", $0) } ?? "∞", e.currency)) }
             for b in s.bankedResets ?? [] where b.isAvailable {
                 print("  banked reset: \(b.title ?? b.id) expires \(b.expiresAt.map { "\($0)" } ?? "never")")
@@ -146,7 +149,7 @@ func printStatus() async {
 }
 
 switch command {
-case "limits": await printLimits(browser: args.contains("--browser"), swap: args.contains("--swap"))
+case "limits": await printLimits(browser: args.contains("--browser"), swap: args.contains("--swap"), optedIn: args.contains("--opted-in"))
 case "cookies": printCookies()
 case "web": await printWeb()
 case "ingest": try await ingest()
@@ -155,12 +158,12 @@ case "stats": try await stats()
 case "backfill": try await backfill()
 case "backfill-long": try await backfillLong()
 case "status": await printStatus()
-default: print("usage: tinybar-cli [limits [--browser] [--provider=<id>]|cookies|ingest|usage|stats|backfill|backfill-long|status] [db-path]")
+default: print("usage: tinybar-cli [limits [--browser] [--opted-in] [--provider=<id>]|cookies|ingest|usage|stats|backfill|backfill-long|status] [db-path]")
 }
 
 // `tinybar-cli web`: exercises only the browser-cookie paths.
 func printWeb() async {
-    for provider in ProviderID.allCases where provider != .gemini && provider != .opencode {
+    for provider in ProviderID.allCases where provider.hasBrowserFallback || provider == .cursor {
         do {
             let (browser, s) = try await BrowserFallback.fetch(provider)
             print("\(provider.displayName) via \(browser): " + s.windows.map { "\($0.title) \(Int($0.remainingPercent))% left" }.joined(separator: ", "))

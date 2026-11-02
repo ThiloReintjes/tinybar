@@ -107,24 +107,10 @@ public struct ClaudeCredentials: Sendable {
             rateLimitTier: oauth["rateLimitTier"] as? String)
     }
 
-    private static func readKeychain(service: String, timeout: TimeInterval = 5) throws -> Data? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", service, "-w"]
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { return nil }
-
+    private static func readKeychain(service: String) throws -> Data? {
         // If macOS ever shows an access prompt, don't hang the refresh on it.
-        let watchdog = DispatchWorkItem { if p.isRunning { p.terminate() } }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        watchdog.cancel()
-
-        guard p.terminationStatus == 0 else { return nil }
-        let trimmed = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed = ChildProcess.output(of: "/usr/bin/security", ["find-generic-password", "-s", service, "-w"], timeout: 5)
+        else { return nil }
         // `security -w` prints hex for values it deems binary.
         if !trimmed.hasPrefix("{"), let decoded = Data(hexString: trimmed) { return decoded }
         return Data(trimmed.utf8)

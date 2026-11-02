@@ -321,6 +321,7 @@ extension ProviderID {
         case .gemini: "antigravity.google"
         case .cursor: "cursor.com"
         case .opencode: "opencode.ai"
+        case .copilot: "github.com"
         }
     }
 
@@ -334,6 +335,8 @@ extension ProviderID {
         case .cursor: .gray
         // Its mark is monochrome like Codex's and Cursor's, which charts couldn't tell apart.
         case .opencode: Color(red: 0.13, green: 0.65, blue: 0.62)
+        // GitHub's Copilot purple, as its mark is monochrome too.
+        case .copilot: Color(red: 0.51, green: 0.31, blue: 0.87)
         }
     }
 
