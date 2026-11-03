@@ -53,13 +53,22 @@ func printLimits(browser: Bool, swap: Bool, optedIn: Bool) async {
             print("\(provider.id.displayName) error: \(error.localizedDescription)")
         }
     }
-    for folder in LoginFolders.find() where only == nil || only == folder.provider.rawValue {
+    // The app's own settings hold the folders added there.
+    let added = AddedLoginFolders.urls(UserDefaults(suiteName: "com.tinybar.app") ?? .standard)
+    for folder in LoginFolders.find(added: added) where only == nil || only == folder.provider.rawValue {
         do {
             let s = try await folder.source.fetch()
-            print("\(folder.provider.displayName) ~/\(folder.id) \(s.plan ?? "")")
+            print("\(folder.provider.displayName) \(folder.place) \(s.plan ?? "")")
             printWindows(s)
         } catch {
-            print("\(folder.provider.displayName) ~/\(folder.id) error: \(error.localizedDescription)")
+            print("\(folder.provider.displayName) \(folder.place) error: \(error.localizedDescription)")
+        }
+    }
+    if only == nil || only == ProviderID.copilot.rawValue {
+        for user in CopilotProvider(isOptedIn: { optedIn }).otherUsers() {
+            guard let account = await user.account() else { print("Copilot \(user.place): no Copilot plan"); continue }
+            print("Copilot \(account.displayName) [\(user.place)]\(account.error.map { " error: \($0.localizedDescription)" } ?? "")")
+            if let s = account.snapshot { printWindows(s) }
         }
     }
     if swap, only == nil || only == ProviderID.claude.rawValue, let cswap = ClaudeSwap.locate() {

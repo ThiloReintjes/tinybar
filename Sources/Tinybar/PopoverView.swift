@@ -6,11 +6,13 @@ enum Page: Hashable {
     case overview
     case provider(ProviderID)
     case settings
+    /// One subscription's settings, a level below Settings.
+    case subscription
     /// How Tinybar counts: where each number comes from.
     case about
 
     /// Pages reached from the footer: they replace the tab bar with a header and a way back.
-    var isAside: Bool { self == .settings || self == .about }
+    var isAside: Bool { self == .settings || self == .subscription || self == .about }
 }
 
 /// The pages sit side by side on one strip that slides under a fixed window. Switching tabs moves
@@ -18,6 +20,8 @@ enum Page: Hashable {
 struct PopoverView: View {
     let model: AppModel
     @State private var page: Page
+    /// Which subscription the Settings page below the first level shows.
+    @State private var subscription = ProviderID.claude
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let width: CGFloat = 344
@@ -25,13 +29,14 @@ struct PopoverView: View {
     /// scroll inside it.
     static let contentHeight: CGFloat = 540
 
-    init(model: AppModel, page: Page = .overview) {
+    init(model: AppModel, page: Page = .overview, subscription: ProviderID = .claude) {
         self.model = model
         _page = State(initialValue: page)
+        _subscription = State(initialValue: subscription)
     }
 
     private var pages: [Page] {
-        [.overview] + model.enabledProviders.map(Page.provider) + [.settings, .about]
+        [.overview] + model.enabledProviders.map(Page.provider) + [.settings, .subscription, .about]
     }
 
     var body: some View {
@@ -40,7 +45,7 @@ struct PopoverView: View {
                 TabBar(model: model, page: page, select: go)
                     .opacity(page.isAside ? 0 : 1)
                     .allowsHitTesting(!page.isAside)
-                AsideHeader(title: page == .about ? "How Tinybar counts" : "Settings") { go(.overview) }
+                AsideHeader(title: asideTitle) { go(page == .subscription ? .settings : .overview) }
                     .opacity(page.isAside ? 1 : 0)
                     .allowsHitTesting(page.isAside)
             }
@@ -81,8 +86,20 @@ struct PopoverView: View {
         switch p {
         case .overview: OverviewPage(model: model, open: { go(.provider($0)) })
         case let .provider(id): ProviderPage(model: model, id: id)
-        case .settings: SettingsPage(model: model)
+        case .settings: SettingsPage(model: model) { id in
+            subscription = id
+            go(.subscription)
+        }
+        case .subscription: SubscriptionPage(model: model, id: subscription)
         case .about: AboutPage(model: model, visible: page == .about)
+        }
+    }
+
+    private var asideTitle: String {
+        switch page {
+        case .about: "How Tinybar counts"
+        case .subscription: subscription.displayName
+        default: "Settings"
         }
     }
 
@@ -983,7 +1000,7 @@ private struct Footer: View {
             }
             .keyboardShortcut("i")
             FooterButton(icon: "gearshape", label: "Settings") {
-                select(page == .settings ? .overview : .settings)
+                select(page == .settings || page == .subscription ? .overview : .settings)
             }
             .keyboardShortcut(",")
             FooterButton(icon: "power", label: "Quit Tinybar") { NSApp.terminate(nil) }
@@ -1096,79 +1113,21 @@ private struct AboutPage: View {
 
 // MARK: Settings
 
+/// Settings' first level: a row per subscription, each opening its own page, then what applies to
+/// them all. Short enough to take in at a glance (SPEC §7).
 private struct SettingsPage: View {
     let model: AppModel
+    let open: (ProviderID) -> Void
 
     var body: some View {
         @Bindable var settings = model.settings
         VStack(alignment: .leading, spacing: 18) {
-            SettingsSection(
-                "Subscriptions",
-                footer: "Copilot reads your Copilot CLI or gh login. If only the Copilot CLI has it, macOS asks for Keychain access: choose Always Allow.")
-            {
+            SettingsSection("Subscriptions", footer: "Tinybar turns on each subscription it finds a login for.") {
                 ForEach(ProviderID.allCases, id: \.self) { id in
-                    SettingsToggle(isOn: Binding(
-                        get: { model.providers[id] != nil },
-                        set: { model.setEnabled(id, $0) }),
-                        first: id == ProviderID.allCases.first)
-                    {
-                        HStack(spacing: 8) {
-                            ProviderDot(id: id, size: 7)
-                            Text(id.displayName)
-                        }
-                    }
+                    SubscriptionRow(model: model, id: id, first: id == ProviderID.allCases.first) { open(id) }
                 }
             }
-            if !model.loginFolders.isEmpty || model.isClaudeSwapInstalled {
-                SettingsSection(
-                    "Accounts",
-                    footer: model.claudeSwapError.map { "claude-swap: \($0)." }
-                        ?? (model.isClaudeSwapInstalled
-                            ? "Login folders are read like your main login. claude-swap may renew idle logins itself when Tinybar asks for their limits."
-                            : "Other logins found in your home folder, read like your main login."))
-                {
-                    ForEach(model.loginFolders) { folder in
-                        SettingsToggle(isOn: Binding(
-                            get: { settings.isLoginFolderEnabled(folder) },
-                            set: { model.setLoginFolder(folder, enabled: $0) }),
-                            first: folder == model.loginFolders.first)
-                        {
-                            HStack(spacing: 8) {
-                                ProviderDot(id: folder.provider, size: 7)
-                                Text("~/\(folder.id)")
-                            }
-                        }
-                    }
-                    if model.isClaudeSwapInstalled {
-                        SettingsToggle(isOn: Binding(
-                            get: { settings.readClaudeSwap },
-                            set: { model.setReadClaudeSwap($0) }),
-                            first: model.loginFolders.isEmpty)
-                        {
-                            Text("Read accounts from claude-swap")
-                        }
-                    }
-                }
-            }
-            SettingsSection(
-                "Browser fallback",
-                footer: "When a CLI login is missing or expired, read your signed-in browser session instead. Chromium browsers ask once for Keychain access.")
-            {
-                let _ = settings.browserFallbackRevision
-                let ids = ProviderID.allCases.filter(\.hasBrowserFallback)
-                ForEach(ids, id: \.self) { id in
-                    SettingsToggle(isOn: Binding(
-                        get: { settings.isBrowserFallbackEnabled(id) },
-                        set: {
-                            settings.setBrowserFallback(id, $0)
-                            if $0 { Task { await model.refresh(force: true) } }
-                        }),
-                        first: id == ids.first)
-                    {
-                        Text("\(id.displayName) via \(id.webDomain)")
-                    }
-                }
-            }
+            OtherLoginsSection(model: model)
             SettingsSection("General") {
                 SettingsToggle(isOn: $settings.launchAtLogin, first: true) { Text("Launch at login") }
                 SettingsToggle(isOn: $settings.notificationsEnabled) { Text("Notify when a limit is nearly used up") }
@@ -1215,15 +1174,314 @@ private struct SettingsPage: View {
     }
 }
 
+/// A subscription on Settings' first level: whether it's on and whose it is, opening its page.
+private struct SubscriptionRow: View {
+    let model: AppModel
+    let id: ProviderID
+    var first = false
+    let open: () -> Void
+
+    private var status: String {
+        guard let state = model.providers[id] else { return "Off" }
+        if state.hasSeveralAccounts { return "\(state.accounts.count) accounts" }
+        return model.defaultLoginName(id) ?? "On"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !first { Divider().padding(.leading, 14) }
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    ProviderDot(id: id, size: 7)
+                    Text(id.displayName).font(.system(size: 13))
+                    Spacer(minLength: 8)
+                    Text(status)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(id.displayName), \(status)")
+        }
+    }
+}
+
+/// One subscription's settings: whether Tinybar reads it, its logins and where each comes from,
+/// and its browser fallback.
+private struct SubscriptionPage: View {
+    let model: AppModel
+    let id: ProviderID
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsSection(nil, footer: id == .copilot
+                ? "Copilot reads your Copilot CLI, editor plugin or gh login. If only the Copilot CLI has it, macOS asks for Keychain access: choose Always Allow."
+                : nil)
+            {
+                SettingsToggle(isOn: Binding(get: { model.providers[id] != nil }, set: { model.setEnabled(id, $0) }), first: true) {
+                    Text("Show \(id.displayName)")
+                }
+            }
+            if LoginFolderKind.of(id) != nil {
+                AccountsSection(model: model, id: id)
+            }
+            if id.hasBrowserFallback {
+                SettingsSection(
+                    "Browser fallback",
+                    footer: "When the CLI login is missing or expired, read your signed-in browser session instead. Chromium browsers ask once for Keychain access.")
+                {
+                    let _ = settings.browserFallbackRevision
+                    SettingsToggle(isOn: Binding(
+                        get: { settings.isBrowserFallbackEnabled(id) },
+                        set: {
+                            settings.setBrowserFallback(id, $0)
+                            if $0 { Task { await model.refresh(force: true) } }
+                        }),
+                        first: true)
+                    {
+                        Text("Read \(id.webDomain)")
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
+/// One subscription's logins and where each comes from (SPEC §15).
+private struct AccountsSection: View {
+    let model: AppModel
+    let id: ProviderID
+
+    private enum Row: Hashable {
+        case main
+        case folder(LoginFolder)
+        case swap
+        case user(id: String, name: String, place: String)
+    }
+
+    /// The default login first, then the others in the order they're found.
+    private var rows: [Row] {
+        var rows: [Row] = [.main]
+        rows += model.loginFolders.filter { $0.provider == id }.map(Row.folder)
+        if id == .claude, model.isClaudeSwapInstalled { rows.append(.swap) }
+        if id == .copilot {
+            rows += (model.providers[id]?.accounts ?? []).compactMap { account in
+                model.copilotUserPlaces[account.id].map { Row.user(id: account.id, name: account.displayName, place: $0) }
+            }
+        }
+        return rows
+    }
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        SettingsSection("Accounts", footer: footer) {
+            ForEach(Array(rows.enumerated()), id: \.element) { i, row in
+                switch row {
+                case .main:
+                    AccountSourceRow(
+                        id: id, name: model.defaultLoginName(id) ?? "\(id.displayName) login",
+                        detail: LoginFolderKind.defaultFolder(of: id).map { "Default · \(Paths.abbreviated($0))" } ?? "Default",
+                        first: i == 0) { EmptyView() }
+                case let .folder(folder):
+                    AccountSourceRow(
+                        id: folder.provider, name: model.loginFolderNames[folder] ?? folder.place,
+                        detail: folder.isAdded ? "Added · \(folder.place)" : folder.place, first: i == 0)
+                    {
+                        if folder.isAdded {
+                            RemoveButton { model.removeLoginFolder(folder.url) }
+                        } else {
+                            Toggle("", isOn: Binding(
+                                get: { settings.isLoginFolderEnabled(folder) },
+                                set: { model.setLoginFolder(folder, enabled: $0) }))
+                                .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                        }
+                    }
+                case let .user(_, name, place):
+                    AccountSourceRow(id: id, name: name, detail: place, first: i == 0) {
+                        EmptyView()
+                    }
+                case .swap:
+                    SettingsToggle(isOn: Binding(
+                        get: { settings.readClaudeSwap },
+                        set: { model.setReadClaudeSwap($0) }),
+                        first: i == 0)
+                    {
+                        Text("Read accounts from claude-swap")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Where else Tinybar looks for this subscription's logins.
+    private var footer: String {
+        if id == .claude, let error = model.claudeSwapError { return "claude-swap: \(error)." }
+        var parts: [String] = []
+        if let prefix = LoginFolderKind.of(id)?.homePrefix {
+            parts.append("Folders in your home starting with \(prefix) are read too.")
+        }
+        if id == .copilot { parts.append("So is every user the Copilot CLI and gh are signed in as.") }
+        parts.append("Add a login kept elsewhere under Other logins in Settings.")
+        if id == .claude, model.isClaudeSwapInstalled {
+            parts.append("claude-swap may renew idle logins itself when Tinybar asks for their limits.")
+        }
+        return parts.joined(separator: " ")
+    }
+}
+
+/// Adding a login kept anywhere else, by hand or by the user's agent, and the added folders that
+/// hold none Tinybar can read (SPEC §15).
+private struct OtherLoginsSection: View {
+    let model: AppModel
+    @State private var copied = false
+
+    var body: some View {
+        SettingsSection(
+            "Other logins",
+            footer: "For a login kept outside the folders Tinybar looks in, like another app's CODEX_HOME. Your coding agent can find them from the prompt.")
+        {
+            ForEach(Array(model.addedFoldersWithoutLogin.enumerated()), id: \.element) { i, url in
+                AccountSourceRow(
+                    id: nil, name: Paths.abbreviated(url),
+                    detail: Paths.isDefaultConfigDir(url) ? "A default login, read already" : "No login Tinybar can read here",
+                    first: i == 0)
+                {
+                    RemoveButton { model.removeLoginFolder(url) }
+                }
+            }
+            VStack(spacing: 0) {
+                if !model.addedFoldersWithoutLogin.isEmpty { Divider().padding(.leading, 14) }
+                HStack {
+                    Button("Add folder…") { LoginFolderPicker.choose(model: model) }
+                        .help("A login folder kept anywhere else, like a CODEX_HOME")
+                    Spacer(minLength: 8)
+                    Button(copied ? "Copied" : "Copy prompt for your agent") {
+                        let pasteboard = NSPasteboard.general
+                        pasteboard.clearContents()
+                        pasteboard.setString(AddedLoginFolders.agentPrompt(domain: Self.domain), forType: .string)
+                        copied = true
+                    }
+                    .help("Paste it into your coding agent: it finds the logins and adds them here")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
+            .task(id: copied) {
+                guard copied else { return }
+                try? await Task.sleep(for: .seconds(2))
+                copied = false
+            }
+        }
+    }
+
+    /// Where Tinybar's settings live, for the agent's `defaults write`.
+    private static var domain: String { Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName }
+}
+
+/// One login: whose it is, and where Tinybar reads it.
+private struct AccountSourceRow<Trailing: View>: View {
+    let id: ProviderID?
+    let name: String
+    let detail: String
+    var first = false
+    @ViewBuilder let trailing: Trailing
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !first { Divider().padding(.leading, 14) }
+            HStack(spacing: 8) {
+                if let id { ProviderDot(id: id, size: 7) } else { Circle().fill(.quaternary).frame(width: 7, height: 7) }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                    Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                .help(detail)
+                Spacer(minLength: 8)
+                trailing
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+}
+
+private struct RemoveButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "minus.circle").font(.system(size: 13))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("Stop reading this folder")
+        .accessibilityLabel("Remove")
+    }
+}
+
+/// Picks a login folder anywhere on the Mac. The panel turns down a folder with no login before it
+/// closes, since the popover it came from has closed by then.
+@MainActor
+private enum LoginFolderPicker {
+    private static var check: FolderCheck?
+
+    static func choose(model: AppModel) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.prompt = "Add"
+        panel.message = "Choose a folder holding a Claude Code, Codex, Grok, Copilot CLI or OpenCode login."
+        let check = FolderCheck()
+        self.check = check
+        panel.delegate = check
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { response in
+            self.check = nil
+            if response == .OK, let url = panel.url { model.addLoginFolder(url) }
+            model.showPopover()
+        }
+    }
+
+    private final class FolderCheck: NSObject, NSOpenSavePanelDelegate {
+        func panel(_ sender: Any, validate url: URL) throws {
+            if Paths.isDefaultConfigDir(url) {
+                throw refusal("Tinybar already reads this login: it's a CLI's default one.")
+            }
+            if AddedLoginFolders.providers(in: url).isEmpty {
+                throw refusal("There's no login Tinybar can read in this folder. Choose the folder a CLI keeps its login in, like a CODEX_HOME.")
+            }
+        }
+
+        private func refusal(_ message: String) -> NSError {
+            NSError(domain: "Tinybar", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+}
+
 /// A titled platter of rows, like the limit cards. Drawn by hand
 /// rather than with a grouped `Form`, whose section backgrounds mis-measure in the fixed-size
 /// popover and leave the last row outside its card.
 private struct SettingsSection<Content: View>: View {
-    let title: String
+    let title: String?
     var footer: String?
     @ViewBuilder let content: Content
 
-    init(_ title: String, footer: String? = nil, @ViewBuilder content: () -> Content) {
+    init(_ title: String?, footer: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.footer = footer
         self.content = content()
@@ -1231,9 +1489,11 @@ private struct SettingsSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.horizontal, 4)
+            if let title {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 4)
+            }
             VStack(spacing: 0) { content }
                 .platter()
             if let footer {

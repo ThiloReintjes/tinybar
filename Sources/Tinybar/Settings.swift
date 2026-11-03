@@ -104,6 +104,24 @@ final class Settings {
         if enabled { loginFoldersOff.remove(folder.id) } else { loginFoldersOff.insert(folder.id) }
     }
 
+    /// Login folders added anywhere on the Mac. Read afresh, as the user's agent may add one with
+    /// `defaults write` while Tinybar runs (SPEC §15).
+    var addedLoginFolders: [URL] { AddedLoginFolders.urls(defaults) }
+
+    func addLoginFolder(_ url: URL) {
+        let url = url.standardizedFileURL
+        guard !addedLoginFolders.contains(where: { $0.path == url.path }) else { return }
+        defaults.set((defaults.stringArray(forKey: AddedLoginFolders.key) ?? []) + [url.path], forKey: AddedLoginFolders.key)
+    }
+
+    func removeLoginFolder(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        let kept = (defaults.stringArray(forKey: AddedLoginFolders.key) ?? []).filter {
+            AddedLoginFolders.urls(from: [$0]).first?.path != path
+        }
+        defaults.set(kept, forKey: AddedLoginFolders.key)
+    }
+
     // MARK: Browser fallback
 
     /// Read from provider fetches off the main actor, so kept in a thread-safe box.

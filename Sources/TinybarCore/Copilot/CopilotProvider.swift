@@ -20,8 +20,9 @@ public struct CopilotProvider: UsageProvider {
         self.session = session
     }
 
+    /// Any login readable without a prompt, the current CLI user's or another's.
     public func isConfigured() -> Bool {
-        logins.find(optedIn: false) != nil
+        !logins.all(optedIn: false).isEmpty
     }
 
     public func identity() -> LoginIdentity? {
@@ -43,6 +44,61 @@ public struct CopilotProvider: UsageProvider {
         guard HTTP.isHeaderSafe(token) else { throw ProviderError.loginExpired }
         return try await CopilotUsageAPI.fetch(origin: origin, token: token, session: session)
     }
+
+    /// Every other user the Copilot CLI or `gh` is signed in as, each read on its own (SPEC §15).
+    /// The same opt-in applies as to the main login.
+    public func otherUsers() -> [CopilotUser] {
+        let optedIn = isOptedIn()
+        let main = logins.find(optedIn: optedIn)
+        return logins.all(optedIn: optedIn).filter { !$0.isSameLogin(as: main) }.map { login in
+            var pinned = logins
+            pinned.pinned = login
+            return CopilotUser(
+                provider: CopilotProvider(logins: pinned, isOptedIn: isOptedIn, session: session),
+                place: "\(login.source == .gh ? "gh" : "Copilot CLI") · \(login.hostName)")
+        }
+    }
+}
+
+/// Another user the Copilot CLI or `gh` holds.
+public struct CopilotUser: Sendable {
+    public let provider: CopilotProvider
+    /// Which program holds the login, and for which host.
+    public let place: String
+
+    /// Its Account's id, known before asking for any numbers, so a rate limit can be waited out.
+    /// Only an editor plugin's login can lack a name, and there is one of those: it gets the id it
+    /// has as the main login, so a pin on it holds whichever role it's in.
+    public var accountID: String {
+        provider.identity()?.accountID ?? LoginIdentity.accountID(place: ProviderID.copilot.rawValue)
+    }
+
+    /// Its Account with fresh numbers, or nil when the user has no Copilot plan or it ended, which
+    /// makes it no subscription at all: a GitHub account `gh` holds for other work. A token that
+    /// can't be read stays an Account, Stale, so one read before keeps its numbers and its pin.
+    public func account() async -> Account? {
+        var account = blank()
+        do {
+            account.snapshot = try await provider.fetch()
+        } catch let error as ProviderError {
+            if error == CopilotUsageAPI.noPlan || error == CopilotUsageAPI.ended { return nil }
+            account.error = error
+        } catch {
+            account.error = .unexpected(error.localizedDescription)
+        }
+        return account
+    }
+
+    /// Its Account while it waits out a rate limit: Stale, without asking for numbers.
+    public func waitingAccount() -> Account {
+        var account = blank()
+        account.error = .rateLimited(retryAfter: nil)
+        return account
+    }
+
+    private func blank() -> Account {
+        Account(id: accountID, name: provider.identity()?.email ?? place, loginHint: ProviderID.copilot.loginHint)
+    }
 }
 
 /// The logins on this Mac that can read Copilot's limits.
@@ -56,6 +112,19 @@ struct CopilotLogins: Sendable {
         var name: String?
         /// Holds a secret, so it stays out of logs and errors.
         var storedToken: String?
+
+        /// GitHub ignores the case of a login.
+        func isSameUser(as other: Login?) -> Bool {
+            guard let other, let name, let otherName = other.name else { return false }
+            return hostName.lowercased() == other.hostName.lowercased() && name.caseInsensitiveCompare(otherName) == .orderedSame
+        }
+
+        /// The same user, or, as an editor plugin's login may have no name, the same token.
+        func isSameLogin(as other: Login?) -> Bool {
+            guard let other else { return false }
+            if self == other || isSameUser(as: other) { return true }
+            return storedToken != nil && storedToken == other.storedToken && hostName.lowercased() == other.hostName.lowercased()
+        }
 
         /// As `gh` names a host.
         var hostName: String {
@@ -71,6 +140,10 @@ struct CopilotLogins: Sendable {
     var gh: @Sendable (_ host: String, _ user: String?) -> String? = { _, _ in nil }
     /// The Copilot CLI's Keychain item, by its account (`host:login`).
     var keychain: @Sendable (_ account: String) -> String? = { _ in nil }
+    /// Only the Copilot CLI's own user counts: a folder other than the default one.
+    var cliOnly = false
+    /// The one login to read, for another user than the one `find` would pick.
+    var pinned: Login?
 
     static let keychainService = "copilot-cli"
 
@@ -79,8 +152,46 @@ struct CopilotLogins: Sendable {
     /// is in use, wait for the user to opt in: one shows a macOS prompt, the other would put a "no
     /// Copilot plan" card in front of everyone signed in to GitHub.
     func find(optedIn: Bool) -> Login? {
-        if let cli = cliUser(), cli.storedToken != nil || optedIn || ghName(for: cli) != nil { return cli }
+        // `gh`'s users wait for the opt-in, which can be withdrawn while they are read one by one.
+        if let pinned { return pinned.source == .gh && !optedIn ? nil : pinned }
+        // A folder's user is named either way: its token is the only thing that may need a prompt.
+        if cliOnly { return cliUser() }
+        if let cli = cliUser(), isUsable(cli, optedIn: optedIn) { return cli }
         return editorLogin() ?? (optedIn ? ghActiveLogin() : nil)
+    }
+
+    private func isUsable(_ cli: Login, optedIn: Bool) -> Bool {
+        cli.storedToken != nil || optedIn || ghName(for: cli) != nil
+    }
+
+    /// Every login that can read Copilot's limits, in `find`'s order: each user the Copilot CLI is
+    /// signed in as, an editor plugin's, then each user `gh` holds for a host Copilot answers on.
+    /// A user found twice counts once.
+    func all(optedIn: Bool) -> [Login] {
+        var logins = cliUsers().filter { isUsable($0, optedIn: optedIn) }
+        if !cliOnly {
+            logins += [editorLogin()].compactMap { $0 }
+            if optedIn { logins += ghLogins() }
+        }
+        // A user found twice is read through the copy whose token needs no program or prompt.
+        var seen: [Login] = []
+        for login in logins {
+            if let i = seen.firstIndex(where: { $0.isSameLogin(as: login) }) {
+                if seen[i].storedToken == nil, login.storedToken != nil { seen[i] = login }
+            } else {
+                seen.append(login)
+            }
+        }
+        return seen
+    }
+
+    /// The Copilot CLI's user alone, in a folder other than the default one. No editor plugin or
+    /// `gh` login stands in for it there: that would be the default login's account again.
+    static func folder(_ url: URL) -> CopilotLogins {
+        var logins = CopilotLogins()
+        logins.cliHome = url
+        logins.cliOnly = true
+        return logins
     }
 
     /// nil when no source can give the login's token any more.
@@ -96,13 +207,25 @@ struct CopilotLogins: Sendable {
 
     /// `config.json` names the current user. Its token is in the Keychain, or in the same file where
     /// there is no Keychain. 1.x starts the file with `//` comments and renamed the keys to camelCase.
-    private func cliUser() -> Login? {
+    func cliUser() -> Login? {
         guard let config = Self.json(cliHome.appendingPathComponent("config.json")) else { return nil }
         let user = (config["lastLoggedInUser"] ?? config["last_logged_in_user"]) as? [String: Any]
             ?? ((config["loggedInUsers"] ?? config["logged_in_users"]) as? [[String: Any]])?.first
-        guard let host = Self.text(user?["host"]), let name = Self.text(user?["login"]) else { return nil }
+        return Self.cliLogin(user, in: config)
+    }
+
+    /// Everyone the CLI is signed in as, its current user first.
+    private func cliUsers() -> [Login] {
+        guard let config = Self.json(cliHome.appendingPathComponent("config.json")) else { return [] }
+        let users = ((config["loggedInUsers"] ?? config["logged_in_users"]) as? [[String: Any]]) ?? []
+        return [cliUser()].compactMap { $0 } + users.compactMap { Self.cliLogin($0, in: config) }
+    }
+
+    /// A user as `config.json` lists one, with its token where the file holds it.
+    private static func cliLogin(_ user: [String: Any]?, in config: [String: Any]) -> Login? {
+        guard let host = text(user?["host"]), let name = text(user?["login"]) else { return nil }
         let tokens = (config["copilotTokens"] ?? config["copilot_tokens"]) as? [String: Any]
-        return Login(source: .cli, host: host, name: name, storedToken: Self.text(tokens?["\(host):\(name)"]))
+        return Login(source: .cli, host: host, name: name, storedToken: text(tokens?["\(host):\(name)"]))
     }
 
     // MARK: Editor plugins
@@ -155,6 +278,15 @@ struct CopilotLogins: Sendable {
         return ghUsers(host: login.hostName)?.all.first { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 
+    /// Every user `gh` holds for github.com and GitHub Enterprise Cloud hosts, active ones first.
+    private func ghLogins() -> [Login] {
+        let hosts = ghLines?.filter { !$0.hasPrefix(" ") && $0.hasSuffix(":") }.map { String($0.dropLast()) } ?? []
+        return hosts.filter { $0 == "github.com" || $0.hasSuffix(".ghe.com") }.flatMap { host -> [Login] in
+            guard let users = ghUsers(host: host) else { return [] }
+            return ([users.active].compactMap { $0 } + users.all).map { Login(source: .gh, host: "https://\(host)", name: $0) }
+        }
+    }
+
     /// github.com's active user, else that of the first GitHub Enterprise Cloud host `gh` holds.
     private func ghActiveLogin() -> Login? {
         let hosts = ghLines?.filter { !$0.hasPrefix(" ") && $0.hasSuffix(":") }.map { String($0.dropLast()) } ?? []
@@ -189,10 +321,14 @@ extension CopilotLogins {
                 + (help.contains("--no-refresh") ? ["--no-refresh"] : [])
             return ChildProcess.output(of: gh, arguments, timeout: 10)
         }
-        // Its access list holds only the Copilot CLI, so this asks the user. Give them time to answer.
-        keychain = Self.untilRefused { account in
-            ChildProcess.output(of: "/usr/bin/security", ["find-generic-password", "-s", Self.keychainService, "-a", account, "-w"], timeout: 60)
-        }
+        keychain = Self.keychainUntilRefused
+    }
+
+    /// Its access list holds only the Copilot CLI, so this asks the user. Give them time to answer.
+    /// One for the whole app: a folder's logins are made afresh on every fetch, and a refusal must
+    /// outlast them.
+    private static let keychainUntilRefused = untilRefused { account in
+        ChildProcess.output(of: "/usr/bin/security", ["find-generic-password", "-s", keychainService, "-a", account, "-w"], timeout: 60)
     }
 
     /// A prompt that was refused or left unanswered isn't shown again for that account until the next

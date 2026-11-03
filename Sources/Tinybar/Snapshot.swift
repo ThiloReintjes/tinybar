@@ -118,10 +118,22 @@ enum PopoverSnapshot {
                 }
                 exit(0)
             }
-            // `--page claude` or `--page settings` renders that page instead of the overview.
+            // `--page claude`, `--page settings` or `--page settings/codex` renders that page instead of the overview.
             var page = Page.overview
+            var subscription = ProviderID.claude
             if let p = args.firstIndex(of: "--page"), p + 1 < args.count {
-                page = args[p + 1] == "settings" ? .settings : args[p + 1] == "about" ? .about : ProviderID(rawValue: args[p + 1]).map(Page.provider) ?? .overview
+                let name = args[p + 1]
+                let prefix = "settings/"
+                if name.hasPrefix(prefix), let id = ProviderID(rawValue: String(name.dropFirst(prefix.count))) {
+                    page = .subscription
+                    subscription = id
+                } else if name == "settings" {
+                    page = .settings
+                } else if name == "about" {
+                    page = .about
+                } else {
+                    page = ProviderID(rawValue: name).map(Page.provider) ?? .overview
+                }
             }
             // `--backdrop` stands in for the worst case behind the glass: a bright window under a
             // dark popover, a dark one under a light popover.
@@ -129,7 +141,7 @@ enum PopoverSnapshot {
             for (appearance, suffix) in [(NSAppearance.Name.darkAqua, ".dark"), (.aqua, "")] {
                 let fill = !backdrop ? Color(nsColor: .windowBackgroundColor)
                     : appearance == .darkAqua ? Color(white: 0.58) : Color(white: 0.22)
-                let host = NSHostingView(rootView: PopoverView(model: model, page: page).background(fill))
+                let host = NSHostingView(rootView: PopoverView(model: model, page: page, subscription: subscription).background(fill))
                 host.appearance = NSAppearance(named: appearance)
                 let size = host.fittingSize
                 let window = NSWindow(
@@ -214,6 +226,12 @@ private enum AccountsDemo {
         case "many":
             folders[side] = account(.claude, "side@example.com", session: 92, sessionIn: 3.7, weekly: 88, weeklyIn: 145,
                                     error: .loginExpired, hint: side.loginHint)
+            let added = LoginFolder(
+                provider: .codex, url: Paths.home.appendingPathComponent("Library/Application Support/Switcher/homes/A1", isDirectory: true),
+                isAdded: true)
+            folders[added] = account(.codex, "team@example.com", plan: "Team", session: 8, sessionIn: 4.2, weekly: 31, weeklyIn: 101)
+            defaults[.grok] = account(.grok, "me@example.com", plan: "SuperGrok", active: true, session: nil, weekly: 44, weeklyIn: 90)
+            folders[folder(.grok, ".grok_work")] = account(.grok, "work@example.com", plan: "SuperGrok Heavy", session: nil, weekly: 12, weeklyIn: 60)
             swap = [
                 account(.claude, "client-a@example.com", session: 0, weekly: 10, weeklyIn: 27),
                 account(.claude, "client-b@example.com", session: 26, sessionIn: 4, weekly: 35, weeklyIn: 122),

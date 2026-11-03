@@ -183,7 +183,10 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
    prices and Stats come from, what stays on the Mac, and how much of the last 30 days' tokens
    Activity was counted from when that is short of all.
 
-**Settings** (replaces the page, back with Esc): Provider toggles, a toggle per extra login folder and "Read accounts from claude-swap" (§15), launch at login, notifications, the browser cookie fallback per Provider (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key), hide percentage, and Auto for the menu bar. The running version sits at the bottom, next to a Report a bug link that opens the GitHub bug form with the version and macOS filled in.
+**Settings** (replaces the page, back with Esc): two levels, so the first fits at a glance.
+- **First level**: Subscriptions, a row per Provider with its state ("Off", its email, "3 accounts") opening its page; Other logins: Add folder… and Copy prompt for your agent, with any added folder that holds no login (§15); General: launch at login, notifications, hide percentage, and Auto for the menu bar. The running version sits at the bottom, next to a Report a bug link that opens the GitHub bug form with the version and macOS filled in.
+- **A subscription's page** slides in from the right, and Back or Esc returns to the first level: Show <Provider>, its Accounts with where each is read from (the default login, a folder found in the home folder with its toggle, an added folder with a remove button, other Copilot users, "Read accounts from claude-swap"), and for Claude and Codex the browser cookie fallback (off by default; enabling it may trigger a macOS Keychain prompt for the browser's storage key).
+- A Provider is on by default only when its login is found; one turned on or off by hand stays that way.
 
 ### Run-out Time
 - Pace = % used ÷ time since the window started (Reset minus duration). Run-out Time = now + % left ÷ pace.
@@ -210,7 +213,7 @@ view, so switching never rebuilds or resizes anything. Long pages scroll inside.
 ### Sources
 - **Claude**: `~/.claude/projects/**/*.jsonl`. Assistant messages with `usage` (input, output, cache creation, cache read), `model`, `timestamp`, `cwd`. De-duplicate by message id; the same response can appear several times, and the most complete copy wins.
 - **Codex**: `~/.codex/sessions/**` (and archived sessions). Token counts are cumulative per session, so store deltas and handle forked sessions without double counting.
-- **Every Account together**: the same logs of each extra login folder and of `cswap run` profiles (`~/.claude-swap-backup/sessions/*/projects`), where those folders exist, looked for on each ingest. These are read whether or not the Account is toggled on or claude-swap is turned on, because they are only local logs. Folders that resolve to the same place count once. Token history stays per Provider: after `cswap switch`, nothing in a log says which Account made a request.
+- **Every Account together**: the same logs of each extra login folder, added ones included, and of `cswap run` profiles (`~/.claude-swap-backup/sessions/*/projects`), where those folders exist, looked for on each ingest. These are read whether or not the Account is toggled on or claude-swap is turned on, because they are only local logs. Folders that resolve to the same place count once. Token history stays per Provider: after `cswap switch`, nothing in a log says which Account made a request.
 
 - **OpenCode**: `opencode.db`, as a copy of the database and its WAL (a clone on APFS). Finished `message` rows (1.x) and `session_message` rows (2.x, assistant and compaction) whose provider is `opencode-go`; everything else is left out (ADR 0009). `output` plus `reasoning` counts as output. Forks and the upgrade to 2.x copy rows under new ids, so a response is identified by its time, model and tokens. Each read starts 10 minutes before the newest row seen, never counted past now, and is skipped while the database and WAL are unchanged. No Activity.
 
@@ -457,16 +460,21 @@ and hides.
 - **How this is worked out**: a button at the bottom opens the workings, the assumptions and the
   source in a popover. The copied image leaves it out.
 
-## 15. Accounts (ADR 0010)
+## 15. Accounts (ADR 0010, ADR 0013)
 
 A Provider has one or more Accounts, and its own Limit Windows are their Pool. With one Account, everything works as it did before Accounts.
 
 ### Where Accounts come from
 1. **The default login**: §4. This is the Active Account. It keeps being fetched directly, so it keeps its plan name, Banked Resets and fallbacks, whatever else is on.
-2. **Extra login folders**: folders directly in the home directory named `.claude*` or `.codex*` that hold a login, looked for on every check, because a GUI app can't see the shell's `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Each has a toggle in Settings, on by default, and one found after launch can enable its Provider, unless the user turned that off. Strictly read-only, like the default login (ADR 0001).
+2. **Extra login folders**: folders directly in the home directory named `.claude*`, `.codex*`, `.grok*` or `.copilot*` that hold a login, looked for on every check, because a GUI app can't see the shell's `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME` or `COPILOT_HOME`. Each has a toggle in Settings, on by default, and one found after launch can enable its Provider, unless the user turned that off. Strictly read-only, like the default login (ADR 0001).
    - **Claude**: `<folder>/.credentials.json`, else the Keychain item `Claude Code-credentials-<first 8 hex digits of the SHA-256 of the folder's path>`, read through `/usr/bin/security`. Presence is checked with an attribute-only lookup. Name and identity come from `oauthAccount` in `<folder>/.claude.json`. The fix for an expired login names the folder: run `CLAUDE_CONFIG_DIR=~/.claude_side claude` once.
    - **Codex**: `<folder>/auth.json`, with the email in its `id_token`. The fix: run `CODEX_HOME=~/.codex_alt codex` once.
-3. **claude-swap**: off by default, turned on in Settings, where its note says it may renew idle logins itself. Display only: Tinybar never switches accounts.
+   - **Grok**: `<folder>/auth.json`, read as the default login is (ADR 0012), with the same custom-deployment checks. The fix: `GROK_HOME=~/.grok_work grok login`.
+   - **Copilot**: `<folder>/config.json` names the Copilot CLI's user. Its token is the file's, or `gh`'s for the same user, or, for a folder the user added, the Keychain's, which may ask. An editor plugin's or `gh`'s other logins never stand in for a folder's. The fix: `COPILOT_HOME=~/.copilot_work copilot login`.
+   - **OpenCode Go**: a data folder (`$XDG_DATA_HOME/opencode`) holding `opencode.db` or `auth.json`, read as the default one is (§4). The home folder names none of these, so they are only added. Limits only: token history stays with the default database.
+   - **Added folders**: a login kept anywhere else (another tool's store, a `CODEX_HOME` in `~/.config`) is added by hand, never searched for: Tinybar doesn't depend on where other apps keep theirs. Settings → Other logins has **Add folder…**, a folder picker that turns down a folder with no login, and **Copy prompt for your agent**, a prompt for the user's coding agent to find such folders by checking only that the files exist, and add each with `defaults write <domain> addedLoginFolders -array-add <path>`. The prompt, the picker's check and the home-folder names all come from one table of CLIs. The list is read afresh on every check, so a folder added from outside shows up on the next one. One folder can hold several CLIs' logins; `auth.json` is Codex's, Grok's and OpenCode's, so each CLI's own reading decides. Added folders are read like the others, Claude's and Codex's logs count (§9), and the fix for an expired login names the whole path. One without a login stays listed as such until removed.
+3. **Other Copilot users**: every user the Copilot CLI is signed in as (`loggedInUsers`), an editor plugin's login, and every user `gh` holds for github.com or a `*.ghe.com` host, other than the default login. The default login's rules apply: a token that takes a Keychain prompt, and `gh`'s users, only once the user turned Copilot on. A user with no Copilot plan is left out, as `gh` holds GitHub accounts used for other work. Shown in Settings with what holds it ("gh · github.com").
+4. **claude-swap**: off by default, turned on in Settings, where its note says it may renew idle logins itself. Display only: Tinybar never switches accounts.
    - Runs exactly `cswap list --json` on the normal poll: no shell, no other arguments, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`. Terminated after 30 s, and output over 256 KB is rejected.
    - Requires `schemaVersion` 1. Anything else, a failure or an error object keeps the last good reading and marks those Accounts Stale, says why in Settings, and never touches the default login.
    - Reads only `number`, `email`, `organizationUuid`, `organizationName`, `alias`, `active`, `disabled`, `usageStatus`, `usage` (`fiveHour`, `sevenDay`, `scoped`, `spend`), `lastGoodUsage` and their fetch times. A reading is dated by its own fetch time, not by when `cswap` ran. Raw output is never logged or kept.
@@ -475,7 +483,7 @@ A Provider has one or more Accounts, and its own Limit Windows are their Pool. W
 
 The browser fallback's numbers (§4) aren't filed under the CLI's login, since that browser may be signed in as someone else: the default login then counts as having no readable email.
 
-Cursor, Gemini, OpenCode Go, Copilot and Grok have only the default login.
+Cursor and Gemini have only the default login: Cursor keeps one per app, and the Antigravity CLI always uses `~/.gemini/antigravity-cli`.
 
 ### Identity and names
 - An Account's identity is its email and organization, lowercased, and pins, alert state and `limit_reading` store only a SHA-256 hash of them. (Log paths in `file_cursor` can still name one: claude-swap names its `cswap run` profiles after the account.) An Account with no readable email uses a hash of its folder's path. The same identity found twice is one Account; the default login wins, then a folder, then claude-swap.

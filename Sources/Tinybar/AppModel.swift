@@ -32,8 +32,20 @@ final class AppModel {
     private var folderAccounts: [LoginFolder: Account] = [:]
     private var folderBackoff: [LoginFolder: Date] = [:]
     private var swapAccounts: [Account] = []
+    /// Other users the Copilot CLI or `gh` holds, and which of them holds each, by Account id.
+    private var copilotUsers: [Account] = []
+    /// Every Copilot login by Account id, whether it is the main login or another user right now:
+    /// a user can switch roles at any time. When a rate-limited one may be asked again (SPEC §5),
+    /// and the last reading each had.
+    private var copilotBackoff: [String: Date] = [:]
+    private var copilotLast: [String: ProviderSnapshot] = [:]
+    private(set) var copilotUserPlaces: [String: String] = [:]
     /// Extra login folders found on this Mac, on or off.
     private(set) var loginFolders: [LoginFolder] = []
+    /// Each folder's email, else where it is, for Settings.
+    private(set) var loginFolderNames: [LoginFolder: String] = [:]
+    /// Added folders with no login Tinybar can read, so Settings can say so.
+    private(set) var addedFoldersWithoutLogin: [URL] = []
     private(set) var isClaudeSwapInstalled = false
     /// Why claude-swap's accounts couldn't be read on the last try.
     private(set) var claudeSwapError: String?
@@ -93,7 +105,10 @@ final class AppModel {
         store = try? ProcessInfo.processInfo.environment["TINYBAR_DB"].map { try UsageStore(path: URL(fileURLWithPath: $0)) }
             ?? UsageStore()
         alertPlanner = settings.loadAlertState()
-        loginFolders = LoginFolders.find()
+        let added = settings.addedLoginFolders
+        loginFolders = LoginFolders.find(added: added)
+        loginFolderNames = Self.names(of: loginFolders)
+        addedFoldersWithoutLogin = Self.withoutLogin(added, found: loginFolders)
         isClaudeSwapInstalled = ClaudeSwap.locate() != nil
         for (id, source) in sources
         where settings.isEnabled(id, detected: source.isConfigured() || loginFolders.contains { $0.provider == id }) {
@@ -184,9 +199,15 @@ final class AppModel {
 
         let now = Date()
         let swap = settings.readClaudeSwap ? ClaudeSwap.locate() : nil
-        (loginFolders, isClaudeSwapInstalled) = await Task.detached(priority: .utility) {
-            (LoginFolders.find(), ClaudeSwap.locate() != nil)
+        let added = settings.addedLoginFolders
+        (loginFolders, loginFolderNames, isClaudeSwapInstalled) = await Task.detached(priority: .utility) {
+            let found = LoginFolders.find(added: added)
+            return (found, Self.names(of: found), ClaudeSwap.locate() != nil)
         }.value
+        // One removed while that ran stays removed.
+        let stillAdded = Set(settings.addedLoginFolders.map(\.path))
+        loginFolders.removeAll { $0.isAdded && !stillAdded.contains($0.url.standardizedFileURL.path) }
+        addedFoldersWithoutLogin = Self.withoutLogin(added.filter { stillAdded.contains($0.path) }, found: loginFolders)
         // A folder found since launch can be a Provider's first login. One the user turned off stays off.
         for id in Set(loginFolders.map(\.provider)) where providers[id] == nil && settings.isEnabled(id, detected: true) {
             providers[id] = disabledProviders.removeValue(forKey: id) ?? ProviderState()
@@ -207,10 +228,15 @@ final class AppModel {
                 providers[id, default: ProviderState()].lastAttempt = now
                 let waiting = state.backoffUntil.map { $0 > now } ?? false
                 let waitingLogin = state.backoffLogin
+                // A Copilot user waiting out a rate limit isn't asked, in either role.
+                let copilotOnHold = id == .copilot ? Set(copilotBackoff.filter { $0.value > now }.keys) : []
                 group.addTask {
                     let identity = source.identity()
                     // A wait is for the login that was asked to. Switched to another, it doesn't apply.
-                    if waiting, Self.loginID(id, identity) == waitingLogin { return nil }
+                    let asked = Self.loginID(id, identity)
+                    if waiting && asked == waitingLogin { return nil }
+                    // It still becomes the main login, Stale while it waits, with any reading it had.
+                    if copilotOnHold.contains(asked) { return .login(id, identity, .failure(.rateLimited(retryAfter: nil))) }
                     return .login(id, identity, await Self.result { try await source.fetch() })
                 }
                 for folder in folders where folder.provider == id {
@@ -221,6 +247,19 @@ final class AppModel {
                 }
                 if id == .claude, let swap {
                     group.addTask { .swap(await Self.result { try ClaudeSwap.read(executable: swap) }) }
+                }
+                if let copilot = source as? CopilotProvider {
+                    group.addTask {
+                        var found: [(Account, String)] = []
+                        for user in copilot.otherUsers() {
+                            if copilotOnHold.contains(user.accountID) {
+                                found.append((user.waitingAccount(), user.place))
+                            } else if let account = await user.account() {
+                                found.append((account, user.place))
+                            }
+                        }
+                        return .copilotUsers(found, asked: Set(found.map(\.0.id)).subtracting(copilotOnHold))
+                    }
                 }
             }
             for await result in group {
@@ -279,6 +318,7 @@ final class AppModel {
         case login(ProviderID, LoginIdentity?, Result<ProviderSnapshot, ProviderError>)
         case folder(LoginFolder, Account, Result<ProviderSnapshot, ProviderError>)
         case swap(Result<[Account], ProviderError>)
+        case copilotUsers([(Account, String)], asked: Set<String>)
     }
 
     private nonisolated static func result<T: Sendable>(_ work: @Sendable () async throws -> T) async -> Result<T, ProviderError> {
@@ -307,8 +347,10 @@ final class AppModel {
                 organizationName: identity?.organizationName,
                 isActive: true)
             defaultLogins[id] = updated(found, last: defaultLogins[id], with: outcome)
+            if id == .copilot { keepCopilotReading(&defaultLogins[id]!, asked: asked, outcome: outcome) }
             guard var state = providers[id] ?? disabledProviders[id] else { break }
-            state.backoffUntil = retryDate(after: outcome)
+            // A Copilot user keeps the wait it had in either role, not a new one for changing role.
+            state.backoffUntil = id == .copilot ? copilotBackoff[asked] : retryDate(after: outcome)
             state.backoffLogin = asked
             store(state, id)
             rebuild(id)
@@ -334,7 +376,33 @@ final class AppModel {
                 for i in swapAccounts.indices { swapAccounts[i].error = error }
             }
             rebuild(.claude)
+        case let .copilotUsers(found, asked):
+            var kept: [(Account, String)] = []
+            for (account, place) in found {
+                var account = account
+                keepCopilotReading(&account, asked: asked.contains(account.id) ? account.id : nil,
+                                   outcome: account.error.map { .failure($0) } ?? account.snapshot.map { .success($0) })
+                // A token that can't be read for one never read before: nothing to show for it.
+                if account.snapshot == nil, account.error == .notConfigured { continue }
+                kept.append((account, place))
+            }
+            copilotUsers = kept.map(\.0)
+            copilotUserPlaces = Dictionary(kept.map { account, place in (account.id, place) }, uniquingKeysWith: { a, _ in a })
+            rebuild(.copilot)
         }
+    }
+
+    /// A Copilot login's reading and rate limit, filed by Account id so they follow a user who
+    /// switches between main login and other user. `asked`: the login was asked this time, rather
+    /// than kept while it waits out a rate limit.
+    private func keepCopilotReading(_ account: inout Account, asked: String?, outcome: Result<ProviderSnapshot, ProviderError>?) {
+        // A login is only asked once its wait is over: what arrives during one stands in for it,
+        // and mustn't end or shorten it.
+        if let asked, let outcome, !(copilotBackoff[asked].map { $0 > Date() } ?? false) {
+            copilotBackoff[asked] = retryDate(after: outcome)
+        }
+        account.snapshot = account.snapshot ?? copilotLast[account.id]
+        if let snapshot = account.snapshot { copilotLast[account.id] = snapshot }
     }
 
     private nonisolated static func loginID(_ id: ProviderID, _ identity: LoginIdentity?) -> String {
@@ -365,7 +433,11 @@ final class AppModel {
     /// Merges a Provider's Accounts into its Pool, the default login first (SPEC §15).
     private func rebuild(_ id: ProviderID) {
         let main = defaultLogins[id]
-        let rows = id == .claude ? AccountRoster.swapRows(swapAccounts, defaultLogin: main, provider: id) : []
+        let rows: [Account] = switch id {
+        case .claude: AccountRoster.swapRows(swapAccounts, defaultLogin: main, provider: id)
+        case .copilot: copilotUsers
+        default: []
+        }
         let folders = loginFolders.filter { $0.provider == id }.compactMap { folderAccounts[$0] }
         let accounts = AccountRoster.merge(main.map { [$0] } ?? [], folders, rows)
         let pool = Pool(provider: id, accounts: accounts)
@@ -623,6 +695,47 @@ final class AppModel {
         Task { await refresh(force: true) }
     }
 
+    /// Adds a login folder from anywhere on the Mac. One already read for one CLI is kept too, as it
+    /// may hold another's login: a folder is never read twice for the same CLI.
+    func addLoginFolder(_ url: URL) {
+        settings.addLoginFolder(url)
+        addedFoldersWithoutLogin = Self.withoutLogin(settings.addedLoginFolders, found: loginFolders)
+        Task { await refresh(force: true) }
+    }
+
+    func removeLoginFolder(_ url: URL) {
+        settings.removeLoginFolder(url)
+        let path = url.standardizedFileURL.path
+        let gone = loginFolders.filter { $0.isAdded && $0.url.standardizedFileURL.path == path }
+        loginFolders.removeAll { gone.contains($0) }
+        addedFoldersWithoutLogin.removeAll { $0.standardizedFileURL.path == path }
+        for folder in gone {
+            folderAccounts[folder] = nil
+            // One the home folder holds would be found again: removing it turns that one off.
+            let inHome = folder.url.deletingLastPathComponent().standardizedFileURL.path == Paths.home.standardizedFileURL.path
+                && LoginFolderKind.of(folder.provider)?.homePrefix.map { folder.url.lastPathComponent.hasPrefix($0) } == true
+            if inHome { settings.setLoginFolder(LoginFolder(provider: folder.provider, url: folder.url), enabled: false) }
+            rebuild(folder.provider)
+        }
+    }
+
+    /// The default login's email, once read.
+    func defaultLoginName(_ id: ProviderID) -> String? {
+        defaultLogins[id].flatMap { $0.name == id.displayName ? nil : $0.displayName }
+    }
+
+    private nonisolated static func names(of folders: [LoginFolder]) -> [LoginFolder: String] {
+        Dictionary(uniqueKeysWithValues: folders.map { ($0, LoginFolders.account(for: $0).name) })
+    }
+
+    private nonisolated static func withoutLogin(_ added: [URL], found: [LoginFolder]) -> [URL] {
+        let read = Set(found.map { $0.url.standardizedFileURL.path })
+        return added.filter { !read.contains($0.path) }
+    }
+
+    /// Opens the popover again, after a panel that took the focus closed it.
+    @ObservationIgnored var showPopover: () -> Void = {}
+
     func setReadClaudeSwap(_ enabled: Bool) {
         settings.readClaudeSwap = enabled
         if !enabled {
@@ -650,6 +763,7 @@ final class AppModel {
         defaultLogins.merge(defaults) { _, new in new }
         folderAccounts = folders
         loginFolders = folders.keys.sorted { $0.id < $1.id }
+        loginFolderNames = folders.mapValues(\.name)
         swapAccounts = swap
         isClaudeSwapInstalled = true
         settings.savesChanges = false
