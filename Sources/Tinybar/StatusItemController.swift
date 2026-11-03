@@ -163,22 +163,26 @@ enum RingIcon {
                 switch tint {
                 case let .sweep(stops):
                     // Short segments, each coloured by its angle, approximate a conic gradient.
+                    // All edges go down first so no segment's edge covers its neighbour's colour.
                     let steps = max(Int(sweep / 6), 1)
-                    for i in 0..<steps {
-                        let a0 = sweep * Double(i) / Double(steps)
-                        let a1 = sweep * Double(i + 1) / Double(steps)
-                        let seg = NSBezierPath()
-                        seg.appendArc(withCenter: center, radius: radius,
-                                      startAngle: 90 - a0, endAngle: 90 - a1 - (i + 1 < steps ? 0.5 : 0), clockwise: true)
-                        seg.lineWidth = 2
-                        seg.lineCapStyle = (i == 0 || i == steps - 1) ? .round : .butt
-                        color(in: stops, at: (a0 + a1) / 2 / 360).setStroke()
-                        seg.stroke()
+                    for edge in [true, false] {
+                        for i in 0..<steps {
+                            let a0 = sweep * Double(i) / Double(steps)
+                            let a1 = sweep * Double(i + 1) / Double(steps)
+                            let seg = NSBezierPath()
+                            seg.appendArc(withCenter: center, radius: radius,
+                                          startAngle: 90 - a0, endAngle: 90 - a1 - (i + 1 < steps ? 0.5 : 0), clockwise: true)
+                            seg.lineCapStyle = (i == 0 || i == steps - 1) ? .round : .butt
+                            let tone = color(in: stops, at: (a0 + a1) / 2 / 360)
+                            stroke(seg, color: edge ? deeper(tone, dark: dark) : tone, width: edge ? 2 + 2 * edgeWidth : 2)
+                        }
                     }
                 case let .solid(color):
-                    arc(center: center, radius: radius, sweep: sweep, color: color)
+                    let path = arc(center: center, radius: radius, sweep: sweep)
+                    stroke(path, color: deeper(color, dark: dark), width: 2 + 2 * edgeWidth)
+                    stroke(path, color: color, width: 2)
                 case nil:
-                    arc(center: center, radius: radius, sweep: sweep, color: ink)
+                    stroke(arc(center: center, radius: radius, sweep: sweep), color: ink, width: 2)
                 }
             }
 
@@ -201,13 +205,28 @@ enum RingIcon {
         return image
     }
 
-    private static func arc(center: NSPoint, radius: CGFloat, sweep: Double, color: NSColor) {
+    private static func arc(center: NSPoint, radius: CGFloat, sweep: Double) -> NSBezierPath {
         let arc = NSBezierPath()
         arc.appendArc(withCenter: center, radius: radius, startAngle: 90, endAngle: 90 - sweep, clockwise: true)
-        arc.lineWidth = 2
         arc.lineCapStyle = .round
+        return arc
+    }
+
+    private static func stroke(_ path: NSBezierPath, color: NSColor, width: CGFloat) {
+        path.lineWidth = width
         color.setStroke()
-        arc.stroke()
+        path.stroke()
+    }
+
+    /// A coloured arc gets a hairline edge in a slightly deeper shade of its own colour, so it still
+    /// reads on a menu bar tinted close to that colour (an orange wallpaper behind Claude's ring).
+    /// The shade moves away from the text colour: darker on a dark bar, lighter on a light one,
+    /// which keeps the edge all but invisible where the colour already stands out.
+    private static let edgeWidth: CGFloat = 0.5
+    private static let edgeShade: CGFloat = 0.12
+
+    private static func deeper(_ color: NSColor, dark: Bool) -> NSColor {
+        color.blended(withFraction: edgeShade, of: dark ? .black : .white) ?? color
     }
 
     /// Linear interpolation between evenly spaced stops, t in 0...1.
