@@ -349,13 +349,101 @@ private func folder(_ path: String, in home: URL) throws -> URL {
     FileManager.default.createFile(atPath: home.appendingPathComponent(".claude.json").path, contents: Data())
     try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(".claude_link"), withDestinationURL: home.appendingPathComponent(".claude"))
 
-    let found = LoginFolders.find(
-        home: home,
-        hasClaudeLogin: { $0.lastPathComponent == ".claude_side" },
-        hasCodexLogin: { $0.lastPathComponent == ".codex_alt" })
+    let found = LoginFolders.find(home: home, added: []) { _, url in [".claude_side", ".codex_alt"].contains(url.lastPathComponent) }
     #expect(found.map(\.id) == [".claude_side", ".codex_alt"])
     #expect(found[0].loginHint == "run `CLAUDE_CONFIG_DIR=~/.claude_side claude` once to refresh")
     #expect(found[1].loginHint == "run `CODEX_HOME=~/.codex_alt codex` once to refresh")
+}
+
+@Test func addedFoldersCanBeAnywhere() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    _ = try folder(".codex_alt", in: home)
+    let managed = try folder("Library/Application Support/Switcher/homes/A1", in: home)
+    FileManager.default.createFile(atPath: managed.appendingPathComponent("auth.json").path, contents: Data())
+    let claudeDir = try folder("work/claude", in: home)
+    FileManager.default.createFile(atPath: claudeDir.appendingPathComponent(".claude.json").path, contents: Data())
+    let empty = try folder("nothing", in: home)
+    let alt = home.appendingPathComponent(".codex_alt")
+    FileManager.default.createFile(atPath: alt.appendingPathComponent("auth.json").path, contents: Data())
+
+    // Each once, `~` expanded, relative paths and junk left out.
+    let added = AddedLoginFolders.urls(from: [managed.path, managed.path + "/", "relative/path", 3, claudeDir.path, empty.path, alt.path])
+    #expect(added.map(\.path) == [managed.path, claudeDir.path, empty.path, alt.path])
+
+    let found = LoginFolders.find(home: home, added: added) { provider, _ in provider == .claude || provider == .codex }
+    // A folder found in the home folder and added as well counts once, as added: it can be removed.
+    #expect(found.map(\.url.path) == [claudeDir.path, alt.path, managed.path])
+    #expect(found.map(\.isAdded) == [true, true, true])
+    #expect(found[1].id == "codex:\(alt.path)")
+    #expect(found[2].id == "codex:\(managed.path)")
+    #expect(found[0].provider == .claude && found[2].provider == .codex)
+
+    // Shown and quoted as the user would type them.
+    #expect(Paths.abbreviated(managed, home: home) == "~/Library/Application Support/Switcher/homes/A1")
+    // `auth.json` is Codex's, Grok's and OpenCode's: each CLI's own check tells them apart.
+    #expect(AddedLoginFolders.providers(in: managed) { provider, _ in provider == .codex } == [.codex])
+    #expect(AddedLoginFolders.providers(in: managed) { provider, _ in provider == .grok } == [.grok])
+    #expect(AddedLoginFolders.providers(in: empty) { _, _ in true }.isEmpty)
+}
+
+@Test func anAddedFolderIsQuotedInItsLoginHint() {
+    let home = Paths.home
+    let spaced = LoginFolder(provider: .codex, url: home.appendingPathComponent("Library/Application Support/X/A1"), isAdded: true)
+    #expect(spaced.loginHint == #"run `CODEX_HOME="$HOME/Library/Application Support/X/A1" codex` once to refresh"#)
+    let plain = LoginFolder(provider: .claude, url: URL(fileURLWithPath: "/opt/claude-work"), isAdded: true)
+    #expect(plain.loginHint == "run `CLAUDE_CONFIG_DIR=/opt/claude-work claude` once to refresh")
+}
+
+@Test func addedFoldersLogsCountWithTheRest() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let codexHome = try folder("elsewhere/codex", in: home)
+    try #"{"tokens":{"access_token":"a"}}"#.write(to: codexHome.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+    let sessions = try folder("elsewhere/codex/sessions", in: home)
+    let roots = Paths.codexLogRoots(home: home, env: ["CODEX_HOME": home.appendingPathComponent(".codex").path], added: [codexHome])
+    #expect(roots.map(\.path).contains(sessions.resolvingSymlinksInPath().path))
+    // A Codex home holds no Claude logs.
+    #expect(!Paths.claudeLogRoots(home: home, env: ["CLAUDE_CONFIG_DIR": home.appendingPathComponent(".claude").path], added: [codexHome])
+        .contains { $0.path.contains("elsewhere") })
+}
+
+@Test func theAgentPromptAddsWithoutReadingTokens() {
+    let prompt = AddedLoginFolders.agentPrompt(domain: "com.tinybar.app")
+    #expect(prompt.contains("defaults write com.tinybar.app addedLoginFolders -array-add"))
+    #expect(prompt.contains("by name only"))
+    for variable in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "COPILOT_HOME", "XDG_DATA_HOME"] {
+        #expect(prompt.contains(variable))
+    }
+}
+
+@Test func eachCLIsFoldersAreToldApartByTheirOwnLogin() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    // A Grok home: its auth.json is keyed by sign-in scope, which Codex can't read.
+    let grok = try folder(".grok_work", in: home)
+    try #"{"https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828":{"key":"secret","email":"me@example.com"}}"#
+        .write(to: grok.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+    // A second Copilot CLI home.
+    let copilot = try folder(".copilot_work", in: home)
+    try #"{"lastLoggedInUser":{"host":"https://github.com","login":"work-user"}}"#
+        .write(to: copilot.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+    // An OpenCode data folder, kept anywhere, with a 1.x Go key.
+    let opencode = try folder("data/opencode", in: home)
+    try #"{"opencode-go":{"type":"api","key":"secret"}}"#.write(to: opencode.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+    let found = LoginFolders.find(home: home, added: [opencode])
+    // In the table's order.
+    #expect(found.map(\.provider) == [.grok, .copilot, .opencode])
+    let byProvider = Dictionary(uniqueKeysWithValues: found.map { ($0.provider, $0) })
+    #expect(byProvider[.grok]?.url.path == grok.path)
+    #expect(byProvider[.copilot]?.source.identity()?.email == "work-user")
+    #expect(byProvider[.grok]?.source.identity()?.email == "me@example.com")
+    #expect(byProvider[.opencode]?.isAdded == true)
+    #expect(byProvider[.grok]?.loginHint == "run `GROK_HOME=~/.grok_work grok login`")
+    #expect(byProvider[.copilot]?.loginHint == "run `COPILOT_HOME=~/.copilot_work copilot login`")
+    #expect(byProvider[.opencode]?.loginHint.hasSuffix("/data opencode auth login`") == true)
+    #expect(byProvider[.opencode]?.loginHint.hasPrefix("run `XDG_DATA_HOME=") == true)
 }
 
 @Test func theDefaultFolderIsNeverAnExtraOne() throws {
@@ -770,4 +858,66 @@ private func finished(_ account: String, from: Int, used: Double, plan: String? 
         provider: .claude, plans: [nil, nil], readings: [openA, openB], usage: [daySpend(7, 90)], hours: [], prices: priced, now: now, calendar: utc))
     #expect(abs(v.usedPercent - 90) < 1e-6)
     #expect(abs(v.fullWindow! - 200) < 1e-6)
+}
+
+@Test func aHintsPathStaysLiteralInTheShell() {
+    #expect(LoginFolder.shell("~/.codex_alt") == "~/.codex_alt")
+    #expect(LoginFolder.shell("~/Library/Application Support/A1") == #""$HOME/Library/Application Support/A1""#)
+    // Only the `$HOME` Tinybar writes expands: one in the folder's own name doesn't.
+    #expect(LoginFolder.shell("/tmp/account$work`x`") == #""/tmp/account\$work\`x\`""#)
+}
+
+@Test func claudesSecondDefaultFolderIsntAnExtraLogin() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let config = try folder(".config/claude", in: home)
+    FileManager.default.createFile(atPath: config.appendingPathComponent(".claude.json").path, contents: Data())
+    #expect(Paths.extraConfigDirs(.claude, home: home, env: [:], added: [config]).isEmpty)
+}
+
+@Test func anOpenCodeDatabaseMovedByItsVariableIsStillTheDefault() {
+    let elsewhere = URL(fileURLWithPath: "/tmp/tinybar-opencode-\(UUID().uuidString)", isDirectory: true)
+    #expect(Paths.isDefaultConfigDir(elsewhere, env: ["OPENCODE_DB": elsewhere.appendingPathComponent("opencode.db").path]))
+    #expect(!Paths.isDefaultConfigDir(elsewhere, env: [:]))
+}
+
+@Test func anOlderClaudeFolderAndAnOpenCodeDatabaseAnywhereAreRecognised() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let legacy = try folder("old-claude", in: home)
+    FileManager.default.createFile(atPath: legacy.appendingPathComponent(".config.json").path, contents: Data())
+    #expect(AddedLoginFolders.providers(in: legacy) { provider, _ in provider == .claude } == [.claude])
+    // A data folder not named `opencode` is fixed through the database it holds.
+    let account = LoginFolder(provider: .opencode, url: URL(fileURLWithPath: "/work/account1"), isAdded: true)
+    #expect(account.loginHint == "run `OPENCODE_DB=/work/account1/opencode.db opencode auth login`")
+}
+
+@Test func anAddedGrokFoldersSessionsArentCodexLogs() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let grok = try folder("work/grok", in: home)
+    try #"{"https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828":{"key":"secret"}}"#
+        .write(to: grok.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+    _ = try folder("work/grok/sessions", in: home)
+    let roots = Paths.codexLogRoots(home: home, env: ["CODEX_HOME": home.appendingPathComponent(".codex").path], added: [grok])
+    #expect(!roots.contains { $0.path.contains("work/grok") })
+}
+
+@Test func twoLinksToOneHomeFolderAreOneLogin() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let real = try folder("logins/side", in: home)
+    for name in [".claude_a", ".claude_b"] {
+        try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(name), withDestinationURL: real)
+    }
+    #expect(Paths.extraConfigDirs(.claude, home: home, env: [:], added: []).count == 1)
+}
+
+@Test func anOpenCodeFolderCountsWithAGoKeyOnly() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let console = try folder("console/opencode", in: home)
+    try #"{"opencode":{"type":"api","key":"secret"}}"#.write(to: console.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+    #expect(AddedLoginFolders.providers(in: console).isEmpty)
+    #expect(AddedLoginFolders.agentPrompt(domain: "d").contains("-array-add '<absolute path>'"))
 }

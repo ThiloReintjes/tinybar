@@ -45,7 +45,7 @@ python3 -I Scripts/verify-opencode.py [--out DIR]   # OpenCode Go against the re
 python3 -I Scripts/verify-copilot.py       # Copilot against the real CLI, gh and a mock (no plan needed)
 python3 -I Scripts/verify-grok.py          # Grok against the real CLI and a mock (no plan needed)
 swift Scripts/make-icon.swift              # redraw Resources/AppIcon.icns and docs/icon.png
-.build/debug/Tinybar --snapshot out.png [--page <provider>|settings] [--accounts one|stack|many] [--backdrop] [--redact-projects]
+.build/debug/Tinybar --snapshot out.png [--page <provider>|settings|settings/<provider>] [--accounts one|stack|many] [--backdrop] [--redact-projects]
 .build/debug/Tinybar --snapshot out.png --stats [--page commands|models|languages|plans] [--range week|month|all] [--model <id>] [--hover x,y]   # a Stats card
 ```
 

@@ -639,3 +639,84 @@ private func fetch(token: String, host: String = "https://github.com") async thr
     #expect(try incidents("Copilot AI Model Providers").count == 1)
     #expect(try incidents("Actions").isEmpty)
 }
+
+// MARK: Other users (SPEC §15)
+
+/// The CLI signed in as two users, the first of whom `gh` also holds.
+private let twoUserConfig = #"""
+{"loggedInUsers":[{"host":"https://github.com","login":"cli-user"},{"host":"https://github.com","login":"second"}],
+ "lastLoggedInUser":{"host":"https://github.com","login":"cli-user"}}
+"""#
+
+@Test func everyUserTheCLIAndGhHoldIsAnotherLoginOnceOptedIn() throws {
+    let f = try Fixture()
+    defer { f.remove() }
+    try f.write(twoUserConfig, f.cli, "config.json")
+    try f.write(ghHosts, f.gh, "hosts.yml")
+    let logins = f.logins()
+    func names(_ optedIn: Bool) -> [String] { logins.all(optedIn: optedIn).map { "\($0.hostName)/\($0.name ?? "-")" } }
+    // Without opting in, only users whose token needs no prompt: the one `gh` holds too.
+    #expect(names(false) == ["github.com/cli-user"])
+    // `gh`'s Cli-User is the CLI's cli-user: GitHub ignores case.
+    #expect(names(true) == ["github.com/cli-user", "github.com/second", "github.com/gh-active", "acme.ghe.com/other"])
+
+    let provider = CopilotProvider(logins: logins, isOptedIn: { true })
+    let others = provider.otherUsers()
+    // The main login isn't read twice.
+    #expect(others.map { $0.provider.identity()?.email } == ["second", "gh-active", "other"])
+    #expect(others.map(\.place) == ["Copilot CLI · github.com", "gh · github.com", "gh · acme.ghe.com"])
+}
+
+@Test func aCopilotFolderIsOnlyItsCLIsUser() throws {
+    let f = try Fixture()
+    defer { f.remove() }
+    try f.write(ghHosts, f.gh, "hosts.yml")
+    try f.write(#"{"apps.json":{}}"#, f.editor, "apps.json")
+    var logins = f.logins()
+    logins.cliOnly = true
+    // No CLI user there: neither `gh` nor an editor plugin stands in for it.
+    #expect(logins.find(optedIn: true) == nil)
+    try f.write(cliConfig, f.cli, "config.json")
+    #expect(logins.find(optedIn: false)?.name == "cli-user")
+    #expect(logins.all(optedIn: true).map(\.name) == ["cli-user"])
+}
+
+@Test func anUnnamedEditorLoginIsntReadTwice() throws {
+    let f = try Fixture()
+    defer { f.remove() }
+    try f.write(#"{"github.com:Iv1.b507a08c87ecfe98":{"oauth_token":"gho_editor"}}"#, f.editor, "apps.json")
+    try f.write(ghHosts, f.gh, "hosts.yml")
+    let provider = CopilotProvider(logins: f.logins(), isOptedIn: { true })
+    // The editor's login is the main one, though nothing names its user.
+    #expect(provider.otherUsers().map(\.place) == ["gh · github.com", "gh · github.com", "gh · acme.ghe.com"])
+}
+
+@Test func anotherCLIUserGhHoldsTurnsCopilotOn() throws {
+    let f = try Fixture()
+    defer { f.remove() }
+    // The current user's token needs the Keychain; the second user is one `gh` holds.
+    try f.write(#"""
+    {"loggedInUsers":[{"host":"https://github.com","login":"keychain-only"},{"host":"https://github.com","login":"cli-user"}],
+     "lastLoggedInUser":{"host":"https://github.com","login":"keychain-only"}}
+    """#, f.cli, "config.json")
+    try f.write(ghHosts, f.gh, "hosts.yml")
+    #expect(f.logins().find(optedIn: false) == nil)
+    #expect(CopilotProvider(logins: f.logins()).isConfigured())
+}
+
+@Test func anUnnamedEditorLoginWithTheCLIsTokenIsThatUser() throws {
+    let f = try Fixture()
+    defer { f.remove() }
+    try f.write(#"{"loggedInUsers":[{"host":"https://github.com","login":"cli-user"}],"copilotTokens":{"https://github.com:cli-user":"gho_same"}}"#, f.cli, "config.json")
+    try f.write(#"{"github.com:Iv1.b507a08c87ecfe98":{"oauth_token":"gho_same"}}"#, f.editor, "apps.json")
+    #expect(f.logins().all(optedIn: false).map(\.name) == ["cli-user"])
+}
+
+@Test func aUserFoundTwiceIsReadThroughTheTokenAtHand() throws {
+    let f = try Fixture()
+    defer { f.remove() }
+    try f.write(#"{"loggedInUsers":[{"host":"https://github.com","login":"alice"},{"host":"https://github.com","login":"bob"}],"lastLoggedInUser":{"host":"https://github.com","login":"alice"}}"#, f.cli, "config.json")
+    try f.write(#"{"github.com:Iv1.b507a08c87ecfe98":{"user":"Bob","oauth_token":"gho_editor"}}"#, f.editor, "apps.json")
+    let bob = f.logins().all(optedIn: true).first { $0.name?.lowercased() == "bob" }
+    #expect(bob?.storedToken == "gho_editor")
+}

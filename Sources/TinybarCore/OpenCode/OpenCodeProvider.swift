@@ -49,6 +49,11 @@ struct OpenCodeData: Sendable {
         }
     }
 
+    /// A data folder, as `$XDG_DATA_HOME/opencode` names one.
+    init(folder: URL) {
+        self.init(database: folder.appendingPathComponent("opencode.db"), authFile: folder.appendingPathComponent("auth.json"))
+    }
+
     init(database: URL?, authFile: URL) {
         self.database = database
         self.authFile = authFile

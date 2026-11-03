@@ -47,6 +47,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
         render()
         observe()
+        model.showPopover = { [weak self] in
+            guard let self, !self.popover.isShown else { return }
+            self.togglePopover()
+        }
         model.openStats = { [weak self] in
             self?.popover.performClose(nil)
             self?.stats.show()
