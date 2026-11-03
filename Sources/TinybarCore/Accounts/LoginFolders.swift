@@ -67,7 +67,8 @@ public struct LoginFolderKind: Sendable {
             defaultFolders: { _, env in
                 [Paths.openCodeData(env: env)] + [OpenCodeData(env: env).database?.deletingLastPathComponent()].compactMap { $0 }
             },
-            hasLogin: { OpenCodeData(folder: $0).storedLogin() != nil },
+            // A Go key, as for the default login: a Console login may have no Go plan (ADR 0009).
+            hasLogin: { OpenCodeData(folder: $0).storedLogin()?.integration == OpenCodeData.goIntegration },
             source: { folder, _ in OpenCodeProvider(data: OpenCodeData(folder: folder)) },
             renew: { folder, shell in
                 // 2.x keeps the login in the database, which `OPENCODE_DB` points at wherever it is.
@@ -211,7 +212,8 @@ public enum AddedLoginFolders {
         and account-switcher folders under ~/Library/Application Support, ~/.config and \
         ~/.local/share. Test for the files by name only (`test -e`): they hold login tokens.
 
-        Add each folder: defaults write \(domain) \(key) -array-add "<absolute path>"
+        Add each folder, in single quotes so the shell leaves its name alone: \
+        defaults write \(domain) \(key) -array-add '<absolute path>'
 
         Finish by listing each folder added and where you found it.
         """

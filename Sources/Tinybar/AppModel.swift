@@ -709,12 +709,15 @@ final class AppModel {
         let gone = loginFolders.filter { $0.isAdded && $0.url.standardizedFileURL.path == path }
         loginFolders.removeAll { gone.contains($0) }
         addedFoldersWithoutLogin.removeAll { $0.standardizedFileURL.path == path }
+        // One the home folder holds would be found again, with a login now or later: removing it
+        // turns it off for each CLI whose folders are named like it.
+        if url.deletingLastPathComponent().standardizedFileURL.path == Paths.home.standardizedFileURL.path {
+            for kind in LoginFolderKind.all where kind.homePrefix.map({ url.lastPathComponent.hasPrefix($0) }) == true {
+                settings.setLoginFolder(LoginFolder(provider: kind.provider, url: url), enabled: false)
+            }
+        }
         for folder in gone {
             folderAccounts[folder] = nil
-            // One the home folder holds would be found again: removing it turns that one off.
-            let inHome = folder.url.deletingLastPathComponent().standardizedFileURL.path == Paths.home.standardizedFileURL.path
-                && LoginFolderKind.of(folder.provider)?.homePrefix.map { folder.url.lastPathComponent.hasPrefix($0) } == true
-            if inHome { settings.setLoginFolder(LoginFolder(provider: folder.provider, url: folder.url), enabled: false) }
             rebuild(folder.provider)
         }
     }

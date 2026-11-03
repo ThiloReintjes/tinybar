@@ -107,10 +107,10 @@ public enum Paths {
         } ?? []
         let found = names.compactMap { name -> URL? in
             let url = home.appendingPathComponent(name, isDirectory: true)
-            guard isDirectory(url), !taken.contains(url.resolvingSymlinksInPath().path) else { return nil }
+            // Two links to one folder are one login.
+            guard isDirectory(url), taken.insert(url.resolvingSymlinksInPath().path).inserted else { return nil }
             return url
         }
-        taken.formUnion(found.map { $0.resolvingSymlinksInPath().path })
         // One the user added as well counts as added: it can be removed, and may ask the Keychain.
         let chosen = Set(added.map { $0.resolvingSymlinksInPath().path })
         let (alsoAdded, inHome) = found.reduce(into: ([URL](), [URL]())) { split, url in
@@ -127,9 +127,13 @@ public enum Paths {
     }
 
     /// Whether a folder is the default login's, which is read anyway.
-    public static func isDefaultConfigDir(_ url: URL, env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+    /// Whether a folder is the default login's, which is read anyway: any CLI's, or `provider`'s.
+    public static func isDefaultConfigDir(
+        _ url: URL, of provider: ProviderID? = nil, env: [String: String] = ProcessInfo.processInfo.environment) -> Bool
+    {
         let place = url.resolvingSymlinksInPath().path
-        return LoginFolderKind.all.flatMap { $0.defaultFolders(home, env) }.contains { $0.resolvingSymlinksInPath().path == place }
+        return LoginFolderKind.all.filter { provider == nil || $0.provider == provider }
+            .flatMap { $0.defaultFolders(home, env) }.contains { $0.resolvingSymlinksInPath().path == place }
     }
 
     /// A path as the user would type it: `~/…` inside the home folder.

@@ -53,7 +53,8 @@ and add `--zap` to also delete your history and settings.
   comes before the reset. Otherwise it says "Lasts until reset", and hovering shows your reserve.
 - **One ring in the menu bar** for the limit closest to running out, or the one you pin.
 - **Several accounts.** Other Claude, Codex, Grok and Copilot logins in your home folder are picked up by
-  themselves (`~/.claude_personal`, `~/.codex_alt`), so are all users the Copilot CLI and `gh` are signed in as, and accounts from
+  themselves (`~/.claude_personal`, `~/.codex_alt`), so are the Copilot CLI's users, and, once you turn Copilot on in
+  Settings, the users `gh` is signed in as, and accounts from
   [claude-swap](https://github.com/realiti4/claude-swap) if you turn that on in Settings. Each subscription's
   page in Settings lists every login and where it's read from. A login kept anywhere else can be added under
   Settings → Other logins, or found by your agent: **Copy prompt for your agent** and paste it into Claude Code or Codex. A subscription's

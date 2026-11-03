@@ -902,3 +902,22 @@ private func finished(_ account: String, from: Int, used: Double, plan: String? 
     let roots = Paths.codexLogRoots(home: home, env: ["CODEX_HOME": home.appendingPathComponent(".codex").path], added: [grok])
     #expect(!roots.contains { $0.path.contains("work/grok") })
 }
+
+@Test func twoLinksToOneHomeFolderAreOneLogin() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let real = try folder("logins/side", in: home)
+    for name in [".claude_a", ".claude_b"] {
+        try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(name), withDestinationURL: real)
+    }
+    #expect(Paths.extraConfigDirs(.claude, home: home, env: [:], added: []).count == 1)
+}
+
+@Test func anOpenCodeFolderCountsWithAGoKeyOnly() throws {
+    let home = try tempHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let console = try folder("console/opencode", in: home)
+    try #"{"opencode":{"type":"api","key":"secret"}}"#.write(to: console.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+    #expect(AddedLoginFolders.providers(in: console).isEmpty)
+    #expect(AddedLoginFolders.agentPrompt(domain: "d").contains("-array-add '<absolute path>'"))
+}

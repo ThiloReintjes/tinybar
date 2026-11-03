@@ -1184,6 +1184,8 @@ private struct SubscriptionRow: View {
     private var status: String {
         guard let state = model.providers[id] else { return "Off" }
         if state.hasSeveralAccounts { return "\(state.accounts.count) accounts" }
+        // The only Account may be a folder's, with no default login.
+        if let only = state.accounts.first, only.displayName != id.displayName { return only.displayName }
         return model.defaultLoginName(id) ?? "On"
     }
 
@@ -1459,10 +1461,12 @@ private enum LoginFolderPicker {
 
     private final class FolderCheck: NSObject, NSOpenSavePanelDelegate {
         func panel(_ sender: Any, validate url: URL) throws {
-            if Paths.isDefaultConfigDir(url) {
+            // A CLI's default folder can still hold another CLI's login.
+            let held = AddedLoginFolders.providers(in: url)
+            if held.isEmpty ? Paths.isDefaultConfigDir(url) : held.allSatisfy({ Paths.isDefaultConfigDir(url, of: $0) }) {
                 throw refusal("Tinybar already reads this login: it's a CLI's default one.")
             }
-            if AddedLoginFolders.providers(in: url).isEmpty {
+            if held.isEmpty {
                 throw refusal("There's no login Tinybar can read in this folder. Choose the folder a CLI keeps its login in, like a CODEX_HOME.")
             }
         }
