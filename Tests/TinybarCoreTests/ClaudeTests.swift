@@ -136,7 +136,6 @@ private func tempRoot() throws -> (URL, URL) {
      "seven_day_opus":null, "seven_day_sonnet":null,
      "limits":[
       {"kind":"session","group":"session","percent":39,"resets_at":"2026-11-04T13:09:00Z","scope":null,"is_active":true},
-      {"kind":"weekly_all","group":"weekly","percent":9,"resets_at":"2026-11-04T20:59:00Z","scope":null,"is_active":false},
       {"kind":"weekly_scoped","group":"weekly","percent":12,"resets_at":"2026-11-04T20:59:00Z",
        "scope":{"model":{"id":"claude-all-models","display_name":"All models"},"surface":null},"is_active":false},
       {"kind":"weekly_scoped","group":"weekly","percent":33,"resets_at":"2026-11-04T20:59:00Z",
