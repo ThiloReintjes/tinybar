@@ -141,7 +141,7 @@ An unresolved incident counts when it names a counted component, or names none a
 
 Two levels, one click apart. A tab bar at the top always shows Overview plus one tab per enabled
 Provider (keys 0–7). With five or more on, a Provider page shows only its own name and the other tabs a dot, with the name on hover. The popover keeps one fixed size; pages sit side by side and slide into
-view, so switching never rebuilds or resizes anything. Long pages scroll inside.
+view, so switching never resizes anything. Only the page in view is built, and the popover's views are released when it closes. Long pages scroll inside.
 
 1. **Overview**:
    - One row per Provider: concentric rings (outer: longest account-wide window, inner: the next),

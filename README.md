@@ -19,7 +19,7 @@ tokens you used and what they would have cost at API prices.**
 </p>
 
 Tinybar is a lighter, from-scratch alternative to [CodexBar](https://github.com/steipete/CodexBar).
-It uses about 20 MB of memory and 0% CPU while the popover is closed, and has no dependencies, no
+It uses about 40 MB of memory and 0% CPU while the popover is closed, and has no dependencies, no
 WebKit and no telemetry. It reads the logins your CLIs already have and never changes anything on
 your account.
 
@@ -115,7 +115,7 @@ Measured on Apple silicon with 16 GB of Codex logs and 8 GB of Claude transcript
 | | |
 | --- | --- |
 | Idle CPU | 0.0%, with one poll every 5 minutes and no animations |
-| Memory | about 20 MB |
+| Memory | about 40 MB |
 | New log lines | FSEvents reports the changed files, and Tinybar reads only the appended bytes |
 | OpenCode's database | Read on a poll only if it changed, from where the last read stopped, from a clone of the file |
 | First launch | the full history imports in about two minutes, in a child process |

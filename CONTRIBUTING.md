@@ -14,7 +14,7 @@ write code. Docs-only fixes are the exception.
   this needs a new ADR, see [ADR 0001](docs/adr/0001-read-only-credentials.md).
 - **Idle is free.** 0% CPU while the popover is closed. No timer faster than the 5-minute poll, no
   animation loops, no polling of the file system (FSEvents only).
-- **Memory.** Under 50 MB resident at steady state; today it's ~20 MB footprint. Heavy one-off work
+- **Memory.** Under 50 MB resident at steady state; today it's ~40 MB footprint. Heavy one-off work
   (like the first history import) runs in a child process.
 - **Incremental only.** Log ingestion reads appended bytes. Nothing rescans the history on a timer.
 - **No WebViews, no embedded JS engines, no long-lived child processes.** A new dependency has to
