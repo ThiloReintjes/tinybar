@@ -29,11 +29,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
-        let host = NSHostingController(rootView: PopoverView(model: model))
-        // Size the popover to the SwiftUI content; the default is a fixed 320×320 box that
-        // centers and clips the content.
-        host.sizingOptions = .preferredContentSize
-        popover.contentViewController = host
 
         if let button = statusItem.button {
             button.target = self
@@ -104,11 +99,24 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         button.appearsDisabled = stale
     }
 
+    /// The SwiftUI tree is dropped on close and built again on the next open, so a closed popover
+    /// holds none of it.
+    func popoverDidClose(_ notification: Notification) {
+        popover.contentViewController = nil
+    }
+
     @objc private func togglePopover() {
         if popover.isShown {
             popover.performClose(nil)
         } else if let button = statusItem.button {
             model.refreshOnOpen()
+            if popover.contentViewController == nil {
+                let host = NSHostingController(rootView: PopoverView(model: model))
+                // Size the popover to the SwiftUI content; the default is a fixed 320×320 box
+                // that centers and clips the content.
+                host.sizingOptions = .preferredContentSize
+                popover.contentViewController = host
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }

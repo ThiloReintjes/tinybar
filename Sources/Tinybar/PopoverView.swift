@@ -16,12 +16,15 @@ enum Page: Hashable {
 }
 
 /// The pages sit side by side on one strip that slides under a fixed window. Switching tabs moves
-/// the strip; nothing is rebuilt and the popover never changes size, so nothing jumps.
+/// the strip and the popover never changes size, so nothing jumps. Only the pages on screen are
+/// built; the rest hold their place empty.
 struct PopoverView: View {
     let model: AppModel
     @State private var page: Page
     /// Which subscription the Settings page below the first level shows.
     @State private var subscription = ProviderID.claude
+    /// Pages still sliding out while the strip moves to `page`.
+    @State private var leaving: Set<Page> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let width: CGFloat = 344
@@ -55,13 +58,21 @@ struct PopoverView: View {
 
             HStack(alignment: .top, spacing: 0) {
                 ForEach(pages, id: \.self) { p in
-                    ScrollView {
-                        content(p)
-                            .padding(.horizontal, 14)
-                            .padding(.top, 6)
-                            .padding(.bottom, 12)
+                    // Only the page on screen and any sliding away are built. Building every page
+                    // at once left ~17 MB behind after the popover closed.
+                    Group {
+                        if p == page || leaving.contains(p) {
+                            ScrollView {
+                                content(p)
+                                    .padding(.horizontal, 14)
+                                    .padding(.top, 6)
+                                    .padding(.bottom, 12)
+                            }
+                            .scrollIndicators(.never)
+                        } else {
+                            Color.clear
+                        }
                     }
-                    .scrollIndicators(.never)
                     .frame(width: Self.width, height: Self.contentHeight)
                     .accessibilityHidden(p != page)
                 }
@@ -106,7 +117,13 @@ struct PopoverView: View {
 
     private func go(_ next: Page) {
         guard next != page else { return }
-        withAnimation(reduceMotion ? nil : Motion.page) { page = next }
+        let from = page
+        leaving.insert(from)
+        withAnimation(reduceMotion ? nil : Motion.page) {
+            page = next
+        } completion: {
+            leaving.remove(from)
+        }
     }
 }
 
