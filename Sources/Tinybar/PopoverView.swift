@@ -419,8 +419,9 @@ private struct AccountBar: View {
     var body: some View {
         HStack(spacing: 3) {
             ForEach(accounts) { account in
-                let left = account.snapshot?.bindingWindow?.remainingPercent ?? 0
-                let fill = shownPercent(left: left, used: showsUsed)
+                // No reading: an empty segment, and no made-up percentage in its tip.
+                let left = account.snapshot?.bindingWindow?.remainingPercent
+                let fill = left.map { shownPercent(left: $0, used: showsUsed) } ?? 0
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(provider.color.opacity(0.18))
@@ -440,8 +441,9 @@ private struct AccountBar: View {
         }
     }
 
-    private static func tip(_ account: Account, left: Double, used: Bool) -> String {
-        "\(account.displayName): \(PercentText.phrase(left: left, used: used))" + (account.isStale ? ", login expired" : "")
+    private static func tip(_ account: Account, left: Double?, used: Bool) -> String {
+        let reading = left.map { PercentText.phrase(left: $0, used: used) } ?? "no reading"
+        return "\(account.displayName): \(reading)" + (account.isStale ? ", login expired" : "")
     }
 }
 
