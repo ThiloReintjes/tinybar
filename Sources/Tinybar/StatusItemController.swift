@@ -70,15 +70,18 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let pinned = model.pinned
         let stale = model.isPinnedStale
         guard let button = statusItem.button else { return }
+        let showsUsed = model.settings.showsUsedPercentage
         let key = RenderKey(
-            percent: pinned.map { Int($0.1.remainingPercent.rounded()) },
+            percent: pinned.map { Int(shownPercent(left: $0.1.remainingPercent, used: showsUsed).rounded()) },
             provider: pinned?.0,
             stale: stale,
             hidePercent: model.settings.hidePercentage,
             dark: button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua,
             alert: model.disruption?.severity)
         let owner = model.pinnedAccount.map { " (\($0.displayName))" } ?? ""
-        var tip = pinned.map { "\($0.0.displayName)\(owner) \($0.1.title): \(Int($0.1.remainingPercent.rounded()))% left" }
+        var tip = pinned.map {
+            "\($0.0.displayName)\(owner) \($0.1.title): \(PercentText.phrase(left: $0.1.remainingPercent, used: showsUsed))"
+        }
         if let incident = model.disruption {
             tip = [tip, "\(incident.provider.displayName): \(incident.title)"].compactMap { $0 }.joined(separator: "\n")
         }
@@ -112,9 +115,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
-/// A small ring showing the remaining fraction (full at 100% left, empty at 0%), optionally
-/// followed by the percentage text. The arc takes the pinned Provider's colour; the track and
-/// text follow the menu bar like a template image would.
+/// A small ring showing the remaining fraction (full at 100% left, empty at 0%), or the used one
+/// with "Show percentages as used", optionally followed by the percentage text. The arc takes the
+/// pinned Provider's colour; the track and text follow the menu bar like a template image would.
 @MainActor
 enum RingIcon {
     static let ringSize: CGFloat = 14
