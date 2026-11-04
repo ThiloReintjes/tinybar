@@ -128,6 +128,28 @@ private func tempRoot() throws -> (URL, URL) {
     #expect(s.windows.map(\.title) == ["5-hour", "Fable Weekly"])
 }
 
+@Test func keepsScopedLimitsReportedInactive() throws {
+    // The shape from #31: Fable's weekly limit is enforced yet says is_active false. Only scoped
+    // weekly limits count, once each, and "All models" is the plain weekly window again.
+    let json = Data(#"""
+    {"five_hour":{"utilization":39,"resets_at":"2026-11-04T13:09:00Z"},
+     "seven_day_opus":null, "seven_day_sonnet":null,
+     "limits":[
+      {"kind":"session","group":"session","percent":39,"resets_at":"2026-11-04T13:09:00Z","scope":null,"is_active":true},
+      {"kind":"weekly_scoped","group":"weekly","percent":12,"resets_at":"2026-11-04T20:59:00Z",
+       "scope":{"model":{"id":"claude-all-models","display_name":"All models"},"surface":null},"is_active":false},
+      {"kind":"weekly_scoped","group":"weekly","percent":33,"resets_at":"2026-11-04T20:59:00Z",
+       "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false},
+      {"kind":"weekly_scoped","group":"weekly","percent":34,"scope":{"model":{"display_name":"Fable"}}},
+      {"kind":"daily_scoped","group":"daily","percent":50,"scope":{"model":{"display_name":"Opus"}}}]}
+    """#.utf8)
+    let usage = try JSONDecoder().decode(ClaudeUsageAPI.UsageResponse.self, from: json)
+    let s = ClaudeUsageAPI.snapshot(from: usage, plan: "Enterprise")
+    #expect(s.windows.map(\.id) == ["session", "fable-weekly"])
+    #expect(s.windows[1].usedPercent == 33)
+    #expect(s.windows[1].isModelSpecific)
+}
+
 @Test func parsesClaudeCredentials() throws {
     let json = Data(#"{"claudeAiOauth":{"accessToken":"tok","expiresAt":4102444800000,"subscriptionType":"max","rateLimitTier":"default_claude_max_5x"}}"#.utf8)
     let c = try ClaudeCredentials.parse(json)
