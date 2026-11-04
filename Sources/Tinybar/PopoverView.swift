@@ -74,6 +74,7 @@ struct PopoverView: View {
             Footer(model: model, page: page, select: go)
         }
         .frame(width: Self.width)
+        .environment(\.showsUsed, model.settings.showsUsedPercentage)
         .background(GlassTint())
         .background(TabShortcuts(model: model, select: go))
         .onChange(of: model.enabledProviders) { _, enabled in
@@ -408,37 +409,39 @@ enum StaleText {
     }
 }
 
-/// One segment per Account, filled to what its tightest window has left. The Pool's number sits
-/// beside it; this shows how that's shared out.
+/// One segment per Account, filled to what its tightest window has left (or has used, with "Show
+/// percentages as used"). The Pool's number sits beside it; this shows how that's shared out.
 private struct AccountBar: View {
     let accounts: [Account]
     let provider: ProviderID
+    @Environment(\.showsUsed) private var showsUsed
 
     var body: some View {
         HStack(spacing: 3) {
             ForEach(accounts) { account in
                 let left = account.snapshot?.bindingWindow?.remainingPercent ?? 0
+                let fill = shownPercent(left: left, used: showsUsed)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(provider.color.opacity(0.18))
                         Capsule()
                             .fill(provider.color)
                             .opacity(account.isActive ? 1 : 0.6)
-                            .frame(width: left > 0 ? max(g.size.width * left / 100, 5) : 0)
+                            .frame(width: fill > 0 ? max(g.size.width * fill / 100, 5) : 0)
                     }
                 }
                 .frame(height: 5)
                 .opacity(account.isStale ? 0.45 : 1)
                 .contentShape(Rectangle())
-                .help(AccountBar.tip(account, left: left))
+                .help(AccountBar.tip(account, left: left, used: showsUsed))
                 .accessibilityElement()
-                .accessibilityLabel(AccountBar.tip(account, left: left))
+                .accessibilityLabel(AccountBar.tip(account, left: left, used: showsUsed))
             }
         }
     }
 
-    private static func tip(_ account: Account, left: Double) -> String {
-        "\(account.displayName): \(Int(left.rounded()))% left" + (account.isStale ? ", login expired" : "")
+    private static func tip(_ account: Account, left: Double, used: Bool) -> String {
+        "\(account.displayName): \(PercentText.phrase(left: left, used: used))" + (account.isStale ? ", login expired" : "")
     }
 }
 
@@ -559,6 +562,7 @@ private struct AccountRow: View {
     let account: Account
     let provider: ProviderID
     let isOpen: Bool
+    @Environment(\.showsUsed) private var showsUsed
 
     var body: some View {
         HStack(spacing: 10) {
@@ -611,10 +615,10 @@ private struct AccountRow: View {
     private var figures: String {
         let windows = account.snapshot?.windows.filter { !$0.isModelSpecific } ?? []
         return windows.compactMap { w -> String? in
-            let left = Int(w.remainingPercent.rounded())
+            let shown = Int(shownPercent(left: w.remainingPercent, used: showsUsed).rounded())
             return switch w.kind {
-            case .session: "5h \(left)"
-            case .weekly: "wk \(left)"
+            case .session: "5h \(shown)"
+            case .weekly: "wk \(shown)"
             case .other: nil
             }
         }.joined(separator: " · ")
@@ -1136,6 +1140,7 @@ private struct SettingsPage: View {
                 {
                     Text("Show percentage in menu bar")
                 }
+                SettingsToggle(isOn: $settings.showsUsedPercentage) { Text("Show percentages as used") }
                 SettingsToggle(isOn: Binding(
                     get: { model.isAuto },
                     set: { auto in

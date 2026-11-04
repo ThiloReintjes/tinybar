@@ -19,6 +19,12 @@ final class Settings {
         didSet { defaults.set(hidePercentage, forKey: "hidePercentage") }
     }
 
+    /// Shows how much of each Limit Window is used instead of how much is left, in the menu bar
+    /// and the popover. Alerts and Auto still go by what's left.
+    var showsUsedPercentage: Bool {
+        didSet { defaults.set(showsUsedPercentage, forKey: "showsUsedPercentage") }
+    }
+
     var notificationsEnabled: Bool {
         didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") }
     }
@@ -52,6 +58,7 @@ final class Settings {
         defaults.register(defaults: ["notificationsEnabled": true, "hidePercentage": false])
         pinnedLimit = defaults.string(forKey: "pinnedLimit")
         hidePercentage = defaults.bool(forKey: "hidePercentage")
+        showsUsedPercentage = defaults.bool(forKey: "showsUsedPercentage")
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         readClaudeSwap = defaults.bool(forKey: "readClaudeSwap")
         claudeSwapHintDismissed = defaults.bool(forKey: "claudeSwapHintDismissed")
