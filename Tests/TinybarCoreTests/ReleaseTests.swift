@@ -97,6 +97,27 @@ private func codexLines(context: Int, output: Int) -> String {
     #expect(ClaudeUsageAPI.snapshot(from: ineligible, plan: nil).bankedResets == nil)
 }
 
+@Test func claudeResetGrantsKeepTheirLabel() throws {
+    // Trimmed from a live response (November 2026).
+    let json = Data(#"""
+    {"five_hour": {"utilization": 8}, "cedar_ember": {"eligible": true, "ineligible_reason": null, "grants": [
+      {"id": "full-reset-2611", "label": "One full limit reset (November 2026)", "resets_total": 1,
+       "resets_left": 1, "starts_at": "2026-11-10T21:30:00+00:00", "ends_at": "2026-12-10T22:00:00+00:00",
+       "clears": ["five_hour", "seven_day"], "paused": false, "usable_now": true, "type": "full"}
+    ]}}
+    """#.utf8)
+    let usage = try JSONDecoder().decode(ClaudeUsageAPI.UsageResponse.self, from: json)
+    let banked = ClaudeUsageAPI.snapshot(from: usage, plan: nil, now: parseISODate("2026-11-11T12:00:00Z")!).bankedResets
+    #expect(banked?.map(\.title) == ["One full limit reset (November 2026)"])
+    #expect(banked?.first?.id == "claude-0")
+}
+
+/// The server picks the surface from the User-Agent; only the CLI's own shape is eligible.
+@Test func claudeUserAgentMatchesTheCLI() {
+    #expect(ClaudeUsageAPI.userAgent.hasPrefix("claude-cli/"))
+    #expect(ClaudeUsageAPI.userAgent.hasSuffix(" (external, cli)"))
+}
+
 @Test func resetGrantQueryFallsBackOnRefusal() async throws {
     let url = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     var asked: [String?] = []
