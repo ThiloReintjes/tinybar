@@ -59,6 +59,16 @@ enum ClaudeUsageAPI {
                 case endsAt = "ends_at"
                 case paused
             }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                // Display text only: a malformed label must not drop the reset.
+                label = try? c.decodeIfPresent(String.self, forKey: .label)
+                resetsLeft = try c.decode(Int.self, forKey: .resetsLeft)
+                startsAt = try c.decodeIfPresent(String.self, forKey: .startsAt)
+                endsAt = try c.decodeIfPresent(String.self, forKey: .endsAt)
+                paused = try c.decode(Bool.self, forKey: .paused)
+            }
         }
 
         /// One entry per reset still usable at `now`: a grant with two left counts twice.

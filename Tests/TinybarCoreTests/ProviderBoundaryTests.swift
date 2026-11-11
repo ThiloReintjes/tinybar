@@ -121,6 +121,8 @@ private final class RedirectFixture: URLProtocol, @unchecked Sendable {
     #expect(try grants(#"{"resets_left":1,"paused":false,"ends_at":"invalid"},{"resets_left":1,"paused":false,"starts_at":"invalid"}"#).isEmpty)
     #expect(try grants("{\"resets_left\":1,\"paused\":false},{\"resets_left\":\(Int.max),\"paused\":false}").isEmpty)
     #expect(try grants(#"{"resets_left":1,"paused":false}"#).count == 1)
+    // A malformed label is dropped, not the reset.
+    #expect(try grants(#"{"label":42,"resets_left":1,"paused":false}"#).map(\.title) == [nil])
 }
 
 @Test func codexDurationCannotOverflow() throws {
