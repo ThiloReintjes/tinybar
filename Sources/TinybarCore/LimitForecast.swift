@@ -74,22 +74,27 @@ public enum AutoLimit {
     /// count when nothing else is known. A Pool with a window used up can't be used until that
     /// Reset, so it only counts when every other Pool is used up too: the menu bar follows what
     /// can still be used, not a 0% that stays put for days.
-    public static func pick(_ pools: [Pool]) -> (ProviderID, LimitWindow)? {
+    public static func pick(_ pools: [Pool]) -> (provider: ProviderID, window: LimitWindow)? {
         let known = pools.filter { $0.snapshot.windows.contains { !$0.isModelSpecific } }
         let fresh = known.filter { !$0.isStale }
         let current = fresh.isEmpty ? known : fresh
         let open = current.filter { !$0.snapshot.isUsedUp }
-        let candidates = (open.isEmpty ? current : open).flatMap { pool in
-            pool.snapshot.windows.filter { !$0.isModelSpecific }.map { w in
-                let runOut = pool.isStale ? nil
-                    : w.runOutTime(asOf: pool.snapshot.fetchedAt).flatMap { w.runsOutBeforeReset($0) ? $0 : nil }
-                return (pool.provider, w, runOut)
-            }
+        let candidates = open.isEmpty ? current : open
+
+        // A Stale Pool's pace is out of date, so it has no Run-out Time here.
+        let runningOut = candidates.filter { !$0.isStale }.compactMap { pool in
+            pool.snapshot.firstRunOut(includeModelSpecific: false)
+                .map { (provider: pool.provider, window: $0.window, at: $0.at) }
         }
-        if let first = candidates.filter({ $0.2 != nil }).min(by: { $0.2! < $1.2! }) { return (first.0, first.1) }
-        return candidates.min {
-            ($0.1.remainingPercent, $0.1.resetsAt ?? .distantFuture) < ($1.1.remainingPercent, $1.1.resetsAt ?? .distantFuture)
-        }.map { ($0.0, $0.1) }
+        if let first = runningOut.min(by: { $0.at < $1.at }) { return (first.provider, first.window) }
+
+        let windows = candidates.flatMap { pool in
+            pool.snapshot.windows.filter { !$0.isModelSpecific }.map { (provider: pool.provider, window: $0) }
+        }
+        return windows.min {
+            ($0.window.remainingPercent, $0.window.resetsAt ?? .distantFuture)
+                < ($1.window.remainingPercent, $1.window.resetsAt ?? .distantFuture)
+        }
     }
 }
 

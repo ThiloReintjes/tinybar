@@ -233,29 +233,29 @@ private func autoPool(
     let now = Date(timeIntervalSince1970: 2_000_000_000)
     // Claude's week is gone for 5 days: the menu bar follows Codex, the one still in use.
     let pick = AutoLimit.pick([autoPool(.claude, weekly: 100, now: now), autoPool(.codex, weekly: 79, now: now)])
-    #expect(pick?.0 == .codex)
-    #expect(pick?.1.id == "weekly")
+    #expect(pick?.provider == .codex)
+    #expect(pick?.window.id == "weekly")
     // A spent 5 hours blocks the Provider just the same, until it resets.
     let session = AutoLimit.pick([autoPool(.claude, weekly: 10, session: 100, now: now), autoPool(.codex, weekly: 79, now: now)])
-    #expect(session?.0 == .codex)
+    #expect(session?.provider == .codex)
 }
 
 @Test func autoFallsBackToTheFirstResetWhenEverythingIsUsedUp() {
     let now = Date(timeIntervalSince1970: 2_000_000_000)
     // Both used up: the one coming back first, Claude's 5 hours in 3h.
     let pick = AutoLimit.pick([autoPool(.claude, weekly: 0, session: 100, now: now), autoPool(.codex, weekly: 100, now: now)])
-    #expect(pick?.0 == .claude)
-    #expect(pick?.1.id == "session")
+    #expect(pick?.provider == .claude)
+    #expect(pick?.window.id == "session")
 }
 
 @Test func autoStillShowsTheLeastLeftAmongUsableProviders() {
     let now = Date(timeIntervalSince1970: 2_000_000_000)
     let pick = AutoLimit.pick([autoPool(.claude, weekly: 40, now: now), autoPool(.codex, weekly: 79, now: now)])
-    #expect(pick?.0 == .codex)
+    #expect(pick?.provider == .codex)
     // Stale Pools count only when nothing else is known, used up or not.
     let stale = AutoLimit.pick([autoPool(.claude, weekly: 100, now: now), autoPool(.codex, weekly: 10, stale: true, now: now)])
-    #expect(stale?.0 == .claude)
-    #expect(AutoLimit.pick([autoPool(.codex, weekly: 10, stale: true, now: now)])?.0 == .codex)
+    #expect(stale?.provider == .claude)
+    #expect(AutoLimit.pick([autoPool(.codex, weekly: 10, stale: true, now: now)])?.provider == .codex)
 }
 
 @Test func reserveIsTheShareOfTheWindowPassedMinusTheShareUsed() throws {
