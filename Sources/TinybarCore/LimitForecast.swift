@@ -73,22 +73,23 @@ public enum AutoLimit {
     /// Reset; if none does, the one with the least left (ties: the earlier Reset). Stale Pools only
     /// count when nothing else is known. A Pool with a window used up can't be used until that
     /// Reset, so it only counts when every other Pool is used up too: the menu bar follows what
-    /// can still be used, not a 0% that stays put for days.
+    /// can still be used, not a 0% that stays put for days. With every Pool used up, it shows the
+    /// one usable again first: the Pool whose last used-up window resets soonest, by that window.
     public static func pick(_ pools: [Pool]) -> (provider: ProviderID, window: LimitWindow)? {
         let known = pools.filter { $0.snapshot.windows.contains { !$0.isModelSpecific } }
         let fresh = known.filter { !$0.isStale }
         let current = fresh.isEmpty ? known : fresh
         let open = current.filter { !$0.snapshot.isUsedUp }
-        let candidates = open.isEmpty ? current : open
+        guard !open.isEmpty else { return firstBack(current) }
 
         // A Stale Pool's pace is out of date, so it has no Run-out Time here.
-        let runningOut = candidates.filter { !$0.isStale }.compactMap { pool in
+        let runningOut = open.filter { !$0.isStale }.compactMap { pool in
             pool.snapshot.firstRunOut(includeModelSpecific: false)
                 .map { (provider: pool.provider, window: $0.window, at: $0.at) }
         }
         if let first = runningOut.min(by: { $0.at < $1.at }) { return (first.provider, first.window) }
 
-        let windows = candidates.flatMap { pool in
+        let windows = open.flatMap { pool in
             pool.snapshot.windows.filter { !$0.isModelSpecific }.map { (provider: pool.provider, window: $0) }
         }
         return windows.min {
@@ -96,12 +97,23 @@ public enum AutoLimit {
                 < ($1.window.remainingPercent, $1.window.resetsAt ?? .distantFuture)
         }
     }
+
+    /// A used-up Pool comes back when the last of its used-up windows resets; a window with no
+    /// known Reset never does.
+    private static func firstBack(_ pools: [Pool]) -> (provider: ProviderID, window: LimitWindow)? {
+        func reset(_ window: LimitWindow) -> Date { window.resetsAt ?? .distantFuture }
+        return pools.compactMap { pool in
+            pool.snapshot.usedUpWindows.max { reset($0) < reset($1) }.map { (provider: pool.provider, window: $0) }
+        }.min { reset($0.window) < reset($1.window) }
+    }
 }
 
 extension ProviderSnapshot {
     /// Whether a window that isn't model-specific has nothing left, which blocks the whole
     /// Provider (or, for a Pool, every Account of it) until its Reset.
-    public var isUsedUp: Bool {
-        windows.contains { !$0.isModelSpecific && $0.remainingPercent <= 0 }
+    public var isUsedUp: Bool { !usedUpWindows.isEmpty }
+
+    var usedUpWindows: [LimitWindow] {
+        windows.filter { !$0.isModelSpecific && $0.remainingPercent <= 0 }
     }
 }

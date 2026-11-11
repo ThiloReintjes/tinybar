@@ -216,13 +216,13 @@ private func fiveHour(used: Double, elapsedHours: Double, asOf: Date) -> LimitWi
 // MARK: Auto
 
 private func autoPool(
-    _ id: ProviderID, weekly: Double, session: Double = 0, stale: Bool = false, now: Date
+    _ id: ProviderID, weekly: Double, session: Double = 0, weekResetDays: Double = 5, stale: Bool = false, now: Date
 ) -> AutoLimit.Pool {
     let windows = [
         LimitWindow(id: "session", title: "5-hour", usedPercent: session,
                     resetsAt: now.addingTimeInterval(3 * 3600), durationSeconds: 5 * 3600),
         LimitWindow(id: "weekly", title: "Weekly", usedPercent: weekly,
-                    resetsAt: now.addingTimeInterval(5 * 86400), durationSeconds: 7 * 86400),
+                    resetsAt: now.addingTimeInterval(weekResetDays * 86400), durationSeconds: 7 * 86400),
     ]
     return AutoLimit.Pool(
         provider: id, snapshot: ProviderSnapshot(provider: id, plan: nil, windows: windows, fetchedAt: now),
@@ -246,6 +246,20 @@ private func autoPool(
     let pick = AutoLimit.pick([autoPool(.claude, weekly: 0, session: 100, now: now), autoPool(.codex, weekly: 100, now: now)])
     #expect(pick?.provider == .claude)
     #expect(pick?.window.id == "session")
+    // Claude's 5 hours come back in 3h but its week in 5 days; Codex's week tomorrow.
+    let blocked = AutoLimit.pick([
+        autoPool(.claude, weekly: 100, session: 100, now: now),
+        autoPool(.codex, weekly: 100, weekResetDays: 1, now: now),
+    ])
+    #expect(blocked?.provider == .codex)
+    #expect(blocked?.window.id == "weekly")
+    // A used-up Pool's other window running out doesn't matter: it's blocked either way.
+    let forecast = AutoLimit.pick([
+        autoPool(.claude, weekly: 100, session: 79, now: now),
+        autoPool(.codex, weekly: 30, session: 100, now: now),
+    ])
+    #expect(forecast?.provider == .codex)
+    #expect(forecast?.window.id == "session")
 }
 
 @Test func autoStillShowsTheLeastLeftAmongUsableProviders() {
