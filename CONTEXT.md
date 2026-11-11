@@ -43,7 +43,7 @@ A saved reset the user holds (a Codex reset coupon, a Claude "Reset for free" gr
 _Avoid_: Reset credit, rollover
 
 **Pinned Limit**:
-The single Limit Window, of a Pool or of one Account, that the user picked in the popover to show in the menu bar. Without one, the menu bar shows Auto: of the Pools' windows that aren't model-specific, the one that runs out first.
+The single Limit Window, of a Pool or of one Account, that the user picked in the popover to show in the menu bar. Without one, the menu bar shows Auto: of the Pools' windows that aren't model-specific, the one that runs out first, skipping Pools with a window used up while another can still be used.
 _Avoid_: Primary limit, featured limit
 
 **Incident**:

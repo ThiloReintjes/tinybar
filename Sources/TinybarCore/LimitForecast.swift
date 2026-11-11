@@ -53,3 +53,67 @@ extension ProviderSnapshot {
             .min { $0.1 < $1.1 }
     }
 }
+
+/// What the menu bar shows when no window is pinned (see CONTEXT.md: Pinned Limit, SPEC §6).
+public enum AutoLimit {
+    /// One Provider as Auto sees it: its Pool's snapshot, and whether every Account of it is Stale.
+    public struct Pool: Sendable {
+        public var provider: ProviderID
+        public var snapshot: ProviderSnapshot
+        public var isStale: Bool
+
+        public init(provider: ProviderID, snapshot: ProviderSnapshot, isStale: Bool) {
+            self.provider = provider
+            self.snapshot = snapshot
+            self.isStale = isStale
+        }
+    }
+
+    /// Of every Pool's windows that aren't model-specific, the one that runs out first before its
+    /// Reset; if none does, the one with the least left (ties: the earlier Reset). Stale Pools only
+    /// count when nothing else is known. A Pool with a window used up can't be used until that
+    /// Reset, so it only counts when every other Pool is used up too: the menu bar follows what
+    /// can still be used, not a 0% that stays put for days. With every Pool used up, it shows the
+    /// one usable again first: the Pool whose last used-up window resets soonest, by that window.
+    public static func pick(_ pools: [Pool]) -> (provider: ProviderID, window: LimitWindow)? {
+        let known = pools.filter { $0.snapshot.windows.contains { !$0.isModelSpecific } }
+        let fresh = known.filter { !$0.isStale }
+        let current = fresh.isEmpty ? known : fresh
+        let open = current.filter { !$0.snapshot.isUsedUp }
+        guard !open.isEmpty else { return firstBack(current) }
+
+        // A Stale Pool's pace is out of date, so it has no Run-out Time here.
+        let runningOut = open.filter { !$0.isStale }.compactMap { pool in
+            pool.snapshot.firstRunOut(includeModelSpecific: false)
+                .map { (provider: pool.provider, window: $0.window, at: $0.at) }
+        }
+        if let first = runningOut.min(by: { $0.at < $1.at }) { return (first.provider, first.window) }
+
+        let windows = open.flatMap { pool in
+            pool.snapshot.windows.filter { !$0.isModelSpecific }.map { (provider: pool.provider, window: $0) }
+        }
+        return windows.min {
+            ($0.window.remainingPercent, $0.window.resetsAt ?? .distantFuture)
+                < ($1.window.remainingPercent, $1.window.resetsAt ?? .distantFuture)
+        }
+    }
+
+    /// A used-up Pool comes back when the last of its used-up windows resets; a window with no
+    /// known Reset never does.
+    private static func firstBack(_ pools: [Pool]) -> (provider: ProviderID, window: LimitWindow)? {
+        func reset(_ window: LimitWindow) -> Date { window.resetsAt ?? .distantFuture }
+        return pools.compactMap { pool in
+            pool.snapshot.usedUpWindows.max { reset($0) < reset($1) }.map { (provider: pool.provider, window: $0) }
+        }.min { reset($0.window) < reset($1.window) }
+    }
+}
+
+extension ProviderSnapshot {
+    /// Whether a window that isn't model-specific has nothing left, which blocks the whole
+    /// Provider (or, for a Pool, every Account of it) until its Reset.
+    public var isUsedUp: Bool { !usedUpWindows.isEmpty }
+
+    var usedUpWindows: [LimitWindow] {
+        windows.filter { !$0.isModelSpecific && $0.remainingPercent <= 0 }
+    }
+}
