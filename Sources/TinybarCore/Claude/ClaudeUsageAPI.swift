@@ -45,6 +45,7 @@ enum ClaudeUsageAPI {
         var grants: [CodexUsageAPI.Lossy<Grant>]
 
         struct Grant: Decodable {
+            var label: String?
             var resetsLeft: Int
             var startsAt: String?
             var endsAt: String?
@@ -52,6 +53,7 @@ enum ClaudeUsageAPI {
             var paused: Bool
 
             enum CodingKeys: String, CodingKey {
+                case label
                 case resetsLeft = "resets_left"
                 case startsAt = "starts_at"
                 case endsAt = "ends_at"
@@ -72,7 +74,7 @@ enum ClaudeUsageAPI {
                 // An implausible count is malformed rather than a reason to draw 10,000 rows.
                 guard grant.resetsLeft <= 50 - out.count else { return [] }
                 for _ in 0..<grant.resetsLeft {
-                    out.append(BankedReset(id: "claude-\(out.count)", title: nil, status: "available", expiresAt: ends))
+                    out.append(BankedReset(id: "claude-\(out.count)", title: grant.label, status: "available", expiresAt: ends))
                 }
             }
             return out
@@ -179,8 +181,10 @@ enum ClaudeUsageAPI {
     }
 
     /// Matches the official CLI's User-Agent, using the installed Claude Code version when known.
+    /// The server reads the surface from it: any other shape gets `cedar_ember` back as
+    /// ineligible (`"ineligible_reason": "surface"`), with no grants.
     static var userAgent: String {
-        "claude-code/\(ClaudeCodeVersion.installed ?? "2.1.0")"
+        "claude-cli/\(ClaudeCodeVersion.installed ?? "2.1.0") (external, cli)"
     }
 
     // MARK: Mapping
