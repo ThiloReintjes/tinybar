@@ -649,25 +649,12 @@ final class AppModel {
     /// Whether the menu bar follows Auto rather than a pinned window.
     var isAuto: Bool { explicitPin == nil }
 
-    /// Auto: of every Pool's windows that aren't model-specific, the one that runs out first before
-    /// its Reset; if none does, the one with the least left. Stale Pools only count when nothing else
-    /// is known.
+    /// Auto (SPEC §6): the window closest to running out among the Pools that can still be used.
     private var autoPinned: (ProviderID, LimitWindow)? {
-        func candidates(stale: Bool) -> [(ProviderID, LimitWindow, Date?)] {
-            enabledProviders.flatMap { id -> [(ProviderID, LimitWindow, Date?)] in
-                guard let state = providers[id], state.isStale == stale, let snapshot = state.snapshot else { return [] }
-                return snapshot.windows.filter { !$0.isModelSpecific }.map { w in
-                    let runOut = stale ? nil : w.runOutTime(asOf: snapshot.fetchedAt).flatMap { w.runsOutBeforeReset($0) ? $0 : nil }
-                    return (id, w, runOut)
-                }
-            }
-        }
-        let fresh = candidates(stale: false)
-        let all = fresh.isEmpty ? candidates(stale: true) : fresh
-        if let first = all.filter({ $0.2 != nil }).min(by: { $0.2! < $1.2! }) { return (first.0, first.1) }
-        return all.min {
-            ($0.1.remainingPercent, $0.1.resetsAt ?? .distantFuture) < ($1.1.remainingPercent, $1.1.resetsAt ?? .distantFuture)
-        }.map { ($0.0, $0.1) }
+        AutoLimit.pick(enabledProviders.compactMap { id in
+            guard let state = providers[id], let snapshot = state.snapshot else { return nil }
+            return AutoLimit.Pool(provider: id, snapshot: snapshot, isStale: state.isStale)
+        })
     }
 
     /// Pins a Pool's window, or with `account` one Account's; clicking the pinned window again goes
