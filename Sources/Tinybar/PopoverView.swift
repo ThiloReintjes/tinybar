@@ -415,6 +415,21 @@ enum StaleText {
         }
     }
 
+    /// The first command in a message, between backticks, for the copy button. A backtick escaped
+    /// inside it, from a folder's name (`LoginFolder.shell`), doesn't end it.
+    static func command(in message: String) -> String? {
+        guard let start = message.firstIndex(of: "`") else { return nil }
+        var escaped = false
+        var i = message.index(after: start)
+        while i < message.endIndex {
+            let c = message[i]
+            if c == "`", !escaped { return String(message[message.index(after: start)..<i]) }
+            escaped = c == "\\" && !escaped
+            i = message.index(after: i)
+        }
+        return nil
+    }
+
     /// `hint` is what renews this login, when it isn't the Provider's own default login.
     static func long(id: ProviderID, error: ProviderError, hint: String? = nil) -> String {
         switch error {
@@ -805,20 +820,45 @@ private struct StaleBanner: View {
     let error: ProviderError
     let since: Date?
     var hint: String?
+    @State private var copied = false
 
     var body: some View {
+        let message = StaleText.long(id: id, error: error, hint: hint)
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text(StaleText.long(id: id, error: error, hint: hint))
+                Text(message)
                     .fixedSize(horizontal: false, vertical: true)
                 if let since {
                     Text("Showing the numbers from \(since.formatted(date: Calendar.current.isDateInToday(since) ? .omitted : .abbreviated, time: .shortened)).")
                         .foregroundStyle(.secondary)
                 }
             }
+            if let command = StaleText.command(in: message) {
+                Spacer(minLength: 0)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    copied = true
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .foregroundStyle(.secondary)
+                .help(copied ? "Copied" : "Copy \(command)")
+                .accessibilityLabel(copied ? "Copied" : "Copy command")
+                .task(id: copied) {
+                    guard copied else { return }
+                    try? await Task.sleep(for: .seconds(2))
+                    copied = false
+                }
+            }
         }
+        .onChange(of: message) { copied = false }
         .font(.system(size: 12))
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
