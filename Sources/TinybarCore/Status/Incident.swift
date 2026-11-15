@@ -129,7 +129,7 @@ public enum StatusFeed {
             // the page's statuspage-style summary. Without it the page isn't read, so the last
             // answer stays and a quieted Incident keeps its id.
             let summary = try await get(base.appendingPathComponent("api/v2/summary.json"), session)
-            guard (try? JSONSerialization.jsonObject(with: summary)) is [String: Any] else {
+            guard ((try? JSONSerialization.jsonObject(with: summary)) as? [String: Any])?["incidents"] is [[String: Any]] else {
                 throw ProviderError.unexpected("Unexpected status page response")
             }
             return incidentIO(affected: affected, summary: summary, provider: id, base: base, group: group)

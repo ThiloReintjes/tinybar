@@ -299,6 +299,8 @@ private final class OpenAIStatusFixture: URLProtocol, @unchecked Sendable {
     #expect(try await StatusFeed.fetch(.codex, session: session).map(\.id) == ["i2"])
     OpenAIStatusFixture.summarySays = nil
     await #expect(throws: ProviderError.self) { try await StatusFeed.fetch(.codex, session: session) }
-    OpenAIStatusFixture.summarySays = "<html>"
-    await #expect(throws: ProviderError.self) { try await StatusFeed.fetch(.codex, session: session) }
+    for broken in ["<html>", #"{"error": "unavailable"}"#, #"{"incidents": "none"}"#] {
+        OpenAIStatusFixture.summarySays = broken
+        await #expect(throws: ProviderError.self, "\(broken)") { try await StatusFeed.fetch(.codex, session: session) }
+    }
 }
