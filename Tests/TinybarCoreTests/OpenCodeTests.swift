@@ -247,6 +247,8 @@ func trimsAKeyPastedWithWhitespace(key: String) throws {
     #"{"type":"key","key":"a\nheader"}"#,
     #"{"type":"key","key":""}"#,
     #"{"type":"key","key":" \n "}"#,
+    #"{"type":"key","key":"k\u2003"}"#,  // not whitespace a fetch header drops
+    #"{"type":"oauth","access":"a","refresh":"r","expires":false}"#,
     "{",
 ])
 func unusableOpenCodeLoginCountsAsExpired(value: String) throws {
