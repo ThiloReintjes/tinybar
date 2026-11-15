@@ -356,7 +356,7 @@ private struct OverviewRow: View {
             Label(StaleText.short(id: id, error: error), systemImage: "exclamationmark.triangle.fill")
                 .labelStyle(TightLabel())
                 .foregroundStyle(.orange)
-        } else if let incident = model.incidents[id]?.first {
+        } else if let incident = model.loudIncident(id) {
             HStack(spacing: 3) {
                 StatusLight(severity: incident.severity, size: 5)
                 Text(incident.title)
@@ -472,6 +472,7 @@ private struct AccountBar: View {
 private struct ProviderPage: View {
     let model: AppModel
     let id: ProviderID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let state = model.providers[id]
@@ -481,7 +482,15 @@ private struct ProviderPage: View {
         VStack(alignment: .leading, spacing: 14) {
             Hero(id: id, state: state)
 
-            ForEach(model.incidents[id] ?? [], id: \.self) { IncidentBanner(incident: $0) }
+            ForEach(model.incidents[id] ?? [], id: \.self) { incident in
+                if model.isQuiet(incident) {
+                    QuietIncident(incident: incident)
+                } else {
+                    IncidentBanner(incident: incident) {
+                        withAnimation(reduceMotion ? Motion.reduced : Motion.page) { model.quiet(incident) }
+                    }
+                }
+            }
 
             if let error = state?.error {
                 // The only Account may be a login folder, which `claude` alone wouldn't renew.
@@ -715,9 +724,10 @@ private struct Hero: View {
     }
 }
 
-/// The provider's own word on an outage. Opens the incident on its status page.
+/// The provider's own word on an outage. Opens the incident on its status page; the ✕ quiets it.
 private struct IncidentBanner: View {
     let incident: Incident
+    let quiet: () -> Void
 
     var body: some View {
         Button { NSWorkspace.shared.open(incident.url) } label: {
@@ -736,11 +746,8 @@ private struct IncidentBanner: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
-                Spacer(minLength: 4)
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 2)
+                // Room for the ✕, which sits over the banner rather than in its button.
+                Spacer(minLength: 22)
             }
             .font(.system(size: 12))
             .multilineTextAlignment(.leading)
@@ -753,6 +760,43 @@ private struct IncidentBanner: View {
         }
         .buttonStyle(PressScale())
         .help("Open on \(incident.page)")
+        .overlay(alignment: .topTrailing) {
+            Button(action: quiet) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressScale())
+            .foregroundStyle(.tertiary)
+            .padding(.top, 7)
+            .padding(.trailing, 7)
+            .help("Quiet until it gets worse")
+            .accessibilityLabel("Quiet")
+        }
+    }
+}
+
+/// A quieted Incident: one line where its banner was, still opening it on its status page.
+private struct QuietIncident: View {
+    let incident: Incident
+
+    var body: some View {
+        Button { NSWorkspace.shared.open(incident.url) } label: {
+            HStack(spacing: 4) {
+                StatusLight(severity: incident.severity, size: 5)
+                Text(incident.title)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .help("\(incident.summary). Open on \(incident.page)")
     }
 }
 

@@ -296,21 +296,44 @@ final class AppModel {
                 group.addTask { (id, try? await StatusFeed.fetch(id)) }
             }
             for await (id, found) in group {
-                if let found { incidents[id] = found }
+                guard let found else { continue }
+                incidents[id] = found
+                forgetEnded(found, of: id)
             }
         }
-        for id in incidents.keys where !ids.contains(id) { incidents[id] = nil }
+        for id in incidents.keys where !ids.contains(id) {
+            incidents[id] = nil
+            forgetEnded([], of: id)
+        }
     }
 
-    /// Snapshots only: shows an Incident without a real one.
-    func showForSnapshot(_ incident: Incident) {
+    /// Read and written with no wait between, so an Incident quieted meanwhile stays quiet.
+    private func forgetEnded(_ open: [Incident], of id: ProviderID) {
+        var quiet = settings.quietIncidents
+        quiet.keep(open, of: id)
+        if quiet != settings.quietIncidents { settings.quietIncidents = quiet }
+    }
+
+    /// Quieted: no light in the menu bar or on its row, and one line on its page.
+    func isQuiet(_ incident: Incident) -> Bool { settings.quietIncidents.contains(incident) }
+
+    func quiet(_ incident: Incident) { settings.quietIncidents.insert(incident) }
+
+    /// The Provider's worst Incident that isn't quieted.
+    func loudIncident(_ id: ProviderID) -> Incident? { incidents[id]?.first { !isQuiet($0) } }
+
+    /// Snapshots only: shows an Incident without a real one, quieted or not.
+    func showForSnapshot(_ incident: Incident, quiet: Bool = false) {
+        settings.savesChanges = false
+        settings.quietIncidents = QuietIncidents()
+        if quiet { settings.quietIncidents.insert(incident) }
         incidents[incident.provider] = [incident]
         lastStatusCheck = .distantFuture
     }
 
     /// The worst Incident that disrupts a subscription (maintenance doesn't), for the menu bar.
     var disruption: Incident? {
-        enabledProviders.compactMap { incidents[$0]?.first }.filter { $0.severity >= .degraded }.max { $0.severity < $1.severity }
+        enabledProviders.compactMap(loudIncident).filter { $0.severity >= .degraded }.max { $0.severity < $1.severity }
     }
 
     /// What one fetch brought back.

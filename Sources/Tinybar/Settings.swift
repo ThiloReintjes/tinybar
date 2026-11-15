@@ -42,6 +42,11 @@ final class Settings {
         didSet { if savesChanges { defaults.set(claudeSwapHintDismissed, forKey: "claudeSwapHintDismissed") } }
     }
 
+    /// Incidents quieted from their banner, until they get worse or end.
+    var quietIncidents: QuietIncidents {
+        didSet { if savesChanges { defaults.set(quietIncidents.levels, forKey: "quietIncidents") } }
+    }
+
     /// Extra login folders the user turned off, by name.
     private var loginFoldersOff: Set<String> {
         didSet { defaults.set(Array(loginFoldersOff), forKey: "loginFoldersOff") }
@@ -62,6 +67,7 @@ final class Settings {
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         readClaudeSwap = defaults.bool(forKey: "readClaudeSwap")
         claudeSwapHintDismissed = defaults.bool(forKey: "claudeSwapHintDismissed")
+        quietIncidents = QuietIncidents(defaults.dictionary(forKey: "quietIncidents") as? [String: Int] ?? [:])
         loginFoldersOff = Set(defaults.stringArray(forKey: "loginFoldersOff") ?? [])
         launchAtLogin = SMAppService.mainApp.status == .enabled
 

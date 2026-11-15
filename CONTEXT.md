@@ -47,7 +47,7 @@ The single Limit Window, of a Pool or of one Account, that the user picked in th
 _Avoid_: Primary limit, featured limit
 
 **Incident**:
-A problem a Provider reports on its own public status page that affects the parts Tinybar's users rely on (for Claude: claude.ai, the API and Claude Code), from degraded service to a major outage, or maintenance in progress.
+A problem a Provider reports on its own public status page that affects the parts Tinybar's users rely on (for Claude: claude.ai, the API and Claude Code), from degraded service to a major outage, or maintenance in progress. The user can quiet one until it gets worse or ends.
 _Avoid_: Outage (it's one severity), downtime, alert
 
 **Limit Alert**:

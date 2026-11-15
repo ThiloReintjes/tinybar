@@ -152,6 +152,7 @@ private func codexLines(context: Int, output: Int) -> String {
     let base = URL(string: "https://status.claude.com")!
     let found = try StatusFeed.statuspage(json, provider: .claude, base: base, components: ["claude.ai", "Claude API", "Claude Code"])
     #expect(found.map(\.title) == ["Elevated errors for Claude Opus 5.5", "Issue with spend limits", "Database upgrade"])
+    #expect(found.map(\.id) == ["a", "c", "m"])
     // Severity from the components that count (Cowork's major outage doesn't).
     #expect(found[0].severity == .partialOutage)
     #expect(found[0].components == ["Claude Code"])
@@ -190,9 +191,32 @@ private func codexLines(context: Int, output: Int) -> String {
     #expect(found[0].title == "Degraded performance in Codex")
     #expect(found[0].severity == .majorOutage)
     #expect(found[0].url.absoluteString == "https://status.openai.com/incidents/i2")
+    #expect(found[0].id == "i2")
 
     let quiet = try StatusFeed.incidentIOAffected(Data(#"{"summary": {"affected_components": [], "structure": {"items": []}}}"#.utf8), group: "Codex")
     #expect(quiet.isEmpty)
+}
+
+/// #38: a quieted Incident stays quiet until it gets worse, and is forgotten once it ends.
+@Test func quietIncidentsComeBackWhenWorseOrNew() {
+    func incident(_ id: String, _ severity: Incident.Severity, _ provider: ProviderID = .claude) -> Incident {
+        Incident(provider: provider, id: id, title: "t", severity: severity, components: [],
+                 url: URL(string: "https://status.claude.com")!, updatedAt: nil)
+    }
+    var quiet = QuietIncidents()
+    quiet.insert(incident("a", .partialOutage))
+    #expect(quiet.contains(incident("a", .partialOutage)))
+    #expect(quiet.contains(incident("a", .degraded)), "getting better keeps it quiet")
+    #expect(!quiet.contains(incident("a", .majorOutage)), "getting worse makes it loud")
+    #expect(!quiet.contains(incident("b", .partialOutage)), "another incident is loud")
+    #expect(!quiet.contains(incident("a", .partialOutage, .codex)), "ids are per status page")
+
+    quiet.insert(incident("x", .degraded, .codex))
+    quiet.keep([incident("a", .partialOutage), incident("z", .degraded)], of: .claude)
+    #expect(quiet.contains(incident("a", .partialOutage)))
+    quiet.keep([], of: .claude)
+    #expect(!quiet.contains(incident("a", .partialOutage)), "ended, so loud if it comes back")
+    #expect(quiet.contains(incident("x", .degraded, .codex)), "another page's answer forgets nothing here")
 }
 
 // MARK: Releases
