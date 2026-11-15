@@ -123,19 +123,23 @@ struct OpenCodeLogin {
         workspaceID = (metadata?["orgID"] as? String).flatMap { HTTP.isHeaderSafe($0) ? $0 : nil }
     }
 
+    /// OpenCode keeps a pasted key as typed, and its client sends it trimmed, since a fetch header
+    /// drops surrounding whitespace. So a key with a stray space or newline works there, and here too.
     private static func secret(_ value: [String: Any], now: Date) -> String? {
+        let secret: Any?
         switch value["type"] as? String {
         case "key", "api":
-            return value["key"] as? String
+            secret = value["key"]
         case "oauth":
-            // Skipped within 60 s of expiry, like Cursor's token.
+            // Skipped within 60 s of expiry, like Cursor's token. 0 means the issuer gave no lifetime.
             guard let expires = (value["expires"] as? NSNumber)?.doubleValue,
-                  Date(timeIntervalSince1970: expires / 1000) > now.addingTimeInterval(60)
+                  expires == 0 || Date(timeIntervalSince1970: expires / 1000) > now.addingTimeInterval(60)
             else { return nil }
-            return value["access"] as? String
+            secret = value["access"]
         default:
             return nil
         }
+        return (secret as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// OpenCode sends a credential to the Console it signed in to. Tinybar does the same for

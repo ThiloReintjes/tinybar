@@ -227,6 +227,17 @@ private func login(_ value: String, integration: String = "opencode-go") throws 
     #expect(oauth.token == "a" && oauth.workspaceID == "wrk_x" && oauth.origin.absoluteString == "https://opencode.ai")
 }
 
+/// #37: OpenCode keeps a pasted key as typed and sends it trimmed, so it works there.
+@Test(arguments: ["k ", "k\n", " k", "\tk\r\n"])
+func trimsAKeyPastedWithWhitespace(key: String) throws {
+    let value = try String(decoding: JSONSerialization.data(withJSONObject: ["type": "key", "key": key]), as: UTF8.self)
+    #expect(try login(value).token == "k")
+}
+
+@Test func oauthLoginWithoutLifetimeNeverExpires() throws {
+    #expect(try login(#"{"type":"oauth","methodID":"device","access":"a ","refresh":"r","expires":0}"#).token == "a")
+}
+
 @Test(arguments: [
     #"{"type":"oauth","access":"a","refresh":"r","expires":1900000059000}"#,  // about to expire
     #"{"type":"oauth","access":"a"}"#,
@@ -235,6 +246,7 @@ private func login(_ value: String, integration: String = "opencode-go") throws 
     #"{"type":"key","key":12}"#,
     #"{"type":"key","key":"a\nheader"}"#,
     #"{"type":"key","key":""}"#,
+    #"{"type":"key","key":" \n "}"#,
     "{",
 ])
 func unusableOpenCodeLoginCountsAsExpired(value: String) throws {
