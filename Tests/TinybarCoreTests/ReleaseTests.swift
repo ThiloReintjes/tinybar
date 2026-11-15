@@ -266,3 +266,39 @@ private func codexLines(context: Int, output: Int) -> String {
     // That failed, and the old version's answer doesn't hold it off for a day.
     #expect(updated.isDue(now: t0 + 60 + 3600, version: "0.5.1"))
 }
+
+/// OpenAI's status page: the proxy says Codex is affected; the summary answers with `summarySays`,
+/// or fails when it's nil.
+private final class OpenAIStatusFixture: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var summarySays: String?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let proxy = #"""
+        {"summary": {"affected_components": [{"component_id": "c-cli", "status": "degraded_performance"}],
+          "structure": {"items": [{"group": {"id": "g1", "name": "Codex", "components": [{"component_id": "c-cli", "name": "CLI"}]}}]}}}
+        """#
+        let body = request.url!.path.hasPrefix("/proxy/") ? proxy : Self.summarySays
+        let response = HTTPURLResponse(url: request.url!, statusCode: body == nil ? 500 : 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data((body ?? "").utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// #38: without the summary, Codex's Incident would lose its id, and a quieted one would be loud.
+@Test func codexStatusWithoutItsSummaryIsNoAnswer() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [OpenAIStatusFixture.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+
+    OpenAIStatusFixture.summarySays = #"{"incidents": [{"id": "i2", "name": "Codex is slow", "status": "identified", "impact": "minor"}]}"#
+    #expect(try await StatusFeed.fetch(.codex, session: session).map(\.id) == ["i2"])
+    OpenAIStatusFixture.summarySays = nil
+    await #expect(throws: ProviderError.self) { try await StatusFeed.fetch(.codex, session: session) }
+    OpenAIStatusFixture.summarySays = "<html>"
+    await #expect(throws: ProviderError.self) { try await StatusFeed.fetch(.codex, session: session) }
+}

@@ -129,7 +129,7 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 ### Status pages
 Read on every poll and popover refresh (same throttle), without credentials, only for enabled Providers:
 - **Claude**: `status.claude.com/api/v2/summary.json` (statuspage.io). Counts the components `claude.ai`, `Claude API` and `Claude Code`; Console, Cowork and Government don't count.
-- **Codex**: `status.openai.com/proxy/status.openai.com` (incident.io), counting the components of the "Codex" group; when any is affected, `status.openai.com/api/v2/summary.json` supplies the incident's title (the open incident naming Codex, else the first open one with an impact).
+- **Codex**: `status.openai.com/proxy/status.openai.com` (incident.io), counting the components of the "Codex" group; when any is affected, `status.openai.com/api/v2/summary.json` supplies the incident's title and id (the open incident naming Codex, else the first open one with an impact); without it, the page counts as unread.
 - **Cursor**: `status.cursor.com/api/v2/summary.json`, all components.
 - **OpenCode Go**: `status.opencode.ai/api/status`, its `go` service only: Zen's free models are often degraded, which says nothing about the subscription. A page reporting its own data as stale is no answer.
 - **Copilot**: `www.githubstatus.com/api/v2/summary.json`, the components `Copilot` and `Copilot AI Model Providers`.

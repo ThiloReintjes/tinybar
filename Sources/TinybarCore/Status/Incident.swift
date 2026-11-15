@@ -125,9 +125,13 @@ public enum StatusFeed {
             let proxy = try await get(base.appendingPathComponent("proxy/\(base.host ?? "")"), session)
             let affected = try incidentIOAffected(proxy, group: group)
             guard !affected.isEmpty else { return [] }
-            // The native feed names the affected components; the incident titles come from the
-            // page's statuspage-style summary.
-            let summary = try? await get(base.appendingPathComponent("api/v2/summary.json"), session)
+            // The native feed names the affected components; the incident titles and ids come from
+            // the page's statuspage-style summary. Without it the page isn't read, so the last
+            // answer stays and a quieted Incident keeps its id.
+            let summary = try await get(base.appendingPathComponent("api/v2/summary.json"), session)
+            guard (try? JSONSerialization.jsonObject(with: summary)) is [String: Any] else {
+                throw ProviderError.unexpected("Unexpected status page response")
+            }
             return incidentIO(affected: affected, summary: summary, provider: id, base: base, group: group)
         case let .openCode(base):
             return try openCode(try await get(base.appendingPathComponent("api/status"), session), base: base)
