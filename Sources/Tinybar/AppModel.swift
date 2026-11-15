@@ -301,10 +301,8 @@ final class AppModel {
                 forgetEnded(found, of: id)
             }
         }
-        for id in incidents.keys where !ids.contains(id) {
-            incidents[id] = nil
-            forgetEnded([], of: id)
-        }
+        // Turning a Provider off hides its Incidents; only its page's answer can end them.
+        for id in incidents.keys where !ids.contains(id) { incidents[id] = nil }
     }
 
     /// Read and written with no wait between, so an Incident quieted meanwhile stays quiet.
