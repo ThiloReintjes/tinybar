@@ -19,7 +19,8 @@ enum PopoverSnapshot {
         else { fail("Output directory does not exist.") }
         let model = AppModel(settings: Settings())
         Task { @MainActor in
-            // `--incident claude:partialOutage` stands in for a status page reporting one.
+            // `--incident claude:partialOutage` stands in for a status page reporting one; a third
+            // part, `:quiet`, shows it quieted.
             if let i = args.firstIndex(of: "--incident"), i + 1 < args.count {
                 let parts = args[i + 1].split(separator: ":").map(String.init)
                 if let name = parts.first, let id = ProviderID(rawValue: name) {
@@ -30,9 +31,10 @@ enum PopoverSnapshot {
                     default: .partialOutage
                     }
                     model.showForSnapshot(Incident(
-                        provider: id, title: "Elevated errors for Claude Opus 5.5", severity: severity,
+                        provider: id, id: "snapshot", title: "Elevated errors for Claude Opus 5.5", severity: severity,
                         components: ["claude.ai", "Claude API (api.anthropic.com)", "Claude Code"],
-                        url: URL(string: "https://stspg.io/bzc81gbv1b99")!, updatedAt: Date().addingTimeInterval(-1800)))
+                        url: URL(string: "https://stspg.io/bzc81gbv1b99")!, updatedAt: Date().addingTimeInterval(-1800)),
+                        quiet: parts.count > 2 && parts[2] == "quiet")
                 }
             }
             // `--menubar` renders the status item's icon at 4x, with and without an incident light.

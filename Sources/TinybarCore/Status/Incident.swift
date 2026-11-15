@@ -23,6 +23,9 @@ public struct Incident: Sendable, Hashable, Codable {
     }
 
     public var provider: ProviderID
+    /// The status page's own id for it, stable while it's open (a page with one problem at a time
+    /// names the part it's about).
+    public var id: String
     public var title: String
     public var severity: Severity
     /// The affected parts Tinybar cares about, as the status page names them ("Claude Code").
@@ -30,8 +33,9 @@ public struct Incident: Sendable, Hashable, Codable {
     public var url: URL
     public var updatedAt: Date?
 
-    public init(provider: ProviderID, title: String, severity: Severity, components: [String], url: URL, updatedAt: Date?) {
+    public init(provider: ProviderID, id: String, title: String, severity: Severity, components: [String], url: URL, updatedAt: Date?) {
         self.provider = provider
+        self.id = id
         self.title = title
         self.severity = severity
         self.components = components
@@ -46,6 +50,36 @@ public struct Incident: Sendable, Hashable, Codable {
         case let .statuspage(base, _), let .incidentIO(base, _), let .openCode(base), let .xAI(base): return base.host ?? ""
         }
     }
+}
+
+/// Incidents the user quieted, each at the severity it had then (#38). One that gets worse is loud
+/// again, and one its page stops reporting is forgotten, so it's loud if it comes back.
+public struct QuietIncidents: Equatable, Sendable {
+    /// Severity by "provider id", as UserDefaults keeps it.
+    public private(set) var levels: [String: Int]
+
+    public init(_ levels: [String: Int] = [:]) {
+        self.levels = levels
+    }
+
+    public func contains(_ incident: Incident) -> Bool {
+        levels[Self.key(incident)].map { incident.severity.rawValue <= $0 } ?? false
+    }
+
+    public mutating func insert(_ incident: Incident) {
+        levels[Self.key(incident)] = incident.severity.rawValue
+    }
+
+    /// Forgets the Provider's Incidents that its page, which answered with `open`, no longer
+    /// reports. A page that can't be read forgets nothing.
+    public mutating func keep(_ open: [Incident], of provider: ProviderID) {
+        let prefix = Self.key(provider, "")
+        let keys = Set(open.map(Self.key))
+        levels = levels.filter { !$0.key.hasPrefix(prefix) || keys.contains($0.key) }
+    }
+
+    private static func key(_ incident: Incident) -> String { key(incident.provider, incident.id) }
+    private static func key(_ provider: ProviderID, _ id: String) -> String { "\(provider.rawValue) \(id)" }
 }
 
 /// Reads each Provider's public status page: no login, one or two small GETs per poll (SPEC §6).
@@ -91,9 +125,13 @@ public enum StatusFeed {
             let proxy = try await get(base.appendingPathComponent("proxy/\(base.host ?? "")"), session)
             let affected = try incidentIOAffected(proxy, group: group)
             guard !affected.isEmpty else { return [] }
-            // The native feed names the affected components; the incident titles come from the
-            // page's statuspage-style summary.
-            let summary = try? await get(base.appendingPathComponent("api/v2/summary.json"), session)
+            // The native feed names the affected components; the incident titles and ids come from
+            // the page's statuspage-style summary. Without it the page isn't read, so the last
+            // answer stays and a quieted Incident keeps its id.
+            let summary = try await get(base.appendingPathComponent("api/v2/summary.json"), session)
+            guard ((try? JSONSerialization.jsonObject(with: summary)) as? [String: Any])?["incidents"] is [[String: Any]] else {
+                throw ProviderError.unexpected("Unexpected status page response")
+            }
             return incidentIO(affected: affected, summary: summary, provider: id, base: base, group: group)
         case let .openCode(base):
             return try openCode(try await get(base.appendingPathComponent("api/status"), session), base: base)
@@ -170,7 +208,7 @@ public enum StatusFeed {
             let link = (entry["shortlink"] as? String).flatMap(URL.init(string:))
                 ?? (entry["id"] as? String).map { base.appendingPathComponent("incidents/\($0)") } ?? base
             out.append(Incident(
-                provider: provider, title: title, severity: level,
+                provider: provider, id: entry["id"] as? String ?? title, title: title, severity: level,
                 components: affected.compactMap { $0["name"] as? String },
                 url: link, updatedAt: (entry["updated_at"] as? String).flatMap(parseISODate)))
         }
@@ -204,7 +242,7 @@ public enum StatusFeed {
         default: severity == .majorOutage ? "\(name) is down" : "\(name) is degraded"
         }
         return [Incident(
-            provider: .opencode, title: title, severity: severity, components: [name], url: base,
+            provider: .opencode, id: "go", title: title, severity: severity, components: [name], url: base,
             updatedAt: (go["since"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) })]
     }
 
@@ -236,7 +274,7 @@ public enum StatusFeed {
         }
         let name = site["name"] as? String ?? "grok.com"
         return [Incident(
-            provider: .grok, title: "\(name): \(severity.label.lowercased())", severity: severity, components: [name],
+            provider: .grok, id: "grok-com", title: "\(name): \(severity.label.lowercased())", severity: severity, components: [name],
             url: base, updatedAt: (root["updated_at"] as? String).flatMap(parseISODate))]
     }
 
@@ -296,7 +334,7 @@ public enum StatusFeed {
         let title = pick?["name"] as? String ?? "\(group) \(level.label.lowercased())"
         let url = (pick?["id"] as? String).map { base.appendingPathComponent("incidents/\($0)") } ?? base
         return [Incident(
-            provider: provider, title: title, severity: level, components: affected.map(\.name),
+            provider: provider, id: pick?["id"] as? String ?? group, title: title, severity: level, components: affected.map(\.name),
             url: url, updatedAt: (pick?["updated_at"] as? String).flatMap(parseISODate))]
     }
 }

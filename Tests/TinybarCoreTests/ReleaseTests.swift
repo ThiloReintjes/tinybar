@@ -152,6 +152,7 @@ private func codexLines(context: Int, output: Int) -> String {
     let base = URL(string: "https://status.claude.com")!
     let found = try StatusFeed.statuspage(json, provider: .claude, base: base, components: ["claude.ai", "Claude API", "Claude Code"])
     #expect(found.map(\.title) == ["Elevated errors for Claude Opus 5.5", "Issue with spend limits", "Database upgrade"])
+    #expect(found.map(\.id) == ["a", "c", "m"])
     // Severity from the components that count (Cowork's major outage doesn't).
     #expect(found[0].severity == .partialOutage)
     #expect(found[0].components == ["Claude Code"])
@@ -190,9 +191,32 @@ private func codexLines(context: Int, output: Int) -> String {
     #expect(found[0].title == "Degraded performance in Codex")
     #expect(found[0].severity == .majorOutage)
     #expect(found[0].url.absoluteString == "https://status.openai.com/incidents/i2")
+    #expect(found[0].id == "i2")
 
     let quiet = try StatusFeed.incidentIOAffected(Data(#"{"summary": {"affected_components": [], "structure": {"items": []}}}"#.utf8), group: "Codex")
     #expect(quiet.isEmpty)
+}
+
+/// #38: a quieted Incident stays quiet until it gets worse, and is forgotten once it ends.
+@Test func quietIncidentsComeBackWhenWorseOrNew() {
+    func incident(_ id: String, _ severity: Incident.Severity, _ provider: ProviderID = .claude) -> Incident {
+        Incident(provider: provider, id: id, title: "t", severity: severity, components: [],
+                 url: URL(string: "https://status.claude.com")!, updatedAt: nil)
+    }
+    var quiet = QuietIncidents()
+    quiet.insert(incident("a", .partialOutage))
+    #expect(quiet.contains(incident("a", .partialOutage)))
+    #expect(quiet.contains(incident("a", .degraded)), "getting better keeps it quiet")
+    #expect(!quiet.contains(incident("a", .majorOutage)), "getting worse makes it loud")
+    #expect(!quiet.contains(incident("b", .partialOutage)), "another incident is loud")
+    #expect(!quiet.contains(incident("a", .partialOutage, .codex)), "ids are per status page")
+
+    quiet.insert(incident("x", .degraded, .codex))
+    quiet.keep([incident("a", .partialOutage), incident("z", .degraded)], of: .claude)
+    #expect(quiet.contains(incident("a", .partialOutage)))
+    quiet.keep([], of: .claude)
+    #expect(!quiet.contains(incident("a", .partialOutage)), "ended, so loud if it comes back")
+    #expect(quiet.contains(incident("x", .degraded, .codex)), "another page's answer forgets nothing here")
 }
 
 // MARK: Releases
@@ -241,4 +265,42 @@ private func codexLines(context: Int, output: Int) -> String {
     #expect(!updated.isDue(now: t0 + 120, version: "0.5.1"))
     // That failed, and the old version's answer doesn't hold it off for a day.
     #expect(updated.isDue(now: t0 + 60 + 3600, version: "0.5.1"))
+}
+
+/// OpenAI's status page: the proxy says Codex is affected; the summary answers with `summarySays`,
+/// or fails when it's nil.
+private final class OpenAIStatusFixture: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var summarySays: String?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let proxy = #"""
+        {"summary": {"affected_components": [{"component_id": "c-cli", "status": "degraded_performance"}],
+          "structure": {"items": [{"group": {"id": "g1", "name": "Codex", "components": [{"component_id": "c-cli", "name": "CLI"}]}}]}}}
+        """#
+        let body = request.url!.path.hasPrefix("/proxy/") ? proxy : Self.summarySays
+        let response = HTTPURLResponse(url: request.url!, statusCode: body == nil ? 500 : 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data((body ?? "").utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// #38: without the summary, Codex's Incident would lose its id, and a quieted one would be loud.
+@Test func codexStatusWithoutItsSummaryIsNoAnswer() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [OpenAIStatusFixture.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+
+    OpenAIStatusFixture.summarySays = #"{"incidents": [{"id": "i2", "name": "Codex is slow", "status": "identified", "impact": "minor"}]}"#
+    #expect(try await StatusFeed.fetch(.codex, session: session).map(\.id) == ["i2"])
+    OpenAIStatusFixture.summarySays = nil
+    await #expect(throws: ProviderError.self) { try await StatusFeed.fetch(.codex, session: session) }
+    for broken in ["<html>", #"{"error": "unavailable"}"#, #"{"incidents": "none"}"#] {
+        OpenAIStatusFixture.summarySays = broken
+        await #expect(throws: ProviderError.self, "\(broken)") { try await StatusFeed.fetch(.codex, session: session) }
+    }
 }

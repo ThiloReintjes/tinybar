@@ -124,12 +124,12 @@ Implementation note: endpoint shapes are undocumented. Verify request headers an
 - A tiny ring glyph showing how much of the Pinned Limit is **left**, in that Provider's colour (Claude orange, Gemini its spark, Codex and Cursor monochrome): full at 100%, empty at 0%, with the percentage next to it (`◕ 77%`). Settings has "hide percentage", and "Show percentages as used", which counts the ring and every percentage and fill in the popover up from 0% as a window is used. Alerts and Auto still go by what's left. A coloured arc has a hairline edge in a slightly deeper shade of its colour (darker on a dark menu bar, lighter on a light one), so it stays visible on a menu bar tinted close to that colour.
 - **Pinned Limit**: chosen by clicking any Limit Window on a Provider page, of the Provider's only Account or of one of several; clicking it again unpins it. Unpinned, the menu bar shows **Auto**: of every Pool's windows that aren't model-specific, the one whose Run-out Time comes first before its Reset, else the one with the least left (ties: the earlier Reset). A Pool of several Accounts has no Run-out Time (§15). A Pool counts as Stale when all its Accounts are, and Stale Pools count only when no other is known. A Pool with a window at 0% left can't be used until that window resets, so it counts only when every other Pool is used up too; then the menu bar shows the Pool usable again first, by the last of its used-up windows to reset. A pinned window that disappears falls back to Auto. Settings has "Show the limit closest to running out".
 - If the Pinned Limit's Account is Stale, or every Account of its Pool, the glyph is dimmed.
-- **Incidents**: while any enabled Provider has an Incident that disrupts it (not maintenance), the ring wears a status light at its top right, cut out of the ring: orange when degraded, red for an outage. The tooltip names it. No animation.
+- **Incidents**: while any enabled Provider has an Incident that disrupts it (not maintenance) and isn't quieted, the ring wears a status light at its top right, cut out of the ring: orange when degraded, red for an outage. The tooltip names it. No animation.
 
 ### Status pages
 Read on every poll and popover refresh (same throttle), without credentials, only for enabled Providers:
 - **Claude**: `status.claude.com/api/v2/summary.json` (statuspage.io). Counts the components `claude.ai`, `Claude API` and `Claude Code`; Console, Cowork and Government don't count.
-- **Codex**: `status.openai.com/proxy/status.openai.com` (incident.io), counting the components of the "Codex" group; when any is affected, `status.openai.com/api/v2/summary.json` supplies the incident's title (the open incident naming Codex, else the first open one with an impact).
+- **Codex**: `status.openai.com/proxy/status.openai.com` (incident.io), counting the components of the "Codex" group; when any is affected, `status.openai.com/api/v2/summary.json` supplies the incident's title and id (the open incident naming Codex, else the first open one with an impact); without it, the page counts as unread.
 - **Cursor**: `status.cursor.com/api/v2/summary.json`, all components.
 - **OpenCode Go**: `status.opencode.ai/api/status`, its `go` service only: Zen's free models are often degraded, which says nothing about the subscription. A page reporting its own data as stale is no answer.
 - **Copilot**: `www.githubstatus.com/api/v2/summary.json`, the components `Copilot` and `Copilot AI Model Providers`.
@@ -148,7 +148,7 @@ view, so switching never resizes anything. Only the page in view is built, and t
      name, plan, the window closest to running out with its reset countdown (or, in orange, the
      earliest Run-out Time), and its % left.
      Model-specific windows are left out. A Stale Provider shows "Login expired" (or the reason) in
-     orange; otherwise an Incident shows its status light and title in its colour, ahead of the
+     orange; otherwise an Incident that isn't quieted shows its status light and title in its colour, ahead of the
      Run-out Time. Clicking a row opens its page.
    - A Provider with several Accounts shows its Pool on the same row: "3 accounts" in place of the
      plan, how much the next Reset gives back ("Weekly · 6% back in 2d 7h"), and a bar under the
@@ -162,7 +162,10 @@ view, so switching never resizes anything. Only the page in view is built, and t
 2. **Provider page**:
    - Large rings with the tightest % left, name and plan.
    - A banner per Incident: status light, title, severity and affected components, when it was
-     last updated and on which status page. Clicking it opens the incident.
+     last updated and on which status page. Clicking it opens the incident. Its ✕ quiets it: the
+     banner shrinks in place to one line (light and title), and the Overview row and menu bar
+     drop it. It's loud again if its severity rises, and forgotten once its page stops reporting
+     it. Kept across launches.
    - A banner when Stale: what went wrong and what the user runs to fix it.
    - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time in orange if
      it comes before the Reset, else a faint "Lasts until reset" with its Reserve in the tooltip.
