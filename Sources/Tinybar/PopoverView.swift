@@ -407,7 +407,8 @@ private struct EmptyState: View {
 enum StaleText {
     static func short(id: ProviderID, error: ProviderError) -> String {
         switch error {
-        case .loginExpired, .notConfigured: "Login expired"
+        case .loginExpired: "Login expired"
+        case .notConfigured: "Not signed in"
         case .rateLimited: "Paused, provider asked to slow down"
         case .network: "Offline"
         case .unexpected: "Couldn't read limits"
@@ -417,8 +418,10 @@ enum StaleText {
     /// `hint` is what renews this login, when it isn't the Provider's own default login.
     static func long(id: ProviderID, error: ProviderError, hint: String? = nil) -> String {
         switch error {
-        case .loginExpired, .notConfigured:
+        case .loginExpired:
             "Login expired. To refresh it, \((hint ?? id.loginHint).replacingOccurrences(of: " once to refresh", with: " once"))."
+        case .notConfigured:
+            "Not signed in. To sign in, \((hint ?? id.loginHint).replacingOccurrences(of: " once to refresh", with: ""))."
         case .rateLimited: "\(id.displayName) asked Tinybar to slow down. It tries again on the next check."
         case let .network(message): "Couldn't reach \(id.displayName): \(message)"
         case let .unexpected(message): message
