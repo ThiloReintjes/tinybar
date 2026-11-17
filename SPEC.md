@@ -202,8 +202,9 @@ view, so switching never resizes anything. Only the page in view is built, and t
   even pace. Under 3% it reads "On pace", so 1% steps don't flip it; more than the time until the
   Reset reads "Lasts until reset". The % stays in the tooltip, and in the CLI.
 - The bar has a notch where an even pace would be by now (the share of the window passed), cut out
-  of the bar rather than drawn on it. A fill past it is under pace. It follows "Show percentages as
-  used", and has the same conditions as a forecast.
+  of the bar rather than drawn on it. It follows "Show percentages as used": a fill past it is under
+  pace when the bar shows what's left, and over pace when it shows what's used. It has the same
+  conditions as a forecast.
 - The window's own average needs no stored history and already includes the idle hours and nights
   that recur before the Reset.
 - No forecast before 5% of the window has passed (1% steps make early readings noise), for an
