@@ -519,8 +519,7 @@ private struct ProviderPage: View {
                     ForEach(windows) { window in
                         WindowRow(
                             window: window, provider: id,
-                            runOut: stale ? nil : snapshot.flatMap { window.runOutTime(asOf: $0.fetchedAt) },
-                            reserve: stale ? nil : snapshot.flatMap { window.reservePercent(asOf: $0.fetchedAt) },
+                            forecastAsOf: stale ? nil : snapshot?.fetchedAt,
                             pinned: model.isPinned(id, window), auto: model.isAuto, dimmed: stale
                         ) { model.pin(id, window) }
                         if window.id != windows.last?.id {
@@ -590,8 +589,7 @@ private struct AccountList: View {
                 ForEach(snapshot.windows) { window in
                     WindowRow(
                         window: window, provider: id,
-                        runOut: account.isStale ? nil : window.runOutTime(asOf: snapshot.fetchedAt),
-                        reserve: account.isStale ? nil : window.reservePercent(asOf: snapshot.fetchedAt),
+                        forecastAsOf: account.isStale ? nil : snapshot.fetchedAt,
                         pinned: model.isPinned(id, window, account: account), auto: false, dimmed: account.isStale
                     ) { model.pin(id, window, account: account) }
                 }
@@ -870,10 +868,8 @@ private struct StaleBanner: View {
 private struct WindowRow: View {
     let window: LimitWindow
     let provider: ProviderID
-    /// When the window runs out at its pace so far, before or after its reset.
-    let runOut: Date?
-    /// How far under an even pace the window is, when it lasts until its reset.
-    let reserve: Double?
+    /// When the window's usage was read, for its forecast. nil while Stale: the pace is out of date.
+    let forecastAsOf: Date?
     let pinned: Bool
     /// Shown because it's the closest to running out, not because the user pinned it.
     let auto: Bool
@@ -892,7 +888,9 @@ private struct WindowRow: View {
                     Spacer()
                     PercentText(percent: window.remainingPercent, size: 17)
                 }
-                RemainingBar(fraction: window.remainingPercent / 100, provider: provider)
+                RemainingBar(
+                    fraction: window.remainingPercent / 100, provider: provider,
+                    evenPace: forecastAsOf.flatMap { window.evenPacePercent(asOf: $0) }.map { 1 - $0 / 100 })
                 if let resetsAt = window.resetsAt {
                     HStack {
                         Text(ResetText.long(resetsAt)).foregroundStyle(.secondary)
@@ -903,8 +901,7 @@ private struct WindowRow: View {
                                     .fontWeight(.medium)
                                     .foregroundStyle(.orange)
                             } else {
-                                Text("Lasts until reset")
-                                    .foregroundStyle(.tertiary)
+                                Text(paceText).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -923,7 +920,20 @@ private struct WindowRow: View {
         .accessibilityHint(pinHelp)
     }
 
+    /// When the window runs out at its pace so far, before or after its reset.
+    private var runOut: Date? { forecastAsOf.flatMap { window.runOutTime(asOf: $0) } }
+    /// How far under an even pace the window is, when it lasts until its reset.
+    private var reserve: Double? { forecastAsOf.flatMap { window.reservePercent(asOf: $0) } }
     private var reserveText: String? { reserve.flatMap(Format.reserve) }
+
+    /// For a window that lasts until its Reset: "2d 9h to spare", or "On pace" when it's close.
+    private var paceText: String {
+        guard let asOf = forecastAsOf, let reserve, reserve >= LimitWindow.onPaceMargin,
+              let spare = window.reserveSeconds(asOf: asOf) else { return "On pace" }
+        // More to spare than the reset countdown beside it shows reads as a contradiction.
+        guard let resetsAt = window.resetsAt, spare < resetsAt.timeIntervalSinceNow else { return "Lasts until reset" }
+        return Format.spare(spare)
+    }
 
     private var help: String {
         guard let reserveText else { return pinHelp }

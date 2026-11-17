@@ -287,6 +287,24 @@ private func autoPool(
     #expect(Format.reserve(0.4) == nil)
 }
 
+/// #42: the Reserve shows as time to spare, and the bar marks where an even pace would be.
+@Test func paceShowsAsTimeToSpareAndAnEvenPaceMark() throws {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    // 30% used with 40% of a 5-hour window gone: 10% of 5 hours to spare.
+    let slow = fiveHour(used: 30, elapsedHours: 2, asOf: now)
+    #expect(abs(try #require(slow.evenPacePercent(asOf: now)) - 40) < 0.001)
+    #expect(abs(try #require(slow.reserveSeconds(asOf: now)) - 1800) < 0.001)
+    #expect(Format.spare(1800) == "30m to spare")
+    #expect(Format.spare(2 * 86400 + 9 * 3600 + 120) == "2d 9h to spare")
+    // Over pace: the mark stays, nothing to spare.
+    let fast = fiveHour(used: 50, elapsedHours: 2, asOf: now)
+    #expect(fast.evenPacePercent(asOf: now) != nil)
+    #expect(fast.reserveSeconds(asOf: now) == nil)
+    // No forecast, no mark: untouched, or too early in the window.
+    #expect(fiveHour(used: 0, elapsedHours: 2, asOf: now).evenPacePercent(asOf: now) == nil)
+    #expect(fiveHour(used: 1, elapsedHours: 10.0 / 60, asOf: now).evenPacePercent(asOf: now) == nil)
+}
+
 @Test func noRunOutWhenItCantBeForecast() {
     let now = Date(timeIntervalSince1970: 2_000_000_000)
     // Too early: 10 minutes is under 5% of the window, however fast it went.

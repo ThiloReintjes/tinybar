@@ -159,11 +159,13 @@ struct RemainingBar: View {
     /// The share left, 0...1. Filled to what's used instead with "Show percentages as used".
     let fraction: Double
     let provider: ProviderID
+    /// The share an even pace would have left by now, 0...1, marked by a notch cut out of the bar.
+    var evenPace: Double? = nil
     @Environment(\.showsUsed) private var showsUsed
 
     var body: some View {
         GeometryReader { geo in
-            let f = shownPercent(left: min(max(fraction, 0), 1) * 100, used: showsUsed) / 100
+            let f = shown(fraction)
             ZStack(alignment: .leading) {
                 Capsule().fill(provider.color.opacity(0.14))
                 Capsule()
@@ -171,10 +173,22 @@ struct RemainingBar: View {
                     .mask(alignment: .leading) {
                         Capsule().frame(width: f > 0 ? max(6, geo.size.width * f) : 0)
                     }
+                if let evenPace {
+                    Rectangle()
+                        .frame(width: 2)
+                        .offset(x: min(max(geo.size.width * shown(evenPace) - 1, 0), geo.size.width - 2))
+                        .blendMode(.destinationOut)
+                }
             }
+            .compositingGroup()
         }
         .frame(height: 6)
         .animation(.smooth(duration: 0.5), value: fraction)
+        .animation(.smooth(duration: 0.5), value: evenPace)
+    }
+
+    private func shown(_ left: Double) -> Double {
+        shownPercent(left: min(max(left, 0), 1) * 100, used: showsUsed) / 100
     }
 }
 

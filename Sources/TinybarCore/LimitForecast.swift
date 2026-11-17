@@ -33,13 +33,29 @@ extension LimitWindow {
         resetsAt.map { runOut < $0 } ?? false
     }
 
+    /// Under this many points of Reserve, a window is on pace, so 1% steps don't flip it.
+    public static let onPaceMargin = 3.0
+
+    /// What an even pace would have used by now: the share of the window passed, 0...100. nil
+    /// when the window can't be forecast.
+    public func evenPacePercent(asOf: Date) -> Double? {
+        guard runOutTime(asOf: asOf) != nil, let resetsAt, let duration = durationSeconds else { return nil }
+        let length = TimeInterval(duration)
+        return (length - resetsAt.timeIntervalSince(asOf)) / length * 100
+    }
+
     /// How much less is used than an even pace would have used by now: the share of the window
     /// passed minus the share used. nil unless the window lasts until its Reset.
     public func reservePercent(asOf: Date) -> Double? {
         guard let runOut = runOutTime(asOf: asOf), !runsOutBeforeReset(runOut),
-            let resetsAt, let duration = durationSeconds else { return nil }
-        let length = TimeInterval(duration)
-        return (length - resetsAt.timeIntervalSince(asOf)) / length * 100 - usedPercent
+            let even = evenPacePercent(asOf: asOf) else { return nil }
+        return even - usedPercent
+    }
+
+    /// The Reserve as time: how long the window could go unused and still be on an even pace.
+    public func reserveSeconds(asOf: Date) -> TimeInterval? {
+        guard let reserve = reservePercent(asOf: asOf), let duration = durationSeconds else { return nil }
+        return reserve / 100 * TimeInterval(duration)
     }
 }
 

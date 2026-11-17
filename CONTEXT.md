@@ -35,7 +35,7 @@ When a Limit Window will reach 0% left if usage continues at its average pace si
 _Avoid_: ETA, prediction, burn rate
 
 **Reserve**:
-How much less of a Limit Window is used than an even pace would have used by now: the share of the window passed minus the share used. Only a window that lasts until its Reset has one.
+How much less of a Limit Window is used than an even pace would have used by now: the share of the window passed minus the share used. Only a window that lasts until its Reset has one. Shown as time to spare: the Reserve times the window's duration.
 _Avoid_: Headroom, buffer, spare
 
 **Banked Reset**:

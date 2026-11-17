@@ -159,6 +159,11 @@ public enum Format {
         return "\(max(m, 1))m"
     }
 
+    /// "2d 9h to spare": a Reserve as time.
+    public static func spare(_ seconds: TimeInterval) -> String {
+        "\(countdown(to: Date(timeIntervalSinceReferenceDate: seconds), now: Date(timeIntervalSinceReferenceDate: 0))) to spare"
+    }
+
     /// "33% in reserve", or nil when it rounds to nothing.
     public static func reserve(_ percent: Double) -> String? {
         let rounded = Int(percent.rounded())

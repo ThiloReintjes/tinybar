@@ -168,7 +168,8 @@ view, so switching never resizes anything. Only the page in view is built, and t
      it. Kept across launches.
    - A banner when Stale: what went wrong and what the user runs to fix it.
    - Every Limit Window: bar, % left, reset time and countdown, and its Run-out Time in orange if
-     it comes before the Reset, else a faint "Lasts until reset" with its Reserve in the tooltip.
+     it comes before the Reset, else its Reserve as time ("2d 9h to spare") or "On pace", with the
+     Reserve in % in the tooltip. A notch cut out of the bar marks where an even pace would be.
      Click to pin; the pinned one is marked.
    - Extras: credits, Banked Resets, extra usage or on-demand spend.
    - With several Accounts: the rings and % show the Pool, with "3 accounts" for the plan. In place
@@ -196,7 +197,14 @@ view, so switching never resizes anything. Only the page in view is built, and t
 - Only a Run-out Time before the Reset is shown as a time, and it warns (orange, and on the Overview).
   One after the Reset reads "Lasts until reset": a date past the Reset looks like a wrong Reset.
 - Reserve = share of the window passed − % used, the same figure CodexBar shows. Next to the row's
-  % left it reads as a second, conflicting number, so it stays in the tooltip, and in the CLI.
+  % left a percentage reads as a second, conflicting number, so the row shows it as time: Reserve ×
+  the window's duration, "2d 9h to spare", how long the window could go unused and still be on an
+  even pace. Under 3% it reads "On pace", so 1% steps don't flip it; more than the time until the
+  Reset reads "Lasts until reset". The % stays in the tooltip, and in the CLI.
+- The bar has a notch where an even pace would be by now (the share of the window passed), cut out
+  of the bar rather than drawn on it. It follows "Show percentages as used": a fill past it is under
+  pace when the bar shows what's left, and over pace when it shows what's used. It has the same
+  conditions as a forecast.
 - The window's own average needs no stored history and already includes the idle hours and nights
   that recur before the Reset.
 - No forecast before 5% of the window has passed (1% steps make early readings noise), for an
