@@ -19,7 +19,7 @@ public struct OpenCodeProvider: UsageProvider {
     /// Auto-enabled only with a Go key. A Console login may have no Go plan, so it is opt-in via
     /// Settings, like Cursor's browser session.
     public func isConfigured() -> Bool {
-        data.storedLogin()?.integration == OpenCodeData.goIntegration
+        data.storedLogins().go != nil
     }
 
     public func fetch() async throws -> ProviderSnapshot {
@@ -63,35 +63,54 @@ struct OpenCodeData: Sendable {
         var integration: String
         /// The credential's JSON. Holds a secret, so it stays out of logs and errors.
         var value: Data
+
+        /// A Console login names its workspace; without one, OpenCode reads no Go usage with it.
+        var hasWorkspace: Bool {
+            let json = try? JSONSerialization.jsonObject(with: value) as? [String: Any]
+            return (json?["metadata"] as? [String: Any])?["orgID"] is String
+        }
     }
 
-    /// The login OpenCode itself would pick: a Go key before a Console login, as a Go key names the
-    /// subscription. `auth.json` stays behind after the upgrade to 2.x and even after logging out,
-    /// so it only counts without a database or with one known to be 1.x.
-    func storedLogin() -> StoredLogin? {
+    struct StoredLogins {
+        var go: StoredLogin?
+        var console: StoredLogin?
+
+        /// What the usage request sends. OpenCode reads Go usage with its Console login and that
+        /// login's workspace, never a Go key, and the endpoint can refuse a Go key (#37).
+        var forUsage: StoredLogin? {
+            if let console, console.hasWorkspace { return console }
+            return go ?? console
+        }
+    }
+
+    func storedLogin() -> StoredLogin? { storedLogins().forUsage }
+
+    /// The logins OpenCode itself would pick, one per integration. `auth.json` stays behind after
+    /// the upgrade to 2.x and even after logging out, so it only counts without a database or with
+    /// one known to be 1.x, and holds only a Go key.
+    func storedLogins() -> StoredLogins {
         let stored = database.flatMap { db in
-            CredentialDatabase.read(db) { handle -> (login: StoredLogin?, isV1: Bool)? in
+            CredentialDatabase.read(db) { handle -> (logins: StoredLogins, isV1: Bool)? in
                 guard let tables = SQLiteDB.rows(handle, "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('message', 'session_v2')")?
                     .compactMap({ $0[0].text })
                 else { return nil }
-                let login = [Self.goIntegration, Self.consoleIntegration].lazy.compactMap { integration in
+                func login(_ integration: String) -> StoredLogin? {
                     Self.activeCredential(integration, in: handle).map { StoredLogin(integration: integration, value: $0) }
-                }.first
-                return (login, tables == ["message"])
+                }
+                return (StoredLogins(go: login(Self.goIntegration), console: login(Self.consoleIntegration)), tables == ["message"])
             }
         }
         if let stored {
-            if let login = stored.login { return login }
-            if !stored.isV1 { return nil }
+            if stored.logins.go != nil || stored.logins.console != nil || !stored.isV1 { return stored.logins }
         } else if let database, FileManager.default.fileExists(atPath: database.path) {
-            return nil
+            return StoredLogins()
         }
         guard let raw = try? Data(contentsOf: authFile),
               let entries = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
               let entry = entries[Self.goIntegration] as? [String: Any],
               let value = try? JSONSerialization.data(withJSONObject: entry)
-        else { return nil }
-        return StoredLogin(integration: Self.goIntegration, value: value)
+        else { return StoredLogins() }
+        return StoredLogins(go: StoredLogin(integration: Self.goIntegration, value: value))
     }
 
     /// OpenCode's own order. Migrated rows have no `active` flag, and the newest of them counts.

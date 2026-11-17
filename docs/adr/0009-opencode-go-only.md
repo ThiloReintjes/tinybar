@@ -24,7 +24,7 @@ We don't pay for Go, so `Scripts/verify-opencode.py` runs the real OpenCode 1.x 
 
 ## Consequences
 
-- **Never checked against a real subscription.** The report's shape comes from OpenCode's source and tests, and its real client accepted it, but no real account has returned one. That a Go key (rather than a Console login) is accepted by the usage endpoint comes from CodexBar only. The first person on Go should run `swift run tinybar-cli limits --provider=opencode`.
+- **Never checked against a real subscription.** The report's shape comes from OpenCode's source and tests, and its real client accepted it, but no real account has returned one. That a Go key (rather than a Console login) is accepted by the usage endpoint comes from CodexBar only, and the first real account contradicted it: the endpoint refused a Go key carried over from 1.x while its Console login worked in OpenCode (#37). OpenCode reads Go usage only with its Console login and that login's workspace, so a Console login with a workspace now goes first and a Go key is the fallback.
 - A real 403 body is only known from OpenCode's tests as `{"type":"error"}`. If the real one differs, a user without Go sees "OpenCode API returned HTTP 403", which is true but less helpful. Console logins are opt-in partly for this reason: auto-enabling them would show this to everyone signed in to OpenCode without Go.
 - The endpoint isn't documented publicly, and neither is the database, so either can change without notice. Pinned versions in the script make a re-run after an OpenCode release the way to find out.
 - `metadata.server` on a login is honored only for opencode.ai and this Mac, while OpenCode's client sends it anywhere. A self-hosted Console would not work.

@@ -285,7 +285,7 @@ func unusableOpenCodeLoginCountsAsExpired(value: String) throws {
     try fixture.addCredential(db, id: "z", integration: "opencode-go", active: 0, created: 3, value: "newer but unselected")
     #expect(key() == "selected")
 
-    // A Go key names the subscription, ahead of a Console login.
+    // A Console login without a workspace reads no Go usage, so the Go key stays ahead of it.
     try fixture.addCredential(db, id: "c", integration: "opencode", active: 1, created: 4, value: "console")
     try fixture.addCredential(db, id: "d", integration: "another", active: 1, created: 5, value: "unrelated")
     #expect(key() == "selected")
@@ -295,6 +295,23 @@ func unusableOpenCodeLoginCountsAsExpired(value: String) throws {
     try db.exec("DELETE FROM credential WHERE integration_id = 'opencode-go'")
     #expect(key() == "console")
     #expect(!OpenCodeProvider(data: fixture.data).isConfigured(), "a Console login may have no Go plan")
+}
+
+/// #37: OpenCode reads Go usage with its Console login and workspace. The usage endpoint refused
+/// the Go key an upgrade carried over, so a key alone counts only without such a login.
+@Test func consoleLoginWithAWorkspaceReadsGoUsage() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    try fixture.setUp(Fixture.v2Tables)
+    let db = try fixture.open()
+    try fixture.addCredential(db, id: "a", integration: "opencode-go", active: nil, created: 1, value: #"{"type":"key","key":"unauthorized"}"#)
+    try fixture.addCredential(db, id: "b", integration: "opencode", active: 0, created: 2, value: #"{"type":"key","key":"zen"}"#)
+    try fixture.addCredential(
+        db, id: "c", integration: "opencode", active: 1, created: 3,
+        value: #"{"type":"oauth","methodID":"device","access":"workspace","refresh":"r","expires":0,"metadata":{"server":"https://opencode.ai/console","orgID":"wrk_anomaly"}}"#)
+    let provider = OpenCodeProvider(data: fixture.data, session: mockedSession())
+    #expect(provider.isConfigured())
+    #expect(try await provider.fetch().windows.count == 3)
 }
 
 @Test func upgradedLoginHasNoActiveFlag() throws {
