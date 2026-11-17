@@ -33,7 +33,7 @@ extension LimitWindow {
         resetsAt.map { runOut < $0 } ?? false
     }
 
-    /// Within this many points of an even pace, a window is on pace, so 1% steps don't flip it.
+    /// Under this many points of Reserve, a window is on pace, so 1% steps don't flip it.
     public static let onPaceMargin = 3.0
 
     /// What an even pace would have used by now: the share of the window passed, 0...100. nil
