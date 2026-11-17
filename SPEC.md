@@ -81,7 +81,7 @@ Enabled automatically only when Cursor.app holds a login. No Limit Alerts (billi
 
 ### OpenCode Go
 Only the subscription: Zen's balance and Console budgets have no Limit Window (ADR 0009).
-1. **OpenCode's login**: the selected `opencode-go` credential, else `opencode` (a Console login), from `opencode.db` in `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, read-only, ordered as OpenCode does (`active DESC, time_created DESC, id DESC`). OpenCode 1.x keeps it in `auth.json` beside that database instead; a database with `session_v2` (2.x) never falls back to it. An expired login is not refreshed.
+1. **OpenCode's login**: the selected `opencode` credential (a Console login) when it names a workspace, as OpenCode reads Go usage with it; else the selected `opencode-go` credential, else the Console login. From `opencode.db` in `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, read-only, ordered as OpenCode does (`active DESC, time_created DESC, id DESC`). OpenCode 1.x keeps it in `auth.json` beside that database instead; a database with `session_v2` (2.x) never falls back to it. An expired login is not refreshed.
    → `GET https://opencode.ai/zen/go/v1/usage`, the request OpenCode's client makes, with `Authorization: Bearer` and, for a Console login, `x-opencode-org-id`. A login is sent only to opencode.ai or a Console on this Mac. A 403 with OpenCode's own error body means no Go subscription; the site's firewall answers 403 too, and is reported as an HTTP error.
 
 Displayed: the 5-hour, weekly and monthly windows. A `rate-limited` window shows nothing left, whatever its share. No plan name (the report has none), and no model-specific windows: Go's limits are per model but it reports one share per window.
