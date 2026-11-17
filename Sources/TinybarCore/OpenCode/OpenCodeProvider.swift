@@ -19,7 +19,7 @@ public struct OpenCodeProvider: UsageProvider {
     /// Auto-enabled only with a Go key. A Console login may have no Go plan, so it is opt-in via
     /// Settings, like Cursor's browser session.
     public func isConfigured() -> Bool {
-        data.storedLogins().go != nil
+        data.hasGoKey
     }
 
     public func fetch() async throws -> ProviderSnapshot {
@@ -84,6 +84,9 @@ struct OpenCodeData: Sendable {
     }
 
     func storedLogin() -> StoredLogin? { storedLogins().forUsage }
+
+    /// What auto-enables OpenCode: a Console login may have no Go plan (ADR 0009).
+    var hasGoKey: Bool { storedLogins().go != nil }
 
     /// The logins OpenCode itself would pick, one per integration. `auth.json` stays behind after
     /// the upgrade to 2.x and even after logging out, so it only counts without a database or with

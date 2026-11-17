@@ -311,6 +311,7 @@ func unusableOpenCodeLoginCountsAsExpired(value: String) throws {
         value: #"{"type":"oauth","methodID":"device","access":"workspace","refresh":"r","expires":0,"metadata":{"server":"https://opencode.ai/console","orgID":"wrk_anomaly"}}"#)
     let provider = OpenCodeProvider(data: fixture.data, session: mockedSession())
     #expect(provider.isConfigured())
+    #expect(LoginFolderKind.of(.opencode)?.hasLogin(fixture.dir) == true, "as an added login folder too")
     #expect(try await provider.fetch().windows.count == 3)
 }
 

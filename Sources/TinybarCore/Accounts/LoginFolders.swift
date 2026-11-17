@@ -68,7 +68,7 @@ public struct LoginFolderKind: Sendable {
                 [Paths.openCodeData(env: env)] + [OpenCodeData(env: env).database?.deletingLastPathComponent()].compactMap { $0 }
             },
             // A Go key, as for the default login: a Console login may have no Go plan (ADR 0009).
-            hasLogin: { OpenCodeData(folder: $0).storedLogin()?.integration == OpenCodeData.goIntegration },
+            hasLogin: { OpenCodeData(folder: $0).hasGoKey },
             source: { folder, _ in OpenCodeProvider(data: OpenCodeData(folder: folder)) },
             renew: { folder, shell in
                 // 2.x keeps the login in the database, which `OPENCODE_DB` points at wherever it is.
