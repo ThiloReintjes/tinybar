@@ -930,8 +930,8 @@ private struct WindowRow: View {
     private var paceText: String {
         guard let asOf = forecastAsOf, let reserve, reserve >= LimitWindow.onPaceMargin,
               let spare = window.reserveSeconds(asOf: asOf) else { return "On pace" }
-        // More to spare than the window has left reads as a contradiction.
-        guard let resetsAt = window.resetsAt, spare < resetsAt.timeIntervalSince(asOf) else { return "Lasts until reset" }
+        // More to spare than the reset countdown beside it shows reads as a contradiction.
+        guard let resetsAt = window.resetsAt, spare < resetsAt.timeIntervalSinceNow else { return "Lasts until reset" }
         return Format.spare(spare)
     }
 

@@ -50,7 +50,8 @@ and add `--zap` to also delete your history and settings.
   cycle, OpenCode Go's 5-hour, weekly and monthly windows, Copilot's monthly quotas and Grok's weekly or monthly pool, with reset countdowns. Model-specific limits, Claude and Grok extra usage, Cursor on-demand spend,
   Codex credits and banked resets, and Copilot AI credits are included.
 - **When you'll run out.** At your pace so far, the time each window hits 0%, in orange, if that
-  comes before the reset. Otherwise it says "Lasts until reset", and hovering shows your reserve.
+  comes before the reset. Otherwise how much time you have to spare ("2d 9h to spare") or "On pace",
+  and a notch in the bar marks where an even pace would be.
 - **One ring in the menu bar** for the limit closest to running out, or the one you pin.
 - **Several accounts.** Other Claude, Codex, Grok and Copilot logins in your home folder are picked up by
   themselves (`~/.claude_personal`, `~/.codex_alt`), so are the Copilot CLI's users, and, once you turn Copilot on in
