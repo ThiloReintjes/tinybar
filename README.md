@@ -97,8 +97,8 @@ expires, the card turns stale until you run `claude`, `codex` or `agy` once, ope
 | Copilot | The Copilot CLI's user through `gh` or `~/.copilot/config.json`, or `~/.config/github-copilot` | `api.github.com/copilot_internal/user` | none |
 | Grok | `~/.grok/auth.json`, from `grok login` | `cli-chat-proxy.grok.com/v1/billing` and `/settings` | none |
 
-The only other requests carry no login. Prices come from `models.dev` and the latest release from
-GitHub, once a day each. The Claude, OpenAI, Cursor, OpenCode, GitHub and xAI status pages are checked with every poll.
+The only other requests carry no login. Prices come from `models.dev` once a day, and the latest
+release from GitHub every 6 hours and on Check now. The Claude, OpenAI, Cursor, OpenCode, GitHub and xAI status pages are checked with every poll.
 
 Notifications are requested once, for alerts. Tinybar reads Claude's Keychain item through
 `/usr/bin/security`, the tool Claude Code itself uses, so there is no prompt. Copilot is picked up by

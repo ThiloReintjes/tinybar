@@ -79,6 +79,8 @@ final class AppModel {
     private var pollTimer: Timer?
     private var isAsleep = false
     private var isLocked = false
+    /// Counts sleeps and locks, so a refresh can tell it was interrupted.
+    private var pauses = 0
     private var pendingRefreshThrottle: TimeInterval?
     private var historyImportFailed = false
     private var initialImportFailed = false
@@ -162,6 +164,7 @@ final class AppModel {
         if let asleep { isAsleep = asleep }
         if let locked { isLocked = locked }
         if isAsleep || isLocked {
+            if !wasPaused { pauses += 1 }
             pollTimer?.invalidate()
         } else if wasPaused {
             schedulePoll()
@@ -177,18 +180,25 @@ final class AppModel {
         Task { await refresh(force: false, throttle: Self.openThrottle) }
     }
 
-    func refresh(force: Bool, throttle: TimeInterval = 0) async {
-        if let task = await fetchAndStartUsage(force: force, throttle: throttle) { await task.value }
+    /// Check now: refresh like opening the popover, and look for a newer Tinybar too. The button
+    /// is disabled while a refresh runs, so this one starts its own.
+    func checkNow() {
+        Task { await refresh(force: false, throttle: Self.openThrottle, checkNow: true) }
+    }
+
+    func refresh(force: Bool, throttle: TimeInterval = 0, checkNow: Bool = false) async {
+        if let task = await fetchAndStartUsage(force: force, throttle: throttle, checkNow: checkNow) { await task.value }
     }
 
     /// Network polls stay independent of a slow history import. Every caller shares one usage task.
-    private func fetchAndStartUsage(force: Bool, throttle: TimeInterval) async -> Task<Void, Never>? {
+    private func fetchAndStartUsage(force: Bool, throttle: TimeInterval, checkNow: Bool) async -> Task<Void, Never>? {
         guard !isAsleep, !isLocked else { return nil }
         guard !isFetching else {
             if force { pendingRefreshThrottle = 0 }
             return nil
         }
         isFetching = true
+        let pausesAtStart = pauses
         defer {
             isFetching = false
             if let throttle = pendingRefreshThrottle {
@@ -270,7 +280,10 @@ final class AppModel {
         guard !isAsleep, !isLocked else { return nil }
         await refreshIncidents(throttle: throttle)
         guard !isAsleep, !isLocked else { return nil }
-        if let release = await updater.checkIfDue(), settings.notificationsEnabled {
+        // Found with Check now, the footer shows it while the popover is open: no notification.
+        // After a sleep or lock since Check now, the popover may be gone: an ordinary check.
+        let release = await updater.checkIfDue(manual: checkNow && pauses == pausesAtStart)
+        if let release, !(checkNow && pauses == pausesAtStart), settings.notificationsEnabled {
             notifier.send(update: release)
         }
         guard !isAsleep, !isLocked else { return nil }

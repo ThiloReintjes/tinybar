@@ -1108,9 +1108,7 @@ private struct Footer: View {
                 .padding(.leading, 6)
             }
             Spacer()
-            FooterButton(icon: "arrow.clockwise", label: "Check now") {
-                Task { await model.refresh(force: false, throttle: AppModel.openThrottle) }
-            }
+            FooterButton(icon: "arrow.clockwise", label: "Check now") { model.checkNow() }
             .disabled(model.isRefreshing)
             .keyboardShortcut("r")
             FooterButton(icon: "chart.bar.xaxis", label: "Stats") { model.openStats() }

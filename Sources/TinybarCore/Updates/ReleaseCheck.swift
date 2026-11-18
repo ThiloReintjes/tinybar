@@ -11,7 +11,7 @@ public struct Release: Sendable, Hashable, Codable {
     }
 }
 
-/// Asks GitHub for the latest release: one unauthenticated GET, at most once a day (SPEC §11).
+/// Asks GitHub for the latest release: one unauthenticated GET, every 6 hours or on Check now (SPEC §11).
 public enum ReleaseCheck {
     static let latestURL = URL(string: "https://api.github.com/repos/ThiloReintjes/tinybar/releases/latest")!
 
@@ -58,11 +58,13 @@ public enum ReleaseCheck {
     }
 }
 
-/// When to ask GitHub next (SPEC §11): a day after a check that got an answer, an hour after one
+/// When to ask GitHub next (SPEC §11): 6 hours after a check that got an answer, an hour after one
 /// that didn't, and right away once Tinybar runs a different version than the one that last asked.
+/// Check now asks too, unless a check started in the last 5 minutes.
 public struct UpdateSchedule: Sendable, Hashable {
-    public static let interval: TimeInterval = 24 * 3600
+    public static let interval: TimeInterval = 6 * 3600
     public static let retry: TimeInterval = 3600
+    public static let manualThrottle: TimeInterval = 5 * 60
 
     /// The last check that got an answer.
     public var lastCheck: Date?
@@ -77,10 +79,14 @@ public struct UpdateSchedule: Sendable, Hashable {
         self.version = version
     }
 
-    public func isDue(now: Date, version current: String) -> Bool {
+    /// `manual` for Check now, which only waits out a check started in the last 5 minutes.
+    public func isDue(now: Date, version current: String, manual: Bool = false) -> Bool {
         guard version == current else { return true }
+        if manual { return lastAttempt.map { now.timeIntervalSince($0) >= Self.manualThrottle } ?? true }
         if let lastAttempt, now.timeIntervalSince(lastAttempt) < Self.retry { return false }
         guard let lastCheck else { return true }
+        // The last attempt got no answer, such as a Check now soon after a check that did.
+        if let lastAttempt, lastAttempt > lastCheck { return true }
         return now.timeIntervalSince(lastCheck) >= Self.interval
     }
 

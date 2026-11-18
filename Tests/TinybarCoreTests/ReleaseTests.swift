@@ -230,14 +230,38 @@ private func codexLines(context: Int, output: Int) -> String {
     #expect(!ReleaseCheck.isNewer("0.3.9", than: "0.4.0"))
 }
 
-@Test func updateChecksWaitADayAfterAnAnswer() {
+@Test func updateChecksWaitSixHoursAfterAnAnswer() {
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
     var schedule = UpdateSchedule()
     #expect(schedule.isDue(now: t0, version: "0.5.0"))
     schedule.attempt(at: t0, version: "0.5.0")
     schedule.lastCheck = t0
-    #expect(!schedule.isDue(now: t0 + 23 * 3600, version: "0.5.0"))
-    #expect(schedule.isDue(now: t0 + 24 * 3600, version: "0.5.0"))
+    #expect(!schedule.isDue(now: t0 + 6 * 3600 - 60, version: "0.5.0"))
+    #expect(schedule.isDue(now: t0 + 6 * 3600, version: "0.5.0"))
+}
+
+@Test func checkNowAsksUnlessACheckJustStarted() {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    var schedule = UpdateSchedule(lastCheck: t0, lastAttempt: t0, version: "0.5.0")
+    // The 6-hour wait doesn't hold off Check now, only a check started in the last 5 minutes.
+    #expect(!schedule.isDue(now: t0 + 60, version: "0.5.0"))
+    #expect(!schedule.isDue(now: t0 + 4 * 60, version: "0.5.0", manual: true))
+    #expect(schedule.isDue(now: t0 + 5 * 60, version: "0.5.0", manual: true))
+    // Nor does the hour after a check that got no answer.
+    schedule.attempt(at: t0 + 600, version: "0.5.0")
+    #expect(!schedule.isDue(now: t0 + 900, version: "0.5.0"))
+    #expect(schedule.isDue(now: t0 + 900, version: "0.5.0", manual: true))
+    // Never checked: Check now asks.
+    #expect(UpdateSchedule().isDue(now: t0, version: "0.5.0", manual: true))
+}
+
+@Test func aFailedCheckNowRetriesWithinTheHour() {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    // Answered, then Check now 5 minutes later got no answer: the 6-hour wait doesn't apply.
+    var schedule = UpdateSchedule(lastCheck: t0, lastAttempt: t0, version: "0.5.0")
+    schedule.attempt(at: t0 + 300, version: "0.5.0")
+    #expect(!schedule.isDue(now: t0 + 300 + 3600 - 60, version: "0.5.0"))
+    #expect(schedule.isDue(now: t0 + 300 + 3600, version: "0.5.0"))
 }
 
 @Test func failedUpdateChecksRetryWithinTheHour() {
