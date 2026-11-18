@@ -2,7 +2,7 @@ import AppKit
 import Observation
 import TinybarCore
 
-/// Finds a newer Tinybar once a day and installs it through Homebrew (SPEC §11, ADR 0007).
+/// Finds a newer Tinybar every 6 hours, or on Check now, and installs it through Homebrew (SPEC §11, ADR 0007).
 ///
 /// Installing runs in two steps. While Tinybar stays open, the tap is pulled and the new zip
 /// downloaded, which is the slow part. Then a small script outlives Tinybar: it waits for it to
@@ -71,10 +71,10 @@ final class Updater {
         }
     }
 
-    /// Asks GitHub when `UpdateSchedule` says it's time. Returns a release seen for the first
-    /// time, to notify about once.
-    func checkIfDue(now: Date = Date()) async -> Release? {
-        guard let current, schedule.isDue(now: now, version: current) else { return nil }
+    /// Asks GitHub when `UpdateSchedule` says it's time; `manual` for Check now. Returns a release
+    /// seen for the first time, to notify about once.
+    func checkIfDue(now: Date = Date(), manual: Bool = false) async -> Release? {
+        guard let current, schedule.isDue(now: now, version: current, manual: manual) else { return nil }
         schedule.attempt(at: now, version: current)
         guard let latest = try? await ReleaseCheck.latest() else { return nil }
         schedule.lastCheck = now

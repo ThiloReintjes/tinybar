@@ -275,8 +275,9 @@ Parsing rules must be verified against CodexBar's `Sources/CodexBarCore/Vendored
 - Releases are signed with Developer ID and notarized, so Gatekeeper opens them without asking.
   The release workflow stops if signing or notarization fails, after retrying Apple's ticket server, which sometimes drops the connection. CI and release runs that GitHub gave no runner are re-run, up to four tries, and any re-run uses `macos-15-intel`, which has the same Xcode as `macos-15`. Next: the official cask
   (`brew install --cask tinybar`).
-- **Updates** (ADR 0007): once a day, `GET api.github.com/repos/ThiloReintjes/tinybar/releases/latest`;
-  an hour after a check that got no answer, and right away when Tinybar's own version changes.
+- **Updates** (ADR 0007): every 6 hours, `GET api.github.com/repos/ThiloReintjes/tinybar/releases/latest`;
+  an hour after a check that got no answer, right away when Tinybar's own version changes, and on
+  Check now (⌘R) unless a check started in the last 5 minutes. One found with Check now isn't notified.
   A newer version replaces the footer's check time with "Update to x.y.z" and is notified once
   (with Limit Alerts' setting). Clicking it, for a Homebrew install: pull the tap, check the cask
   lists that version, `brew fetch` it ("Updating…"), then hand over to a script that waits for

@@ -177,12 +177,18 @@ final class AppModel {
         Task { await refresh(force: false, throttle: Self.openThrottle) }
     }
 
-    func refresh(force: Bool, throttle: TimeInterval = 0) async {
-        if let task = await fetchAndStartUsage(force: force, throttle: throttle) { await task.value }
+    /// Check now: refresh like opening the popover, and look for a newer Tinybar too. The button
+    /// is disabled while a refresh runs, so this one starts its own.
+    func checkNow() {
+        Task { await refresh(force: false, throttle: Self.openThrottle, checkNow: true) }
+    }
+
+    func refresh(force: Bool, throttle: TimeInterval = 0, checkNow: Bool = false) async {
+        if let task = await fetchAndStartUsage(force: force, throttle: throttle, checkNow: checkNow) { await task.value }
     }
 
     /// Network polls stay independent of a slow history import. Every caller shares one usage task.
-    private func fetchAndStartUsage(force: Bool, throttle: TimeInterval) async -> Task<Void, Never>? {
+    private func fetchAndStartUsage(force: Bool, throttle: TimeInterval, checkNow: Bool) async -> Task<Void, Never>? {
         guard !isAsleep, !isLocked else { return nil }
         guard !isFetching else {
             if force { pendingRefreshThrottle = 0 }
@@ -270,7 +276,8 @@ final class AppModel {
         guard !isAsleep, !isLocked else { return nil }
         await refreshIncidents(throttle: throttle)
         guard !isAsleep, !isLocked else { return nil }
-        if let release = await updater.checkIfDue(), settings.notificationsEnabled {
+        // Found with Check now, the footer shows it while the popover is open: no notification.
+        if let release = await updater.checkIfDue(manual: checkNow), !checkNow, settings.notificationsEnabled {
             notifier.send(update: release)
         }
         guard !isAsleep, !isLocked else { return nil }
