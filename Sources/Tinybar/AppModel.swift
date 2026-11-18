@@ -79,6 +79,8 @@ final class AppModel {
     private var pollTimer: Timer?
     private var isAsleep = false
     private var isLocked = false
+    /// Counts sleeps and locks, so a refresh can tell it was interrupted.
+    private var pauses = 0
     private var pendingRefreshThrottle: TimeInterval?
     private var historyImportFailed = false
     private var initialImportFailed = false
@@ -162,6 +164,7 @@ final class AppModel {
         if let asleep { isAsleep = asleep }
         if let locked { isLocked = locked }
         if isAsleep || isLocked {
+            if !wasPaused { pauses += 1 }
             pollTimer?.invalidate()
         } else if wasPaused {
             schedulePoll()
@@ -195,6 +198,7 @@ final class AppModel {
             return nil
         }
         isFetching = true
+        let pausesAtStart = pauses
         defer {
             isFetching = false
             if let throttle = pendingRefreshThrottle {
@@ -277,7 +281,9 @@ final class AppModel {
         await refreshIncidents(throttle: throttle)
         guard !isAsleep, !isLocked else { return nil }
         // Found with Check now, the footer shows it while the popover is open: no notification.
-        if let release = await updater.checkIfDue(manual: checkNow), !checkNow, settings.notificationsEnabled {
+        // After a sleep or lock since Check now, the popover may be gone: an ordinary check.
+        let manual = checkNow && pauses == pausesAtStart
+        if let release = await updater.checkIfDue(manual: manual), !manual, settings.notificationsEnabled {
             notifier.send(update: release)
         }
         guard !isAsleep, !isLocked else { return nil }
