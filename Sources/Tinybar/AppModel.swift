@@ -282,8 +282,8 @@ final class AppModel {
         guard !isAsleep, !isLocked else { return nil }
         // Found with Check now, the footer shows it while the popover is open: no notification.
         // After a sleep or lock since Check now, the popover may be gone: an ordinary check.
-        let manual = checkNow && pauses == pausesAtStart
-        if let release = await updater.checkIfDue(manual: manual), !manual, settings.notificationsEnabled {
+        let release = await updater.checkIfDue(manual: checkNow && pauses == pausesAtStart)
+        if let release, !(checkNow && pauses == pausesAtStart), settings.notificationsEnabled {
             notifier.send(update: release)
         }
         guard !isAsleep, !isLocked else { return nil }
