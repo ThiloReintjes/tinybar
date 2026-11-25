@@ -5,13 +5,14 @@ name: Re-run jobs that got no runner
 # macos-15-intel, as CI and Release choose their runner by attempt. That run ends as a failure with
 # a job cancelled before its first step, unlike a run cancelled by a newer push, which ends as
 # cancelled and is left alone.
+# workflow_run runs with this repo's token even for fork PRs; that is safe here because no step checks
+# out or runs code from the triggering run, it only reads job metadata and asks for a re-run.
 on:
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [CI, Release]
     types: [completed]
 
-permissions:
-  actions: write
+permissions: {}
 
 jobs:
   rerun:
@@ -19,6 +20,8 @@ jobs:
     if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 4
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write # re-run the failed jobs
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
