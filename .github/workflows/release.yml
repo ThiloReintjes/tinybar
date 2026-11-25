@@ -7,8 +7,7 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {}
 
 # Different tags share one tap; never race its read/compare/write sequence.
 concurrency:
@@ -21,8 +20,14 @@ jobs:
     # The app is universal on either.
     runs-on: ${{ github.run_attempt > 1 && 'macos-15-intel' || 'macos-15' }}
     timeout-minutes: 30
+    permissions:
+      contents: write # create the GitHub Release and upload the zip
+      id-token: write # sign the provenance attestation
+      attestations: write # store it
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check the tag matches Info.plist
         run: |
           version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
@@ -88,6 +93,12 @@ jobs:
             gh release create "${GITHUB_REF_NAME}" "build/$asset" \
               --title "Tinybar ${VERSION}" --generate-notes
           fi
+      # After Publish, so it covers the bytes on the release page even on a re-run that kept them.
+      # The README shows how to check a download against it.
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: build/Tinybar-${{ env.VERSION }}.zip
       - name: Bump the Homebrew cask
         env:
           TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}

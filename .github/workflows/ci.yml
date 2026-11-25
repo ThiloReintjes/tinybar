@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
 
+permissions: {}
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -14,8 +16,12 @@ jobs:
     # A retry may be because GitHub had no arm64 runner, so it asks another pool with the same Xcode.
     runs-on: ${{ github.run_attempt > 1 && 'macos-15-intel' || 'macos-15' }}
     timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: swift --version
       - name: Build
         run: swift build

@@ -1,0 +1,14 @@
+# Tinybar has no Swift package dependencies (ADR 0002); the actions pinned in the workflows are the only
+# third-party code, and this keeps their commit pins current.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # Wait a week after a release, so a compromised version is usually caught before it's proposed.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

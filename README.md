@@ -37,7 +37,13 @@ brew install --cask thiloreintjes/tinybar/tinybar && open -a Tinybar
 ```
 
 Or download the zip from [Releases](https://github.com/ThiloReintjes/tinybar/releases). Releases are
-signed with Developer ID and notarized by Apple.
+signed with Developer ID and notarized by Apple. To check that a zip was built by this repo's release
+workflow:
+
+```sh
+gh attestation verify Tinybar-<version>.zip --repo ThiloReintjes/tinybar \
+  --signer-workflow ThiloReintjes/tinybar/.github/workflows/release.yml
+```
 
 Tinybar starts at login and turns on every provider whose CLI you're signed in to, so there is
 nothing to set up. When a new version is out, the popover shows **Update to x.y.z**, and one click
