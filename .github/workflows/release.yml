@@ -20,8 +20,6 @@ jobs:
     # The app is universal on either.
     runs-on: ${{ github.run_attempt > 1 && 'macos-15-intel' || 'macos-15' }}
     timeout-minutes: 30
-    # Only v* tags may use this environment, so no other workflow or branch can read the signing secrets.
-    environment: release
     permissions:
       contents: write # create the GitHub Release and upload the zip
       id-token: write # sign the provenance attestation
