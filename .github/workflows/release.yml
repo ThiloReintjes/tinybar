@@ -94,7 +94,7 @@ jobs:
               --title "Tinybar ${VERSION}" --generate-notes
           fi
       # After Publish, so it covers the bytes on the release page even on a re-run that kept them.
-      # Check a download with: gh attestation verify Tinybar-<version>.zip --repo ThiloReintjes/tinybar
+      # The README shows how to check a download against it.
       - name: Attest build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
